@@ -1,5 +1,10 @@
 # System Architecture
 
+> 🔒 **STATUS: FROZEN / LOCKED (as of Phase 1).**
+> This is the official, agreed architecture. It must **not** be changed without
+> an explicit decision recorded in [`DECISIONS.md`](./DECISIONS.md). All future
+> phases build on top of this blueprint exactly as defined below.
+
 > Reference document for the **Agentic AI-Based Intelligent Billing Manager**.
 > This describes the **target architecture**. Only the project foundation is
 > implemented in Phase 1 — the layers below are built incrementally in later phases.
