@@ -14,6 +14,11 @@ export const env = {
   // MongoDB Atlas connection string. Presence is validated at connect time
   // (see config/database.ts) so startup can fail gracefully with a clear error.
   mongoUri: process.env.MONGODB_URI ?? "",
+  // JWT signing secret. Presence is validated when a token is first issued
+  // (see utils/jwt.ts) so a misconfigured deploy fails with a clear message.
+  jwtSecret: process.env.JWT_SECRET ?? "",
+  // Token lifetime, e.g. "1d", "12h", "3600". Falls back to a safe default.
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "1d",
 } as const;
 
 export const isProduction = env.nodeEnv === "production";
