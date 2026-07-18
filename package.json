@@ -1,0 +1,25 @@
+{
+  "name": "agentic-billing-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agentic AI-Based Intelligent Billing Manager — monorepo root (frontend + backend)",
+  "scripts": {
+    "install:all": "npm install --prefix frontend && npm install --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "build:frontend": "npm run build --prefix frontend",
+    "build:backend": "npm run build --prefix backend",
+    "build": "npm run build:frontend && npm run build:backend",
+    "lint": "npm run lint --prefix frontend && npm run lint --prefix backend",
+    "format": "npm run format --prefix frontend && npm run format --prefix backend"
+  },
+  "keywords": [
+    "saas",
+    "billing",
+    "ai-agent",
+    "nextjs",
+    "express",
+    "typescript"
+  ],
+  "license": "ISC"
+}
