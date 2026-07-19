@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Boxes, Plus } from "lucide-react";
+import { Boxes, Plus, SearchX } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/common/empty-state";
@@ -10,14 +10,22 @@ import { FormAlert } from "@/components/common/form-alert";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
+import { Pagination } from "@/components/common/pagination";
 import { ApiError } from "@/services/api/client";
 import { listPlatforms } from "@/services/platforms/platform.service";
 import type { Platform } from "@/services/types/platform";
 import { PlatformCard } from "./platform-card";
 import { PlatformFormDialog } from "./platform-form-dialog";
 import { DeletePlatformDialog } from "./delete-platform-dialog";
+import {
+  PlatformsToolbar,
+  type PlatformStatusFilter,
+} from "./platforms-toolbar";
 
 type ViewStatus = "loading" | "error" | "ready";
+
+/** Platforms shown per page (client-side pagination). */
+const PAGE_SIZE = 10;
 
 /**
  * Platform management screen: lists platforms and orchestrates the create/edit/
@@ -42,9 +50,52 @@ export function PlatformsView() {
   const [deleteTarget, setDeleteTarget] = React.useState<Platform | null>(null);
   const [deleteKey, setDeleteKey] = React.useState(0);
 
+  // Search / filter / pagination state (all client-side over the loaded list).
+  const [search, setSearch] = React.useState("");
+  const [statusFilter, setStatusFilter] =
+    React.useState<PlatformStatusFilter>("all");
+  const [page, setPage] = React.useState(1);
+
   // Bumping reloadKey re-runs the fetch effect — the single source of loading.
   const [reloadKey, setReloadKey] = React.useState(0);
   const reload = () => setReloadKey((key) => key + 1);
+
+  // Apply search (name/slug) + status filter, then slice the current page.
+  const filtered = React.useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return platforms.filter((platform) => {
+      const matchesQuery =
+        query === "" ||
+        platform.name.toLowerCase().includes(query) ||
+        platform.slug.toLowerCase().includes(query);
+      const matchesStatus =
+        statusFilter === "all" || platform.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    });
+  }, [platforms, search, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Clamp for display without a state-syncing effect (e.g. after a delete).
+  const currentPage = Math.min(page, totalPages);
+  const pagePlatforms = React.useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, currentPage]);
+
+  // Changing search/filter must always return the user to the first page.
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setPage(1);
+  };
+  const handleStatusChange = (value: PlatformStatusFilter) => {
+    setStatusFilter(value);
+    setPage(1);
+  };
+  const clearFilters = () => {
+    setSearch("");
+    setStatusFilter("all");
+    setPage(1);
+  };
 
   React.useEffect(() => {
     let ignore = false;
@@ -139,15 +190,44 @@ export function PlatformsView() {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {platforms.map((platform) => (
-            <PlatformCard
-              key={platform.id}
-              platform={platform}
-              onEdit={openEdit}
-              onDelete={openDelete}
+        <div className="space-y-6">
+          <PlatformsToolbar
+            search={search}
+            onSearchChange={handleSearchChange}
+            status={statusFilter}
+            onStatusChange={handleStatusChange}
+          />
+
+          {filtered.length === 0 ? (
+            <EmptyState
+              icon={SearchX}
+              title="No matching platforms"
+              description="No platforms match your search or filter. Try adjusting them."
+              action={
+                <Button variant="outline" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              }
             />
-          ))}
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {pagePlatforms.map((platform) => (
+                  <PlatformCard
+                    key={platform.id}
+                    platform={platform}
+                    onEdit={openEdit}
+                    onDelete={openDelete}
+                  />
+                ))}
+              </div>
+              <Pagination
+                page={currentPage}
+                totalPages={totalPages}
+                onPageChange={setPage}
+              />
+            </>
+          )}
         </div>
       )}
 
