@@ -15,11 +15,16 @@ import type { BillingStatus } from "@/services/types/billing";
 /** Status filter options: any real status, or "all" for no filtering. */
 export type BillingStatusFilter = "all" | BillingStatus;
 
+/** Sort options for the billing list. */
+export type BillingSort = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
+
 interface BillingToolbarProps {
   search: string;
   onSearchChange: (value: string) => void;
   status: BillingStatusFilter;
   onStatusChange: (value: BillingStatusFilter) => void;
+  sort: BillingSort;
+  onSortChange: (value: BillingSort) => void;
 }
 
 /**
@@ -32,6 +37,8 @@ export function BillingToolbar({
   onSearchChange,
   status,
   onStatusChange,
+  sort,
+  onSortChange,
 }: BillingToolbarProps) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -46,20 +53,36 @@ export function BillingToolbar({
           aria-label="Search billing records"
         />
       </div>
-      <Select
-        value={status}
-        onValueChange={(value) => onStatusChange(value as BillingStatusFilter)}
-      >
-        <SelectTrigger className="w-full sm:w-40" aria-label="Filter by status">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All statuses</SelectItem>
-          <SelectItem value="Paid">Paid</SelectItem>
-          <SelectItem value="Pending">Pending</SelectItem>
-          <SelectItem value="Overdue">Overdue</SelectItem>
-        </SelectContent>
-      </Select>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <Select
+          value={status}
+          onValueChange={(value) => onStatusChange(value as BillingStatusFilter)}
+        >
+          <SelectTrigger className="w-full sm:w-40" aria-label="Filter by status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="Paid">Paid</SelectItem>
+            <SelectItem value="Pending">Pending</SelectItem>
+            <SelectItem value="Overdue">Overdue</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={sort}
+          onValueChange={(value) => onSortChange(value as BillingSort)}
+        >
+          <SelectTrigger className="w-full sm:w-48" aria-label="Sort billing records">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="date-desc">Newest billing date</SelectItem>
+            <SelectItem value="date-asc">Oldest billing date</SelectItem>
+            <SelectItem value="amount-desc">Highest amount</SelectItem>
+            <SelectItem value="amount-asc">Lowest amount</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   );
 }

@@ -23,7 +23,11 @@ import { BillingCard } from "./billing-card";
 import { BillingFormDialog } from "./billing-form-dialog";
 import { DeleteBillingDialog } from "./delete-billing-dialog";
 import { BillingStatsGrid } from "./billing-stats";
-import { BillingToolbar, type BillingStatusFilter } from "./billing-toolbar";
+import {
+  BillingToolbar,
+  type BillingSort,
+  type BillingStatusFilter,
+} from "./billing-toolbar";
 
 type ViewStatus = "loading" | "error" | "ready";
 
@@ -62,6 +66,7 @@ export function BillingView() {
   const [search, setSearch] = React.useState("");
   const [statusFilter, setStatusFilter] =
     React.useState<BillingStatusFilter>("all");
+  const [sort, setSort] = React.useState<BillingSort>("date-desc");
   const [page, setPage] = React.useState(1);
 
   // Bumping reloadKey re-runs the fetch effect — the single source of loading.
@@ -112,13 +117,40 @@ export function BillingView() {
     });
   }, [records, search, statusFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Sort the filtered set (does not change the count, only the order).
+  const sorted = React.useMemo(() => {
+    const copy = [...filtered];
+    copy.sort((a, b) => {
+      switch (sort) {
+        case "date-asc":
+          return (
+            new Date(a.billingDate).getTime() -
+            new Date(b.billingDate).getTime()
+          );
+        case "date-desc":
+          return (
+            new Date(b.billingDate).getTime() -
+            new Date(a.billingDate).getTime()
+          );
+        case "amount-asc":
+          return a.amount - b.amount;
+        case "amount-desc":
+          return b.amount - a.amount;
+        default:
+          return 0;
+      }
+    });
+    return copy;
+  }, [filtered, sort]);
+
+  const totalResults = sorted.length;
+  const totalPages = Math.max(1, Math.ceil(totalResults / PAGE_SIZE));
   // Clamp for display without a state-syncing effect (e.g. after a delete).
   const currentPage = Math.min(page, totalPages);
   const pageRecords = React.useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
-    return filtered.slice(start, start + PAGE_SIZE);
-  }, [filtered, currentPage]);
+    return sorted.slice(start, start + PAGE_SIZE);
+  }, [sorted, currentPage]);
 
   // Changing search/filter must always return the user to the first page.
   const handleSearchChange = (value: string) => {
@@ -127,6 +159,10 @@ export function BillingView() {
   };
   const handleStatusChange = (value: BillingStatusFilter) => {
     setStatusFilter(value);
+    setPage(1);
+  };
+  const handleSortChange = (value: BillingSort) => {
+    setSort(value);
     setPage(1);
   };
   const clearFilters = () => {
@@ -224,6 +260,8 @@ export function BillingView() {
                 onSearchChange={handleSearchChange}
                 status={statusFilter}
                 onStatusChange={handleStatusChange}
+                sort={sort}
+                onSortChange={handleSortChange}
               />
 
               {filtered.length === 0 ? (
@@ -239,6 +277,14 @@ export function BillingView() {
                 />
               ) : (
                 <>
+                  <div className="flex items-center justify-between text-sm text-muted-foreground">
+                    <span>
+                      {totalResults} {totalResults === 1 ? "result" : "results"}
+                    </span>
+                    <span>
+                      Page {currentPage} of {totalPages}
+                    </span>
+                  </div>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {pageRecords.map((record) => (
                       <BillingCard
