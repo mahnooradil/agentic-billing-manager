@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
 import { SectionHeader } from "@/components/common/section-header";
+import { AiSettingsForm } from "@/components/ai/ai-settings-form";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -62,6 +63,8 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       </section>
+
+      <AiSettingsForm />
     </PageWrapper>
   );
 }
