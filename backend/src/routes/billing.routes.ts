@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import {
   listBillingRecords,
+  getBillingStats,
   getBillingRecord,
   createBillingRecord,
   updateBillingRecord,
@@ -20,6 +21,8 @@ const router = Router();
 router.use(authenticate);
 
 router.get("/", listBillingRecords);
+// Static path must be registered before the "/:id" param route.
+router.get("/stats", getBillingStats);
 router.post("/", validate(createBillingSchema), createBillingRecord);
 router.get("/:id", getBillingRecord);
 router.put("/:id", validate(updateBillingSchema), updateBillingRecord);

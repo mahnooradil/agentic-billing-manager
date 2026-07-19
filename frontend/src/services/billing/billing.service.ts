@@ -9,6 +9,7 @@ import type {
   BillingData,
   BillingDeletedData,
   BillingListData,
+  BillingStatsData,
   CreateBillingPayload,
   UpdateBillingPayload,
 } from "@/services/types/billing";
@@ -16,6 +17,11 @@ import type {
 /** GET /billing */
 export function listBillingRecords(): Promise<ApiSuccess<BillingListData>> {
   return api.get<ApiSuccess<BillingListData>>("/billing");
+}
+
+/** GET /billing/stats */
+export function getBillingStats(): Promise<ApiSuccess<BillingStatsData>> {
+  return api.get<ApiSuccess<BillingStatsData>>("/billing/stats");
 }
 
 /** GET /billing/:id */

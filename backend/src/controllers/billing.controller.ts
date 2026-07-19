@@ -52,6 +52,39 @@ export const listBillingRecords = asyncHandler(async (_req, res) => {
   });
 });
 
+/** GET /api/billing/stats — aggregate counts + paid revenue for the dashboard. */
+export const getBillingStats = asyncHandler(async (_req, res) => {
+  const [
+    totalRecords,
+    paidRecords,
+    pendingRecords,
+    overdueRecords,
+    revenueRows,
+  ] = await Promise.all([
+    Billing.countDocuments(),
+    Billing.countDocuments({ status: "Paid" }),
+    Billing.countDocuments({ status: "Pending" }),
+    Billing.countDocuments({ status: "Overdue" }),
+    Billing.aggregate<{ _id: null; revenue: number }>([
+      { $match: { status: "Paid" } },
+      { $group: { _id: null, revenue: { $sum: "$amount" } } },
+    ]),
+  ]);
+
+  // Sum of paid invoice amounts. Note: raw sum across whatever currencies exist.
+  const totalRevenue = revenueRows[0]?.revenue ?? 0;
+
+  sendSuccess(res, 200, "Billing statistics retrieved", {
+    stats: {
+      totalRecords,
+      paidRecords,
+      pendingRecords,
+      overdueRecords,
+      totalRevenue,
+    },
+  });
+});
+
 /** GET /api/billing/:id — fetch a single billing record. */
 export const getBillingRecord = asyncHandler(async (req, res) => {
   const billing = await findBillingOr404(req.params.id as string);

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, ReceiptText } from "lucide-react";
+import { Plus, ReceiptText, SearchX } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/common/empty-state";
@@ -10,16 +10,25 @@ import { FormAlert } from "@/components/common/form-alert";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
+import { Pagination } from "@/components/common/pagination";
 import { ApiError } from "@/services/api/client";
-import { listBillingRecords } from "@/services/billing/billing.service";
+import {
+  getBillingStats,
+  listBillingRecords,
+} from "@/services/billing/billing.service";
 import { listPlatforms } from "@/services/platforms/platform.service";
-import type { BillingRecord } from "@/services/types/billing";
+import type { BillingRecord, BillingStats } from "@/services/types/billing";
 import type { Platform } from "@/services/types/platform";
 import { BillingCard } from "./billing-card";
 import { BillingFormDialog } from "./billing-form-dialog";
 import { DeleteBillingDialog } from "./delete-billing-dialog";
+import { BillingStatsGrid } from "./billing-stats";
+import { BillingToolbar, type BillingStatusFilter } from "./billing-toolbar";
 
 type ViewStatus = "loading" | "error" | "ready";
+
+/** Billing records shown per page (client-side pagination). */
+const PAGE_SIZE = 10;
 
 /**
  * Billing management screen: lists billing records and orchestrates the create/
@@ -30,6 +39,7 @@ export function BillingView() {
   const [status, setStatus] = React.useState<ViewStatus>("loading");
   const [records, setRecords] = React.useState<BillingRecord[]>([]);
   const [platforms, setPlatforms] = React.useState<Platform[]>([]);
+  const [stats, setStats] = React.useState<BillingStats | null>(null);
   const [loadError, setLoadError] = React.useState("");
   const [alert, setAlert] = React.useState<{
     type: "success" | "error";
@@ -48,6 +58,12 @@ export function BillingView() {
   );
   const [deleteKey, setDeleteKey] = React.useState(0);
 
+  // Search / filter / pagination state (all client-side over the loaded list).
+  const [search, setSearch] = React.useState("");
+  const [statusFilter, setStatusFilter] =
+    React.useState<BillingStatusFilter>("all");
+  const [page, setPage] = React.useState(1);
+
   // Bumping reloadKey re-runs the fetch effect — the single source of loading.
   const [reloadKey, setReloadKey] = React.useState(0);
   const reload = () => setReloadKey((key) => key + 1);
@@ -56,12 +72,15 @@ export function BillingView() {
     let ignore = false;
     (async () => {
       try {
-        const [billingResponse, platformsResponse] = await Promise.all([
-          listBillingRecords(),
-          listPlatforms(),
-        ]);
+        const [billingResponse, statsResponse, platformsResponse] =
+          await Promise.all([
+            listBillingRecords(),
+            getBillingStats(),
+            listPlatforms(),
+          ]);
         if (ignore) return;
         setRecords(billingResponse.data.billingRecords);
+        setStats(statsResponse.data.stats);
         setPlatforms(platformsResponse.data.platforms);
         setStatus("ready");
       } catch (error) {
@@ -78,6 +97,43 @@ export function BillingView() {
       ignore = true;
     };
   }, [reloadKey]);
+
+  // Apply search (customer/invoice) + status filter, then slice the page.
+  const filtered = React.useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return records.filter((record) => {
+      const matchesQuery =
+        query === "" ||
+        record.customerName.toLowerCase().includes(query) ||
+        record.invoiceNumber.toLowerCase().includes(query);
+      const matchesStatus =
+        statusFilter === "all" || record.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    });
+  }, [records, search, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Clamp for display without a state-syncing effect (e.g. after a delete).
+  const currentPage = Math.min(page, totalPages);
+  const pageRecords = React.useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, currentPage]);
+
+  // Changing search/filter must always return the user to the first page.
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setPage(1);
+  };
+  const handleStatusChange = (value: BillingStatusFilter) => {
+    setStatusFilter(value);
+    setPage(1);
+  };
+  const clearFilters = () => {
+    setSearch("");
+    setStatusFilter("all");
+    setPage(1);
+  };
 
   const retry = () => {
     setStatus("loading");
@@ -145,29 +201,64 @@ export function BillingView() {
           title="No platforms to bill"
           description="Create a platform first — every billing record must belong to a platform."
         />
-      ) : records.length === 0 ? (
-        <EmptyState
-          icon={ReceiptText}
-          title="No billing records yet"
-          description="Create your first billing record to get started."
-          action={
-            <Button onClick={openCreate}>
-              <Plus />
-              New billing record
-            </Button>
-          }
-        />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {records.map((record) => (
-            <BillingCard
-              key={record.id}
-              record={record}
-              onEdit={openEdit}
-              onDelete={openDelete}
+        <>
+          {stats ? <BillingStatsGrid stats={stats} /> : null}
+
+          {records.length === 0 ? (
+            <EmptyState
+              icon={ReceiptText}
+              title="No billing records yet"
+              description="Create your first billing record to get started."
+              action={
+                <Button onClick={openCreate}>
+                  <Plus />
+                  New billing record
+                </Button>
+              }
             />
-          ))}
-        </div>
+          ) : (
+            <div className="space-y-6">
+              <BillingToolbar
+                search={search}
+                onSearchChange={handleSearchChange}
+                status={statusFilter}
+                onStatusChange={handleStatusChange}
+              />
+
+              {filtered.length === 0 ? (
+                <EmptyState
+                  icon={SearchX}
+                  title="No matching records"
+                  description="No billing records match your search or filter. Try adjusting them."
+                  action={
+                    <Button variant="outline" onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  }
+                />
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {pageRecords.map((record) => (
+                      <BillingCard
+                        key={record.id}
+                        record={record}
+                        onEdit={openEdit}
+                        onDelete={openDelete}
+                      />
+                    ))}
+                  </div>
+                  <Pagination
+                    page={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setPage}
+                  />
+                </>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       <BillingFormDialog

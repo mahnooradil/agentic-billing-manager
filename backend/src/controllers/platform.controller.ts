@@ -13,6 +13,7 @@ import { AppError } from "@/utils/appError";
 import { sendSuccess } from "@/utils/apiResponse";
 import { toPublicPlatform } from "@/utils/platform.serializer";
 import { Platform, type PlatformDocument } from "@/models/platform.model";
+import { Billing } from "@/models/billing.model";
 import type {
   CreatePlatformInput,
   UpdatePlatformInput,
@@ -88,6 +89,16 @@ export const updatePlatform = asyncHandler(async (req, res) => {
 /** DELETE /api/platforms/:id — remove a platform. */
 export const deletePlatform = asyncHandler(async (req, res) => {
   const platform = await findPlatformOr404(req.params.id as string);
+
+  // Prevent orphaning billing records — block deletion while any reference it.
+  const referencingRecord = await Billing.exists({ platform: platform._id });
+  if (referencingRecord) {
+    throw new AppError(
+      "This platform cannot be deleted because billing records are associated with it.",
+      409
+    );
+  }
+
   await platform.deleteOne();
   sendSuccess(res, 200, "Platform deleted", { id: platform._id.toString() });
 });

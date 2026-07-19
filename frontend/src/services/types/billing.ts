@@ -52,3 +52,16 @@ export interface BillingData {
 export interface BillingDeletedData {
   id: string;
 }
+
+/** Aggregate billing statistics for the billing dashboard. */
+export interface BillingStats {
+  totalRecords: number;
+  paidRecords: number;
+  pendingRecords: number;
+  overdueRecords: number;
+  totalRevenue: number;
+}
+
+export interface BillingStatsData {
+  stats: BillingStats;
+}
