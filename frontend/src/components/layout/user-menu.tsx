@@ -13,12 +13,28 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
+
+/** Derive up to two uppercase initials from a display name. */
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "U";
+  const first = parts[0][0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
+  return (first + last).toUpperCase();
+}
 
 /**
- * Avatar dropdown placeholder. Static user info only — no auth, no sign-out
- * logic. Menu items are inert (Phase 4 is UI-only).
+ * Avatar dropdown showing the authenticated user, with a working Sign out
+ * action (clears the session and redirects to /login via the auth context).
+ * Profile/Settings items remain inert (out of Phase 5B scope).
  */
 export function UserMenu() {
+  const { user, logout } = useAuth();
+
+  const displayName = user?.fullName ?? "Account";
+  const email = user?.email ?? "";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -29,16 +45,18 @@ export function UserMenu() {
         )}
       >
         <Avatar size="sm">
-          <AvatarFallback>BM</AvatarFallback>
+          <AvatarFallback>{getInitials(displayName)}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuLabel>
           <div className="flex flex-col">
-            <span className="text-sm font-medium">Guest User</span>
-            <span className="text-xs font-normal text-muted-foreground">
-              guest@example.com
-            </span>
+            <span className="text-sm font-medium">{displayName}</span>
+            {email ? (
+              <span className="text-xs font-normal text-muted-foreground">
+                {email}
+              </span>
+            ) : null}
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -51,7 +69,7 @@ export function UserMenu() {
           Settings
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive">
+        <DropdownMenuItem variant="destructive" onClick={() => logout()}>
           <LogOut />
           Sign out
         </DropdownMenuItem>

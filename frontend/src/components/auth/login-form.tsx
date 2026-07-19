@@ -21,18 +21,20 @@ import { FormAlert } from "@/components/common/form-alert";
 import { ApiError } from "@/services/api/client";
 import { loginUser } from "@/services/auth/auth.service";
 import { loginFormSchema, type LoginFormValues } from "@/lib/validations/auth";
+import { useAuth } from "@/hooks/use-auth";
 
 type SubmitStatus =
   | { type: "idle" }
-  | { type: "success"; message: string }
   | { type: "error"; message: string; errors?: string[] };
 
 /**
- * Login form wired to the Phase 3 backend. On success it shows a message only —
- * per Phase 5A scope it does NOT store the token or navigate anywhere.
+ * Login form wired to the Phase 3 backend. On success it hands the token + user
+ * to the auth context, which persists the session and redirects to the
+ * dashboard.
  */
 export function LoginForm() {
   const [status, setStatus] = React.useState<SubmitStatus>({ type: "idle" });
+  const { login } = useAuth();
 
   const {
     register,
@@ -50,10 +52,8 @@ export function LoginForm() {
         email: values.email,
         password: values.password,
       });
-      setStatus({
-        type: "success",
-        message: response.message ?? "Login successful.",
-      });
+      // Persist session + redirect to /dashboard/overview via the auth context.
+      login(response.data.token, response.data.user);
     } catch (error) {
       if (error instanceof ApiError) {
         setStatus({
@@ -78,9 +78,6 @@ export function LoginForm() {
       </CardHeader>
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <CardContent className="space-y-4">
-          {status.type === "success" ? (
-            <FormAlert variant="success" message={status.message} />
-          ) : null}
           {status.type === "error" ? (
             <FormAlert
               variant="error"
