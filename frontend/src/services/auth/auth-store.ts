@@ -68,6 +68,15 @@ function getServerSnapshot(): AuthSnapshot {
   return LOADING_SNAPSHOT;
 }
 
+/**
+ * Current JWT for outgoing authenticated requests. Reads the in-memory
+ * snapshot once hydrated; before that (edge case) it falls back to storage.
+ * This is the ONLY place the API client should source the token.
+ */
+function getToken(): string | null {
+  return snapshot.status === "ready" ? snapshot.token : readStoredSession().token;
+}
+
 function setSession(token: string, user: AuthUser): void {
   writeStoredSession(token, user);
   setSnapshot({ token, user, status: "ready" });
@@ -82,6 +91,7 @@ export const authStore = {
   subscribe,
   getSnapshot,
   getServerSnapshot,
+  getToken,
   setSession,
   clearSession,
 };

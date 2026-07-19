@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { AuthContext, type AuthContextValue } from "@/context/auth-context";
 import { authStore } from "@/services/auth/auth-store";
+import { setUnauthorizedHandler } from "@/services/api/unauthorized-handler";
 import type { AuthUser } from "@/services/types/auth";
 
 /**
@@ -33,6 +34,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     authStore.clearSession();
     router.replace("/login");
   }, [router]);
+
+  // Let the API client trigger logout centrally on a 401 from an authed request.
+  React.useEffect(() => {
+    setUnauthorizedHandler(logout);
+    return () => setUnauthorizedHandler(null);
+  }, [logout]);
 
   const value = React.useMemo<AuthContextValue>(
     () => ({
