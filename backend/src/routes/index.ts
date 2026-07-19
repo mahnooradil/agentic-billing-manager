@@ -1,6 +1,7 @@
 import { Router } from "express";
 import healthRoutes from "@/routes/health.routes";
 import authRoutes from "@/routes/auth.routes";
+import platformRoutes from "@/routes/platform.routes";
 
 /**
  * Root API router. All feature routers are mounted here so the
@@ -10,5 +11,6 @@ const router = Router();
 
 router.use("/health", healthRoutes);
 router.use("/auth", authRoutes);
+router.use("/platforms", platformRoutes);
 
 export default router;
