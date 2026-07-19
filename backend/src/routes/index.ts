@@ -3,6 +3,7 @@ import healthRoutes from "@/routes/health.routes";
 import authRoutes from "@/routes/auth.routes";
 import platformRoutes from "@/routes/platform.routes";
 import dashboardRoutes from "@/routes/dashboard.routes";
+import billingRoutes from "@/routes/billing.routes";
 
 /**
  * Root API router. All feature routers are mounted here so the
@@ -14,5 +15,6 @@ router.use("/health", healthRoutes);
 router.use("/auth", authRoutes);
 router.use("/platforms", platformRoutes);
 router.use("/dashboard", dashboardRoutes);
+router.use("/billing", billingRoutes);
 
 export default router;
