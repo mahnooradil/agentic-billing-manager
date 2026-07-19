@@ -7,6 +7,7 @@ import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -49,16 +50,19 @@ export function UserMenu() {
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium">{displayName}</span>
-            {email ? (
-              <span className="text-xs font-normal text-muted-foreground">
-                {email}
-              </span>
-            ) : null}
-          </div>
-        </DropdownMenuLabel>
+        {/* Base UI: GroupLabel must live inside a Menu.Group (DropdownMenuGroup). */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>
+            <div className="flex flex-col">
+              <span className="text-sm font-medium">{displayName}</span>
+              {email ? (
+                <span className="text-xs font-normal text-muted-foreground">
+                  {email}
+                </span>
+              ) : null}
+            </div>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem>
           <User />
