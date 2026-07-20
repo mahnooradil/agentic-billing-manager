@@ -26,3 +26,16 @@ export interface UpsertAiSettingsPayload {
 export interface AiSettingsData {
   settings: AiSettings | null;
 }
+
+/** A single chat message (kept in memory only — no persistence). */
+export type ChatRole = "user" | "assistant";
+
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
+
+/** Response `data` shape for a chat completion. */
+export interface ChatResponseData {
+  message: ChatMessage;
+}

@@ -5,6 +5,7 @@ import platformRoutes from "@/routes/platform.routes";
 import dashboardRoutes from "@/routes/dashboard.routes";
 import billingRoutes from "@/routes/billing.routes";
 import aiSettingsRoutes from "@/routes/ai-settings.routes";
+import aiChatRoutes from "@/routes/ai-chat.routes";
 
 /**
  * Root API router. All feature routers are mounted here so the
@@ -18,5 +19,6 @@ router.use("/platforms", platformRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/billing", billingRoutes);
 router.use("/ai/settings", aiSettingsRoutes);
+router.use("/ai/chat", aiChatRoutes);
 
 export default router;
