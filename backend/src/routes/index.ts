@@ -6,6 +6,7 @@ import dashboardRoutes from "@/routes/dashboard.routes";
 import billingRoutes from "@/routes/billing.routes";
 import aiSettingsRoutes from "@/routes/ai-settings.routes";
 import aiChatRoutes from "@/routes/ai-chat.routes";
+import aiRecommendationsRoutes from "@/routes/ai-recommendations.routes";
 import webhookRoutes from "@/routes/webhook.routes";
 import analyticsRoutes from "@/routes/analytics.routes";
 
@@ -22,6 +23,7 @@ router.use("/dashboard", dashboardRoutes);
 router.use("/billing", billingRoutes);
 router.use("/ai/settings", aiSettingsRoutes);
 router.use("/ai/chat", aiChatRoutes);
+router.use("/ai/recommendations", aiRecommendationsRoutes);
 router.use("/webhooks", webhookRoutes);
 router.use("/analytics", analyticsRoutes);
 
