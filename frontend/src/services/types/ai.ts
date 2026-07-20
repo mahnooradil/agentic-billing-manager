@@ -2,7 +2,7 @@
  * AI provider settings types shared between the service layer and the UI.
  * The raw API key never crosses the wire — only a masked hint is returned.
  */
-export type AiProvider = "OpenAI" | "Gemini" | "OpenRouter";
+export type AiProvider = "OpenAI" | "Gemini" | "OpenRouter" | "Claude";
 
 export interface AiSettings {
   id: string;

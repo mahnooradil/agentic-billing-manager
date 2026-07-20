@@ -7,7 +7,7 @@ import {
   LayoutDashboard,
   Boxes,
   CreditCard,
-  Activity,
+  BarChart3,
   Sparkles,
   Settings,
   type LucideIcon,
@@ -23,7 +23,7 @@ export const dashboardNav: NavItem[] = [
   { title: "Dashboard", href: "/dashboard/overview", icon: LayoutDashboard },
   { title: "Platforms", href: "/dashboard/platforms", icon: Boxes },
   { title: "Billing", href: "/dashboard/billing", icon: CreditCard },
-  { title: "Usage", href: "/dashboard/usage", icon: Activity },
+  { title: "Analytics", href: "/dashboard/usage", icon: BarChart3 },
   { title: "AI Assistant", href: "/dashboard/ai", icon: Sparkles },
   { title: "Settings", href: "/dashboard/settings", icon: Settings },
 ];

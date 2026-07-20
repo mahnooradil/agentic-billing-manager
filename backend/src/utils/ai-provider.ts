@@ -24,6 +24,9 @@ interface GenerateParams {
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_VERSION = "2023-06-01";
+const CLAUDE_MAX_TOKENS = 1024;
 
 /** Maps an upstream HTTP status to a clean, secret-free error (never a 401). */
 function providerError(status: number): AppError {
@@ -106,9 +109,14 @@ function maskKey(key: string): string {
   return key.length <= 4 ? "****" : `****${key.slice(-4)}`;
 }
 
-/** Removes anything resembling a Google API key from a string. */
+/** Removes anything resembling a Google API key from a string — both legacy
+ *  "AIza" traffic keys and the new AI Studio auth keys ("AQ." / "AG." prefix) —
+ *  so a key is never leaked in logs regardless of format. */
 function redactKeys(text: string): string {
-  return text.replace(/AIza[0-9A-Za-z_-]{10,}/g, "AIza***REDACTED***");
+  return text.replace(
+    /\b(AIza|AQ\.|AG\.)[A-Za-z0-9._-]{6,}/g,
+    "$1***REDACTED***"
+  );
 }
 
 /**
@@ -172,7 +180,7 @@ function geminiError(httpStatus: number, data: unknown): AppError {
   }
   if (gStatus === "UNAUTHENTICATED" || httpStatus === 401) {
     return new AppError(
-      "Gemini could not authenticate the request (UNAUTHENTICATED). Please check the API key.",
+      "Gemini rejected the credentials (UNAUTHENTICATED). New AI Studio auth keys (AQ./AG. prefix) are still being rolled out by Google for the REST API and may not work yet; otherwise verify the key in AI Settings.",
       502
     );
   }
@@ -260,6 +268,40 @@ async function callGemini(params: GenerateParams): Promise<string> {
   return content;
 }
 
+/** Anthropic Claude via the official Messages API. Model comes from settings. */
+async function callClaude(params: GenerateParams): Promise<string> {
+  const { ok, status, data } = await postJson(
+    ANTHROPIC_URL,
+    {
+      "x-api-key": params.apiKey,
+      "anthropic-version": ANTHROPIC_VERSION,
+    },
+    {
+      model: params.model,
+      max_tokens: CLAUDE_MAX_TOKENS,
+      messages: params.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+    }
+  );
+  if (!ok) throw providerError(status);
+
+  // Concatenate every text block from content[] (ignoring non-text blocks such
+  // as thinking/tool_use), matching the official Anthropic SDK behavior.
+  const blocks =
+    (data as { content?: { type?: string; text?: string }[] } | null)
+      ?.content ?? [];
+  const content = blocks
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("");
+  if (!content.trim()) {
+    throw new AppError("The AI provider returned an empty response.", 502);
+  }
+  return content;
+}
+
 /** Sends the conversation to the configured provider and returns the reply. */
 export async function generateChatCompletion(
   params: GenerateParams
@@ -271,6 +313,8 @@ export async function generateChatCompletion(
       return callOpenAiCompatible(OPENROUTER_URL, params);
     case "Gemini":
       return callGemini(params);
+    case "Claude":
+      return callClaude(params);
     default:
       throw new AppError("Unsupported AI provider.", 400);
   }

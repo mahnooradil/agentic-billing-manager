@@ -23,6 +23,9 @@ export const env = {
   // falls back to a key derived from JWT_SECRET. Presence validated on first use
   // (see utils/crypto.ts) so a misconfigured deploy fails with a clear message.
   aiEncryptionKey: process.env.AI_ENCRYPTION_KEY ?? "",
+  // Shared secret for inbound Pipedream webhooks (sent as `X-Webhook-Token`).
+  // If unset, the webhook fails closed and rejects all requests.
+  pipedreamWebhookSecret: process.env.PIPEDREAM_WEBHOOK_SECRET ?? "",
 } as const;
 
 export const isProduction = env.nodeEnv === "production";

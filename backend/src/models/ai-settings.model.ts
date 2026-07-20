@@ -14,7 +14,7 @@ import {
 } from "mongoose";
 
 /** Supported AI providers. Single source of truth for schema + validators. */
-export const AI_PROVIDERS = ["OpenAI", "Gemini", "OpenRouter"] as const;
+export const AI_PROVIDERS = ["OpenAI", "Gemini", "OpenRouter", "Claude"] as const;
 export type AiProvider = (typeof AI_PROVIDERS)[number];
 
 /** Shape of the persisted AI settings fields. */
@@ -46,7 +46,7 @@ const aiSettingsSchema = new Schema<IAiSettings, AiSettingsModel>(
       required: [true, "Provider is required"],
       enum: {
         values: AI_PROVIDERS,
-        message: "Provider must be OpenAI, Gemini, or OpenRouter",
+        message: "Provider must be OpenAI, Gemini, OpenRouter, or Claude",
       },
     },
     apiKey: {

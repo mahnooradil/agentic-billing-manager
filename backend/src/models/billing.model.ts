@@ -74,6 +74,8 @@ const billingSchema = new Schema<IBilling, BillingModel>(
     billingDate: {
       type: Date,
       required: [true, "Billing date is required"],
+      // Indexed to support analytics range filters and monthly-trend grouping.
+      index: true,
     },
     status: {
       type: String,
@@ -82,6 +84,8 @@ const billingSchema = new Schema<IBilling, BillingModel>(
         message: "Status must be Pending, Paid, or Overdue",
       },
       default: "Pending",
+      // Indexed to support analytics status breakdowns and paid/outstanding sums.
+      index: true,
     },
     notes: {
       type: String,

@@ -5,7 +5,7 @@
  */
 import { z } from "zod";
 
-export const AI_PROVIDERS = ["OpenAI", "Gemini", "OpenRouter"] as const;
+export const AI_PROVIDERS = ["OpenAI", "Gemini", "OpenRouter", "Claude"] as const;
 
 export const aiSettingsFormSchema = z.object({
   provider: z.enum(AI_PROVIDERS),
