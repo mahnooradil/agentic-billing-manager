@@ -17,6 +17,7 @@ import { sendSuccess } from "@/utils/apiResponse";
 import { toPublicBilling } from "@/utils/billing.serializer";
 import { Billing, type BillingDocument } from "@/models/billing.model";
 import { Platform } from "@/models/platform.model";
+import { emitBusinessDataChanged } from "@/services/events/event-bus";
 import type {
   CreateBillingInput,
   UpdateBillingInput,
@@ -101,6 +102,11 @@ export const createBillingRecord = asyncHandler(async (req, res) => {
 
   const billing = await Billing.create(body);
   await billing.populate("platform");
+  emitBusinessDataChanged({
+    source: "billing",
+    action: "create",
+    triggeredBy: req.user?._id?.toString(),
+  });
   sendSuccess(res, 201, "Billing record created", {
     billingRecord: toPublicBilling(billing),
   });
@@ -120,6 +126,11 @@ export const updateBillingRecord = asyncHandler(async (req, res) => {
   await billing.save();
   await billing.populate("platform");
 
+  emitBusinessDataChanged({
+    source: "billing",
+    action: "update",
+    triggeredBy: req.user?._id?.toString(),
+  });
   sendSuccess(res, 200, "Billing record updated", {
     billingRecord: toPublicBilling(billing),
   });
@@ -129,6 +140,11 @@ export const updateBillingRecord = asyncHandler(async (req, res) => {
 export const deleteBillingRecord = asyncHandler(async (req, res) => {
   const billing = await findBillingOr404(req.params.id as string);
   await billing.deleteOne();
+  emitBusinessDataChanged({
+    source: "billing",
+    action: "delete",
+    triggeredBy: req.user?._id?.toString(),
+  });
   sendSuccess(res, 200, "Billing record deleted", {
     id: billing._id.toString(),
   });

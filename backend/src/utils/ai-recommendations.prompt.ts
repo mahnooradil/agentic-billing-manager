@@ -8,7 +8,10 @@
  * and removes the prompt-injection vector of adversarial text in a customer note.
  */
 import type { PublicAnalyticsOverview } from "@/utils/analytics.serializer";
-import type { RecommendationFocus } from "@/validators/ai-recommendations.validator";
+
+/** Recommendation focus areas. Kept here since this is the sole consumer. */
+export const RECOMMENDATION_FOCUSES = ["all", "overdue", "spend"] as const;
+export type RecommendationFocus = (typeof RECOMMENDATION_FOCUSES)[number];
 
 const FOCUS_INSTRUCTION: Record<RecommendationFocus, string> = {
   all: "Cover collections, cash flow, and cost/spend concentration.",

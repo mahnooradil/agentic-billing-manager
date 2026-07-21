@@ -14,6 +14,7 @@ import { sendSuccess } from "@/utils/apiResponse";
 import { toPublicPlatform } from "@/utils/platform.serializer";
 import { Platform, type PlatformDocument } from "@/models/platform.model";
 import { Billing } from "@/models/billing.model";
+import { emitBusinessDataChanged } from "@/services/events/event-bus";
 import type {
   CreatePlatformInput,
   UpdatePlatformInput,
@@ -57,6 +58,11 @@ export const createPlatform = asyncHandler(async (req, res) => {
   }
 
   const platform = await Platform.create(body);
+  emitBusinessDataChanged({
+    source: "platform",
+    action: "create",
+    triggeredBy: req.user?._id?.toString(),
+  });
   sendSuccess(res, 201, "Platform created", {
     platform: toPublicPlatform(platform),
   });
@@ -81,6 +87,11 @@ export const updatePlatform = asyncHandler(async (req, res) => {
   Object.assign(platform, body);
   await platform.save();
 
+  emitBusinessDataChanged({
+    source: "platform",
+    action: "update",
+    triggeredBy: req.user?._id?.toString(),
+  });
   sendSuccess(res, 200, "Platform updated", {
     platform: toPublicPlatform(platform),
   });
@@ -100,5 +111,10 @@ export const deletePlatform = asyncHandler(async (req, res) => {
   }
 
   await platform.deleteOne();
+  emitBusinessDataChanged({
+    source: "platform",
+    action: "delete",
+    triggeredBy: req.user?._id?.toString(),
+  });
   sendSuccess(res, 200, "Platform deleted", { id: platform._id.toString() });
 });

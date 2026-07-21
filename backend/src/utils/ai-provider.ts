@@ -19,6 +19,13 @@ interface GenerateParams {
   model: string;
   apiKey: string;
   messages: ChatMessage[];
+  /**
+   * Optional system instruction (Phase 11). Injected per provider in the correct
+   * place: OpenAI/OpenRouter as a leading `system` message, Claude as the
+   * top-level `system` field, Gemini as `systemInstruction`. When omitted, the
+   * request is byte-for-byte identical to before (existing callers unaffected).
+   */
+  system?: string;
 }
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
@@ -79,10 +86,15 @@ async function callOpenAiCompatible(
   url: string,
   params: GenerateParams
 ): Promise<string> {
+  // OpenAI/OpenRouter take the system instruction as a leading `system` message.
+  const messages: { role: string; content: string }[] = params.system
+    ? [{ role: "system", content: params.system }, ...params.messages]
+    : params.messages;
+
   const { ok, status, data } = await postJson(
     url,
     { Authorization: `Bearer ${params.apiKey}` },
-    { model: params.model, messages: params.messages }
+    { model: params.model, messages }
   );
   if (!ok) throw providerError(status);
 
@@ -237,7 +249,10 @@ async function callGemini(params: GenerateParams): Promise<string> {
     role: message.role === "assistant" ? "model" : "user",
     parts: [{ text: message.content }],
   }));
-  const body = { contents };
+  // Gemini takes the system instruction as a dedicated `systemInstruction`.
+  const body = params.system
+    ? { contents, systemInstruction: { parts: [{ text: params.system }] } }
+    : { contents };
 
   // Diagnostic: log the exact outgoing request (API key masked) — endpoint,
   // headers, model (in the URL) and body — so the wire format can be verified.
@@ -279,6 +294,8 @@ async function callClaude(params: GenerateParams): Promise<string> {
     {
       model: params.model,
       max_tokens: CLAUDE_MAX_TOKENS,
+      // Claude takes the system instruction as a top-level `system` field.
+      ...(params.system ? { system: params.system } : {}),
       messages: params.messages.map((message) => ({
         role: message.role,
         content: message.content,

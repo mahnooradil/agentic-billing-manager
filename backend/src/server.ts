@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { createApp } from "@/app";
 import { env } from "@/config/env";
 import { connectDatabase, disconnectDatabase } from "@/config/database";
+import { initRecommendationEngine } from "@/services/ai/recommendation-engine";
 
 /**
  * Server bootstrap / entry point.
@@ -19,6 +20,9 @@ async function startServer(): Promise<void> {
   try {
     // 1 + 2: connect to the database before starting Express.
     await connectDatabase();
+
+    // Wire autonomous engines to the event bus before serving traffic.
+    initRecommendationEngine();
 
     // 3: database is ready — start accepting HTTP traffic.
     const app = createApp();

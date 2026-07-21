@@ -15,10 +15,19 @@ import { ApiError } from "@/services/api/client";
 import { sendChatMessage } from "@/services/ai/ai-chat.service";
 import type { ChatMessage } from "@/services/types/ai";
 
+/** One-tap starter questions shown in the empty state (Phase 11). */
+const SUGGESTED_PROMPTS = [
+  "What's my total spend?",
+  "How many overdue invoices do I have?",
+  "Which platform costs the most?",
+  "Summarize my billing status",
+];
+
 /**
  * AI Assistant chat. Messages live in component state only (no persistence).
  * Each send posts the full conversation to the backend, which relays it to the
- * user's configured provider and returns the assistant reply.
+ * user's configured provider and returns the assistant reply. The reply is
+ * grounded server-side in the workspace's aggregated billing data (Phase 11).
  */
 export function AiChat() {
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
@@ -32,9 +41,8 @@ export function AiChat() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const text = input.trim();
+  const sendText = async (raw: string) => {
+    const text = raw.trim();
     if (!text || sending) return;
 
     const nextMessages: ChatMessage[] = [
@@ -60,6 +68,11 @@ export function AiChat() {
     }
   };
 
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void sendText(input);
+  };
+
   const isEmpty = messages.length === 0;
 
   return (
@@ -72,12 +85,25 @@ export function AiChat() {
       <Card className="flex flex-1 flex-col p-0">
         <div className="flex max-h-[60vh] min-h-80 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
           {isEmpty && !sending ? (
-            <div className="m-auto">
+            <div className="m-auto flex flex-col items-center gap-4">
               <EmptyState
                 icon={Sparkles}
-                title="Start a conversation"
-                description="Ask the assistant anything to get started."
+                title="Ask about your billing data"
+                description="The assistant can answer questions using your aggregated billing analytics — totals, overdue invoices, spend by platform, and more."
               />
+              <div className="flex flex-wrap justify-center gap-2">
+                {SUGGESTED_PROMPTS.map((prompt) => (
+                  <Button
+                    key={prompt}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void sendText(prompt)}
+                  >
+                    {prompt}
+                  </Button>
+                ))}
+              </div>
             </div>
           ) : (
             <>
