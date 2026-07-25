@@ -10,6 +10,10 @@ export interface AiSettings {
   model: string;
   hasApiKey: boolean;
   maskedApiKey: string;
+  /** Sampling temperature (0–2), or null when unset (provider default). */
+  temperature: number | null;
+  /** Max response tokens, or null when unset (no explicit cap). */
+  maxTokens: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -20,6 +24,9 @@ export interface UpsertAiSettingsPayload {
   model: string;
   /** Omitted on edit to keep the stored key; required on first create. */
   apiKey?: string;
+  /** A number sets it; `null` clears it (back to provider default). */
+  temperature?: number | null;
+  maxTokens?: number | null;
 }
 
 /** Response `data` shape — `settings` is null when nothing is configured yet. */
@@ -27,7 +34,7 @@ export interface AiSettingsData {
   settings: AiSettings | null;
 }
 
-/** A single chat message (kept in memory only — no persistence). */
+/** A single chat message. Persisted client-side via the chat store. */
 export type ChatRole = "user" | "assistant";
 
 export interface ChatMessage {

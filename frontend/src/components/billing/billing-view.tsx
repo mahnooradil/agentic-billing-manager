@@ -19,6 +19,7 @@ import {
 import { listPlatforms } from "@/services/platforms/platform.service";
 import type { BillingRecord, BillingStats } from "@/services/types/billing";
 import type { Platform } from "@/services/types/platform";
+import { PlatformFormDialog } from "@/components/platforms/platform-form-dialog";
 import { BillingCard } from "./billing-card";
 import { BillingFormDialog } from "./billing-form-dialog";
 import { DeleteBillingDialog } from "./delete-billing-dialog";
@@ -61,6 +62,11 @@ export function BillingView() {
     null
   );
   const [deleteKey, setDeleteKey] = React.useState(0);
+
+  // "Create New Platform" shortcut — reuses the Platforms page's own dialog so
+  // billing simply references Platforms (no duplicate platform management here).
+  const [platformFormOpen, setPlatformFormOpen] = React.useState(false);
+  const [platformFormKey, setPlatformFormKey] = React.useState(0);
 
   // Search / filter / pagination state (all client-side over the loaded list).
   const [search, setSearch] = React.useState("");
@@ -207,6 +213,18 @@ export function BillingView() {
     reload();
   };
 
+  const openCreatePlatform = () => {
+    setAlert(null);
+    setPlatformFormKey((key) => key + 1);
+    setPlatformFormOpen(true);
+  };
+
+  // Reloading re-fetches platforms, so the new one is immediately selectable.
+  const handlePlatformCreated = (message: string) => {
+    setAlert({ type: "success", message });
+    reload();
+  };
+
   // A billing record must belong to a platform, so creation needs at least one.
   const noPlatforms = platforms.length === 0;
 
@@ -235,7 +253,13 @@ export function BillingView() {
         <EmptyState
           icon={ReceiptText}
           title="No platforms to bill"
-          description="Create a platform first — every billing record must belong to a platform."
+          description="Every billing record belongs to a platform. Create one to start billing."
+          action={
+            <Button onClick={openCreatePlatform}>
+              <Plus />
+              Create New Platform
+            </Button>
+          }
         />
       ) : (
         <>
@@ -285,7 +309,7 @@ export function BillingView() {
                       Page {currentPage} of {totalPages}
                     </span>
                   </div>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="reveal-group grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {pageRecords.map((record) => (
                       <BillingCard
                         key={record.id}
@@ -321,6 +345,14 @@ export function BillingView() {
         record={deleteTarget}
         onOpenChange={setDeleteOpen}
         onDeleted={handleDeleted}
+      />
+      {/* Reused Platforms dialog: create a platform without leaving Billing. */}
+      <PlatformFormDialog
+        key={`platform-${platformFormKey}`}
+        open={platformFormOpen}
+        platform={null}
+        onOpenChange={setPlatformFormOpen}
+        onSaved={handlePlatformCreated}
       />
     </PageWrapper>
   );

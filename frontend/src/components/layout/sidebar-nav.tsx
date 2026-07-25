@@ -38,14 +38,20 @@ export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              "group/nav relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200",
+              "before:absolute before:top-1/2 before:left-0 before:h-5 before:w-1 before:-translate-y-1/2 before:rounded-full before:bg-brand-gradient before:transition-all before:duration-300 before:content-['']",
               active
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-              collapsed && "justify-center px-0"
+                ? "bg-primary/12 text-primary shadow-[inset_0_1px_0_0_oklch(1_0_0/0.06)] ring-1 ring-primary/20 before:opacity-100"
+                : "text-sidebar-foreground/70 before:opacity-0 hover:translate-x-0.5 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+              collapsed && "justify-center px-0 before:hidden"
             )}
           >
-            <Icon className="size-4 shrink-0" />
+            <Icon
+              className={cn(
+                "size-4 shrink-0 transition-transform duration-200 group-hover/nav:scale-110",
+                active && "text-primary"
+              )}
+            />
             {!collapsed ? <span className="truncate">{item.title}</span> : null}
           </Link>
         );

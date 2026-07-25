@@ -9,6 +9,9 @@ import aiChatRoutes from "@/routes/ai-chat.routes";
 import webhookRoutes from "@/routes/webhook.routes";
 import analyticsRoutes from "@/routes/analytics.routes";
 import recommendationRoutes from "@/routes/recommendation.routes";
+import notificationRoutes from "@/routes/notification.routes";
+import userSettingsRoutes from "@/routes/user-settings.routes";
+import platformConnectionRoutes from "@/routes/platform-connection.routes";
 
 /**
  * Root API router. All feature routers are mounted here so the
@@ -26,5 +29,8 @@ router.use("/ai/chat", aiChatRoutes);
 router.use("/webhooks", webhookRoutes);
 router.use("/analytics", analyticsRoutes);
 router.use("/recommendations", recommendationRoutes);
+router.use("/notifications", notificationRoutes);
+router.use("/settings", userSettingsRoutes);
+router.use("/platform-connections", platformConnectionRoutes);
 
 export default router;

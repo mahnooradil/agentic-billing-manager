@@ -59,3 +59,81 @@ export interface AnalyticsOverview {
 export interface AnalyticsOverviewData {
   analytics: AnalyticsOverview;
 }
+
+// ── Advanced analytics (F6) ──
+export interface SpendingGrowth {
+  currency: string;
+  currentMonth: string;
+  currentTotal: number;
+  previousMonth: string;
+  previousTotal: number;
+  changeAmount: number;
+  changePercent: number | null;
+}
+
+export interface CategorySpend {
+  category: string;
+  count: number;
+  amount: number;
+  currency: string;
+}
+
+export interface RecurringExpense {
+  platform: string;
+  amount: number;
+  currency: string;
+  occurrences: number;
+  months: number;
+}
+
+export interface DuplicateCharge {
+  platform: string;
+  amount: number;
+  currency: string;
+  month: string;
+  count: number;
+}
+
+export interface HighCostPlatform {
+  platform: string;
+  currency: string;
+  total: number;
+  sharePercent: number;
+}
+
+export interface UnderusedSubscription {
+  platform: string;
+  currency: string;
+  total: number;
+  invoices: number;
+  reason: string;
+}
+
+export interface AdvancedInsights {
+  topSpending: string[];
+  costSaving: string[];
+  risks: string[];
+}
+
+export interface AdvancedAnalytics {
+  range: AnalyticsRange;
+  generatedAt: string;
+  invoiceCount: number;
+  primaryCurrency: string | null;
+  currencyBreakdown: CurrencyTotal[];
+  platformBreakdown: PlatformSpend[];
+  categoryBreakdown: CategorySpend[];
+  monthlyTrend: MonthlyPoint[];
+  growth: SpendingGrowth | null;
+  largestExpenses: RecurringExpense[];
+  duplicateSubscriptions: DuplicateCharge[];
+  highCostPlatforms: HighCostPlatform[];
+  underusedSubscriptions: UnderusedSubscription[];
+  insights: AdvancedInsights;
+  summary: string;
+}
+
+/** Response `data` shape returned by the advanced analytics endpoint. */
+export interface AdvancedAnalyticsData {
+  analytics: AdvancedAnalytics;
+}

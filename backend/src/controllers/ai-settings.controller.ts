@@ -46,10 +46,15 @@ export const upsertAiSettings = asyncHandler(async (req, res) => {
     model: string;
     apiKey?: string;
     apiKeyLast4?: string;
+    temperature?: number;
+    maxTokens?: number;
   } = {
     provider: body.provider,
     model: body.model,
   };
+  // Fields explicitly cleared (sent as null) are removed so the provider default
+  // applies again.
+  const unset: Record<string, 1> = {};
 
   // Only re-encrypt/replace the stored key when a new one is provided.
   if (body.apiKey) {
@@ -57,9 +62,21 @@ export const upsertAiSettings = asyncHandler(async (req, res) => {
     update.apiKeyLast4 = body.apiKey.slice(-4);
   }
 
+  // Generation controls: a number sets it, null clears it, undefined leaves it.
+  if (body.temperature === null) unset.temperature = 1;
+  else if (typeof body.temperature === "number")
+    update.temperature = body.temperature;
+
+  if (body.maxTokens === null) unset.maxTokens = 1;
+  else if (typeof body.maxTokens === "number") update.maxTokens = body.maxTokens;
+
   const settings = await AiSettings.findOneAndUpdate(
     { user: user._id },
-    { $set: update, $setOnInsert: { user: user._id } },
+    {
+      $set: update,
+      $setOnInsert: { user: user._id },
+      ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}),
+    },
     { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
   );
 

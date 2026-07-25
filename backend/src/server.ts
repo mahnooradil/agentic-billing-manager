@@ -4,6 +4,7 @@ import { createApp } from "@/app";
 import { env } from "@/config/env";
 import { connectDatabase, disconnectDatabase } from "@/config/database";
 import { initRecommendationEngine } from "@/services/ai/recommendation-engine";
+import { initNotificationEngine } from "@/services/notification/notification-engine";
 
 /**
  * Server bootstrap / entry point.
@@ -23,6 +24,7 @@ async function startServer(): Promise<void> {
 
     // Wire autonomous engines to the event bus before serving traffic.
     initRecommendationEngine();
+    initNotificationEngine();
 
     // 3: database is ready — start accepting HTTP traffic.
     const app = createApp();

@@ -20,6 +20,23 @@ export const upsertAiSettingsSchema = z.object({
     .min(8, "API key must be at least 8 characters")
     .max(500, "API key must be at most 500 characters")
     .optional(),
+  // Optional generation controls. `null` explicitly clears a stored value
+  // (revert to the provider default); omitted leaves it unchanged.
+  temperature: z
+    .number()
+    .min(0, "Temperature must be at least 0")
+    .max(2, "Temperature must be at most 2")
+    .nullable()
+    .optional(),
+  maxTokens: z
+    .number()
+    .int("Max tokens must be a whole number")
+    // A very small cap truncates replies mid-sentence, so the assistant looks
+    // broken. 256 is the lowest value that still yields a usable answer.
+    .min(256, "Max tokens must be at least 256 (smaller values cut replies off)")
+    .max(8192, "Max tokens must be at most 8192")
+    .nullable()
+    .optional(),
 });
 
 export type UpsertAiSettingsInput = z.infer<typeof upsertAiSettingsSchema>;

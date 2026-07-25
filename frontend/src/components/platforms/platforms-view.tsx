@@ -13,6 +13,7 @@ import { PageWrapper } from "@/components/common/page-wrapper";
 import { Pagination } from "@/components/common/pagination";
 import { ApiError } from "@/services/api/client";
 import { listPlatforms } from "@/services/platforms/platform.service";
+import { ConnectionsPanel } from "@/components/connections/connections-panel";
 import type { Platform } from "@/services/types/platform";
 import { PlatformCard } from "./platform-card";
 import { PlatformFormDialog } from "./platform-form-dialog";
@@ -170,6 +171,8 @@ export function PlatformsView() {
       />
 
       {alert ? <FormAlert variant={alert.type} message={alert.message} /> : null}
+
+      <ConnectionsPanel />
 
       {status === "loading" ? (
         <div className="flex flex-1 items-center justify-center py-16">

@@ -15,9 +15,9 @@ export function Brand({ collapsed = false, className }: BrandProps) {
   return (
     <Link
       href="/dashboard/overview"
-      className={cn("flex items-center gap-2 px-3", className)}
+      className={cn("group flex items-center gap-2.5 px-3", className)}
     >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-brand-gradient text-primary-foreground shadow-e1 ring-1 ring-white/15 transition-transform duration-300 group-hover:scale-105 group-hover:rotate-3">
         <Sparkles className="size-4" />
       </span>
       {!collapsed ? (

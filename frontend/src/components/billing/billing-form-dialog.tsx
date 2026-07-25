@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { FormAlert } from "@/components/common/form-alert";
 import { ApiError } from "@/services/api/client";
+import { usePreferences } from "@/services/preferences/preferences-store";
 import {
   createBillingRecord,
   updateBillingRecord,
@@ -58,13 +59,17 @@ function toDateInput(iso: string | undefined): string {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
 
-function toFormValues(record: BillingRecord | null): BillingFormValues {
+function toFormValues(
+  record: BillingRecord | null,
+  defaultCurrency: string
+): BillingFormValues {
   return {
     platform: record?.platform.id ?? "",
     customerName: record?.customerName ?? "",
     invoiceNumber: record?.invoiceNumber ?? "",
     amount: record ? String(record.amount) : "",
-    currency: record?.currency ?? "USD",
+    // New records default to the user's preferred currency (Phase F7).
+    currency: record?.currency ?? defaultCurrency,
     billingDate: toDateInput(record?.billingDate),
     status: record?.status ?? "Pending",
     notes: record?.notes ?? "",
@@ -80,12 +85,16 @@ export function BillingFormDialog({
   onSaved,
 }: BillingFormDialogProps) {
   const isEdit = record !== null;
+  const { general } = usePreferences();
   const [serverError, setServerError] = React.useState<{
     message: string;
     errors?: string[];
   } | null>(null);
 
-  const values = React.useMemo(() => toFormValues(record), [record]);
+  const values = React.useMemo(
+    () => toFormValues(record, general.currency),
+    [record, general.currency]
+  );
 
   const {
     register,

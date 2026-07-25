@@ -1,8 +1,12 @@
+"use client";
+
 import { Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { formatMoney, formatDate } from "@/lib/format";
+import { usePreferences } from "@/services/preferences/preferences-store";
 import type { BillingRecord } from "@/services/types/billing";
 import { BillingStatusBadge } from "./billing-status-badge";
 
@@ -12,36 +16,16 @@ interface BillingCardProps {
   onDelete: (record: BillingRecord) => void;
 }
 
-/** Formats an amount using the record's currency, falling back to a plain code. */
-function formatAmount(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency,
-    }).format(amount);
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`;
-  }
-}
-
-/** Formats an ISO date string as a short, human-readable date. */
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
 /** Presentational card for a single billing record, with edit/delete actions. */
 export function BillingCard({ record, onEdit, onDelete }: BillingCardProps) {
+  // Money + date honor the user's General preferences (currency locale, date
+  // format, timezone). The record's own currency always wins.
+  const { general } = usePreferences();
   return (
-    <Card className="flex flex-col">
+    <Card className="hover-lift group flex flex-col">
       <CardContent className="flex flex-1 flex-col gap-3">
         <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-semibold text-primary ring-1 ring-primary/15 transition-transform duration-300 group-hover:scale-105">
             {record.platform.name.charAt(0).toUpperCase()}
           </span>
           <div className="min-w-0 flex-1">
@@ -55,10 +39,10 @@ export function BillingCard({ record, onEdit, onDelete }: BillingCardProps) {
 
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-lg font-semibold tracking-tight">
-            {formatAmount(record.amount, record.currency)}
+            {formatMoney(record.amount, record.currency, general)}
           </span>
           <span className="text-xs text-muted-foreground">
-            {formatDate(record.billingDate)}
+            {formatDate(record.billingDate, general)}
           </span>
         </div>
 

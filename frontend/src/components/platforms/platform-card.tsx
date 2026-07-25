@@ -24,10 +24,10 @@ function formatHost(url: string): string {
 /** Presentational card for a single platform, with edit/delete actions. */
 export function PlatformCard({ platform, onEdit, onDelete }: PlatformCardProps) {
   return (
-    <Card className="flex flex-col">
+    <Card className="hover-lift group flex flex-col">
       <CardContent className="flex flex-1 flex-col gap-3">
         <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-semibold text-primary ring-1 ring-primary/15 transition-transform duration-300 group-hover:scale-105">
             {platform.name.charAt(0).toUpperCase()}
           </span>
           <div className="min-w-0 flex-1">

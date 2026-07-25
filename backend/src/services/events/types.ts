@@ -3,8 +3,8 @@
  *
  * The event bus is the decoupling seam between "something happened" (emitted by
  * controllers / webhooks / future connectors) and "engines that react to it"
- * (the Recommendation Engine now; Notification/Alert/LangGraph/Automation engines
- * later). Controllers depend ONLY on these types + the bus — never on an engine.
+ * (the Recommendation and Notification Engines). Controllers depend ONLY on
+ * these types + the bus — never on an engine.
  */
 
 /** Where a business-data change originated. Open-ended for future sources. */
@@ -41,8 +41,26 @@ export interface RecommendationsUpdatedEvent {
   at: Date;
 }
 
+/**
+ * Emitted by the Notification Engine whenever a NEW notification is created
+ * (not on dedup refreshes). This is the single seam future notification channels
+ * (Gmail/Slack/Discord/WhatsApp/Push/Pipedream…) subscribe to — they react to
+ * this event and never touch Billing/Recommendation engines directly.
+ */
+export interface NotificationCreatedEvent {
+  type: "notification.created";
+  notificationId: string;
+  severity: "info" | "warning" | "critical";
+  category: string;
+  title: string;
+  at: Date;
+}
+
 /** Union of all domain events. Extend this as new events are introduced. */
-export type DomainEvent = BusinessDataChangedEvent | RecommendationsUpdatedEvent;
+export type DomainEvent =
+  | BusinessDataChangedEvent
+  | RecommendationsUpdatedEvent
+  | NotificationCreatedEvent;
 
 export type DomainEventType = DomainEvent["type"];
 
@@ -53,6 +71,7 @@ export type DomainEventType = DomainEvent["type"];
 export interface EventMap {
   "business.data.changed": BusinessDataChangedEvent;
   "recommendations.updated": RecommendationsUpdatedEvent;
+  "notification.created": NotificationCreatedEvent;
 }
 
 /** A subscriber handler for a specific event type. */

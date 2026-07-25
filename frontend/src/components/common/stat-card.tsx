@@ -24,11 +24,21 @@ export function StatCard({
   className,
 }: StatCardProps) {
   return (
-    <Card className={cn("", className)}>
+    <Card
+      className={cn(
+        "group hover-lift relative isolate overflow-hidden",
+        className
+      )}
+    >
+      {/* Soft brand wash that intensifies on hover. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-16 -right-16 size-40 rounded-full bg-brand-gradient opacity-[0.07] blur-2xl transition-opacity duration-500 group-hover:opacity-20"
+      />
       <CardContent className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <p className="text-sm text-muted-foreground">{label}</p>
-          <p className="font-heading text-2xl font-semibold tracking-tight">
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium text-muted-foreground">{label}</p>
+          <p className="font-heading text-3xl font-semibold tracking-tight tabular-nums">
             {value}
           </p>
           {hint ? (
@@ -36,7 +46,7 @@ export function StatCard({
           ) : null}
         </div>
         {Icon ? (
-          <div className="rounded-lg bg-muted p-2 text-muted-foreground">
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand-gradient text-primary-foreground shadow-e1 ring-1 ring-white/15 transition-transform duration-300 group-hover:scale-105">
             <Icon className="size-5" />
           </div>
         ) : null}

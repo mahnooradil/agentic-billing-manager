@@ -23,13 +23,13 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-xl border border-dashed p-10 text-center",
+        "relative flex flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed border-border/70 bg-card/40 p-12 text-center backdrop-blur-sm",
         className
       )}
     >
       {Icon ? (
-        <div className="mb-4 rounded-full bg-muted p-3">
-          <Icon className="size-6 text-muted-foreground" />
+        <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/15">
+          <Icon className="size-6" />
         </div>
       ) : null}
       <h3 className="font-heading text-base font-medium">{title}</h3>

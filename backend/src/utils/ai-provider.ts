@@ -26,17 +26,40 @@ interface GenerateParams {
    * request is byte-for-byte identical to before (existing callers unaffected).
    */
   system?: string;
+  /**
+   * Optional sampling temperature (0–2) and max response tokens (Phase F7).
+   * Both come from the user's AI settings. When undefined the request is
+   * byte-for-byte identical to pre-F7 (no temperature; Claude keeps its 1024
+   * default; other providers send no token cap).
+   */
+  temperature?: number;
+  maxTokens?: number;
 }
 
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_VERSION = "2023-06-01";
-const CLAUDE_MAX_TOKENS = 1024;
+// Endpoints + constants. Exported so the tool-calling module (UI-Agent.2) shares
+// exactly the same wire targets and defaults as the plain chat path.
+export const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+export const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+export const GEMINI_BASE =
+  "https://generativelanguage.googleapis.com/v1beta/models";
+export const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+export const ANTHROPIC_VERSION = "2023-06-01";
+// Claude's Messages API REQUIRES max_tokens; unlike other providers there is no
+// "unlimited" default. 1024 clipped long answers mid-sentence — 4096 is a
+// generous default for chat while still respecting an explicit user cap (F7).
+export const CLAUDE_MAX_TOKENS = 4096;
+
+/**
+ * Anthropic accepts temperature in 0..1, while OpenAI/Gemini allow 0..2 (which
+ * is what the settings UI permits). Clamp per-provider so a value that is
+ * perfectly valid for another provider can never 400 the entire request.
+ */
+export function clampClaudeTemperature(temperature: number): number {
+  return Math.min(Math.max(temperature, 0), 1);
+}
 
 /** Maps an upstream HTTP status to a clean, secret-free error (never a 401). */
-function providerError(status: number): AppError {
+export function providerError(status: number): AppError {
   if (status === 401 || status === 403) {
     return new AppError(
       "The AI provider rejected your API key. Please check your AI settings.",
@@ -62,7 +85,7 @@ function providerError(status: number): AppError {
 }
 
 /** POSTs JSON and returns the parsed body, mapping network failures cleanly. */
-async function postJson(
+export async function postJson(
   url: string,
   headers: Record<string, string>,
   body: unknown
@@ -94,7 +117,16 @@ async function callOpenAiCompatible(
   const { ok, status, data } = await postJson(
     url,
     { Authorization: `Bearer ${params.apiKey}` },
-    { model: params.model, messages }
+    {
+      model: params.model,
+      messages,
+      ...(params.temperature !== undefined
+        ? { temperature: params.temperature }
+        : {}),
+      ...(params.maxTokens !== undefined
+        ? { max_tokens: params.maxTokens }
+        : {}),
+    }
   );
   if (!ok) throw providerError(status);
 
@@ -234,7 +266,7 @@ const DEPRECATED_GEMINI_MODELS = new Set([
  * current default, while any other (custom) model is passed through unchanged so
  * advanced users can target newer/specific models.
  */
-function resolveGeminiModel(model: string): string {
+export function resolveGeminiModel(model: string): string {
   const trimmed = model.trim();
   if (!trimmed || DEPRECATED_GEMINI_MODELS.has(trimmed.toLowerCase())) {
     return DEFAULT_GEMINI_MODEL;
@@ -249,17 +281,28 @@ async function callGemini(params: GenerateParams): Promise<string> {
     role: message.role === "assistant" ? "model" : "user",
     parts: [{ text: message.content }],
   }));
-  // Gemini takes the system instruction as a dedicated `systemInstruction`.
-  const body = params.system
-    ? { contents, systemInstruction: { parts: [{ text: params.system }] } }
-    : { contents };
+  // Gemini takes the system instruction as a dedicated `systemInstruction`, and
+  // temperature / max tokens inside `generationConfig` (added only when set).
+  const generationConfig: { temperature?: number; maxOutputTokens?: number } = {};
+  if (params.temperature !== undefined)
+    generationConfig.temperature = params.temperature;
+  if (params.maxTokens !== undefined)
+    generationConfig.maxOutputTokens = params.maxTokens;
 
-  // Diagnostic: log the exact outgoing request (API key masked) — endpoint,
-  // headers, model (in the URL) and body — so the wire format can be verified.
+  const body = {
+    contents,
+    ...(params.system
+      ? { systemInstruction: { parts: [{ text: params.system }] } }
+      : {}),
+    ...(Object.keys(generationConfig).length > 0 ? { generationConfig } : {}),
+  };
+
+  // Diagnostic: endpoint + model (in the URL) + masked key only. The request
+  // body is intentionally NOT logged — it carries conversation content (privacy).
   console.error(
-    `[ai-provider][gemini] request: POST ${url} | headers={"Content-Type":"application/json","x-goog-api-key":"${maskKey(
+    `[ai-provider][gemini] request: POST ${url} | x-goog-api-key=${maskKey(
       params.apiKey
-    )}"} | body=${JSON.stringify(body)}`
+    )}`
   );
 
   // Gemini authenticates via the `x-goog-api-key` header (Google's recommended
@@ -293,7 +336,11 @@ async function callClaude(params: GenerateParams): Promise<string> {
     },
     {
       model: params.model,
-      max_tokens: CLAUDE_MAX_TOKENS,
+      // Claude requires max_tokens; use the configured cap or the 1024 default.
+      max_tokens: params.maxTokens ?? CLAUDE_MAX_TOKENS,
+      ...(params.temperature !== undefined
+        ? { temperature: clampClaudeTemperature(params.temperature) }
+        : {}),
       // Claude takes the system instruction as a top-level `system` field.
       ...(params.system ? { system: params.system } : {}),
       messages: params.messages.map((message) => ({

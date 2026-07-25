@@ -26,6 +26,12 @@ export const env = {
   // Shared secret for inbound Pipedream webhooks (sent as `X-Webhook-Token`).
   // If unset, the webhook fails closed and rejects all requests.
   pipedreamWebhookSecret: process.env.PIPEDREAM_WEBHOOK_SECRET ?? "",
+  // Pipedream Connect (F9.2) — managed OAuth for 2,700+ providers. When these
+  // are unset, the Pipedream features report "not configured" (never faked).
+  pipedreamClientId: process.env.PIPEDREAM_CLIENT_ID ?? "",
+  pipedreamClientSecret: process.env.PIPEDREAM_CLIENT_SECRET ?? "",
+  pipedreamProjectId: process.env.PIPEDREAM_PROJECT_ID ?? "",
+  pipedreamEnvironment: process.env.PIPEDREAM_ENVIRONMENT ?? "development",
 } as const;
 
 export const isProduction = env.nodeEnv === "production";

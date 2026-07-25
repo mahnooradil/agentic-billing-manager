@@ -12,6 +12,14 @@ import {
   CircleAlert,
   TriangleAlert,
   Info,
+  Sparkles,
+  Copy,
+  Ban,
+  Flame,
+  PiggyBank,
+  Repeat,
+  ArrowUpRight,
+  ArrowDownRight,
   type LucideIcon,
 } from "lucide-react";
 
@@ -25,9 +33,18 @@ import { StatCard } from "@/components/common/stat-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import {
+  formatMoney as fmtMoney,
+  formatMonth as fmtMonth,
+} from "@/lib/format";
+import { usePreferences } from "@/services/preferences/preferences-store";
 import { ApiError } from "@/services/api/client";
-import { getAnalyticsOverview } from "@/services/analytics/analytics.service";
+import {
+  getAnalyticsOverview,
+  getAdvancedAnalytics,
+} from "@/services/analytics/analytics.service";
 import type {
+  AdvancedAnalytics,
   AnalyticsInsight,
   AnalyticsOverview,
   AnalyticsRange,
@@ -41,31 +58,6 @@ const RANGE_OPTIONS: { value: AnalyticsRange; label: string }[] = [
   { value: "6m", label: "6 mo" },
   { value: "12m", label: "12 mo" },
 ];
-
-/** Formats an amount with its currency; falls back to a plain number + code. */
-function formatMoney(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency,
-    }).format(amount);
-  } catch {
-    return `${amount.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })} ${currency}`;
-  }
-}
-
-/** Turns a "YYYY-MM" key into a short label like "Jan 2026". */
-function formatMonth(month: string): string {
-  const [year, m] = month.split("-").map(Number);
-  if (!year || !m) return month;
-  return new Date(year, m - 1, 1).toLocaleString("en-US", {
-    month: "short",
-    year: "numeric",
-  });
-}
 
 const INSIGHT_STYLES: Record<
   AnalyticsInsight["severity"],
@@ -113,9 +105,16 @@ function BarRow({
  * library. Handles loading, error and empty (no billing data) states.
  */
 export function AnalyticsView() {
+  // Money + month labels honor the user's General preferences (shared layer).
+  const { general } = usePreferences();
+  const formatMoney = (amount: number, currency: string) =>
+    fmtMoney(amount, currency, general);
+  const formatMonth = (month: string) => fmtMonth(month);
+
   const [range, setRange] = React.useState<AnalyticsRange>("all");
   const [status, setStatus] = React.useState<ViewStatus>("loading");
   const [data, setData] = React.useState<AnalyticsOverview | null>(null);
+  const [advanced, setAdvanced] = React.useState<AdvancedAnalytics | null>(null);
   const [loadError, setLoadError] = React.useState("");
 
   // Bumping reloadKey re-runs the fetch effect (used by the retry button).
@@ -137,6 +136,23 @@ export function AnalyticsView() {
             : "Failed to load analytics."
         );
         setStatus("error");
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [range, reloadKey]);
+
+  // Advanced billing intelligence (F6) — loads independently; if it fails the
+  // core analytics above still render (its sections just don't appear).
+  React.useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        const response = await getAdvancedAnalytics(range);
+        if (!ignore) setAdvanced(response.data.analytics);
+      } catch {
+        if (!ignore) setAdvanced(null);
       }
     })();
     return () => {
@@ -200,7 +216,7 @@ export function AnalyticsView() {
       ) : data ? (
         <div className="space-y-8">
           {/* Headline KPIs (money in the primary currency). */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="reveal-group grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
               label="Total Invoices"
               value={String(data.invoiceCount)}
@@ -371,8 +387,334 @@ export function AnalyticsView() {
               />
             )}
           </section>
+
+          {/* ── Advanced billing intelligence (F6) ── */}
+          {advanced && advanced.invoiceCount > 0 ? (
+            <AdvancedSections advanced={advanced} />
+          ) : null}
         </div>
       ) : null}
     </PageWrapper>
+  );
+}
+
+/**
+ * Advanced billing-intelligence sections (F6, polished in F6.1). Every section
+ * always renders — with an informative empty state when it has no data — so the
+ * layout is stable and reads like a professional SaaS dashboard. Presentation
+ * only: no analytics logic, no data shaping.
+ */
+function AdvancedSections({ advanced }: { advanced: AdvancedAnalytics }) {
+  const { general } = usePreferences();
+  const formatMoney = (amount: number, currency: string) =>
+    fmtMoney(amount, currency, general);
+  const formatMonth = (month: string) => fmtMonth(month);
+  const {
+    insights,
+    growth,
+    largestExpenses,
+    duplicateSubscriptions,
+    highCostPlatforms,
+    underusedSubscriptions,
+  } = advanced;
+  const maxExpense = Math.max(0, ...largestExpenses.map((e) => e.amount));
+
+  return (
+    <>
+      {/* AI Insights — summary + three insight cards. */}
+      <section className="space-y-4">
+        <SectionHeader
+          title="AI Insights"
+          description="Automated intelligence from your billing data — no external AI calls."
+        />
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="flex items-start gap-3">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Sparkles className="size-4" />
+            </span>
+            <p className="text-sm leading-relaxed">{advanced.summary}</p>
+          </CardContent>
+        </Card>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <InsightCard
+            icon={Flame}
+            tone="warning"
+            title="Top Spending"
+            items={insights.topSpending}
+            emptyText="Nothing notable yet."
+          />
+          <InsightCard
+            icon={PiggyBank}
+            tone="success"
+            title="Cost Saving"
+            items={insights.costSaving}
+            emptyText="No savings opportunities found."
+          />
+          <InsightCard
+            icon={TriangleAlert}
+            tone="danger"
+            title="Risks"
+            items={insights.risks}
+            emptyText="No risks detected."
+          />
+        </div>
+      </section>
+
+      {/* Spending Growth — stat cards or empty state. */}
+      <section className="space-y-4">
+        <SectionHeader
+          title="Spending Growth"
+          description="How this month compares to the previous month."
+        />
+        {growth && growth.changePercent !== null ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <GrowthCard growth={growth} />
+            <StatCard
+              label="This month"
+              value={formatMoney(growth.currentTotal, growth.currency)}
+              hint={formatMonth(growth.currentMonth)}
+              icon={Wallet}
+            />
+            <StatCard
+              label="Previous month"
+              value={formatMoney(growth.previousTotal, growth.currency)}
+              hint={formatMonth(growth.previousMonth)}
+              icon={Coins}
+            />
+          </div>
+        ) : (
+          <SectionEmpty
+            icon={TrendingUp}
+            message="No historical data yet. Add billing records from multiple months to unlock this insight."
+          />
+        )}
+      </section>
+
+      {/* Largest Recurring Expenses — bars or empty state. */}
+      <section className="space-y-4">
+        <SectionHeader
+          title="Largest Recurring Expenses"
+          description="Charges that repeat across multiple months."
+        />
+        {largestExpenses.length > 0 ? (
+          <Card>
+            <CardContent className="space-y-4">
+              {largestExpenses.map((e, index) => (
+                <BarRow
+                  key={`${e.platform}-${e.amount}-${index}`}
+                  label={e.platform}
+                  caption={`${formatMoney(e.amount, e.currency)} · ${e.months} mo · ${e.occurrences}×`}
+                  value={e.amount}
+                  max={maxExpense}
+                />
+              ))}
+            </CardContent>
+          </Card>
+        ) : (
+          <SectionEmpty icon={Repeat} message="No recurring expenses detected." />
+        )}
+      </section>
+
+      {/* Duplicate Charges — cards or empty state. */}
+      <section className="space-y-4">
+        <SectionHeader
+          title="Duplicate Charges"
+          description="The same platform billed the same amount more than once in a month."
+        />
+        {duplicateSubscriptions.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {duplicateSubscriptions.map((d, index) => (
+              <Card key={`${d.platform}-${d.month}-${index}`}>
+                <CardContent className="flex items-center gap-3">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                    <Copy className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{d.platform}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatMoney(d.amount, d.currency)} × {d.count} in{" "}
+                      {formatMonth(d.month)}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <SectionEmpty icon={Copy} message="No duplicate charges detected." />
+        )}
+      </section>
+
+      {/* High-cost Platforms — platform cards or empty state. */}
+      <section className="space-y-4">
+        <SectionHeader
+          title="High-cost Platforms"
+          description="Where your spend concentrates most."
+        />
+        {highCostPlatforms.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {highCostPlatforms.map((p, index) => (
+              <Card key={`${p.platform}-${index}`}>
+                <CardContent className="space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium">{p.platform}</span>
+                    <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs font-semibold">
+                      {p.sharePercent}%
+                    </span>
+                  </div>
+                  <p className="font-heading text-lg font-semibold tracking-tight">
+                    {formatMoney(p.total, p.currency)}
+                  </p>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${Math.min(p.sharePercent, 100)}%` }}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <SectionEmpty icon={Layers} message="No high-cost platforms detected." />
+        )}
+      </section>
+
+      {/* Underused Subscriptions — cards or empty state. */}
+      <section className="space-y-4">
+        <SectionHeader
+          title="Underused Subscriptions"
+          description="Inactive platforms that are still being billed."
+        />
+        {underusedSubscriptions.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {underusedSubscriptions.map((u, index) => (
+              <Card key={`${u.platform}-${index}`}>
+                <CardContent className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium">{u.platform}</span>
+                    <span className="shrink-0 text-sm text-muted-foreground">
+                      {formatMoney(u.total, u.currency)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{u.reason}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <SectionEmpty icon={Ban} message="No underused subscriptions found." />
+        )}
+      </section>
+    </>
+  );
+}
+
+type InsightTone = "warning" | "success" | "danger";
+
+const INSIGHT_TONES: Record<InsightTone, string> = {
+  warning: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  success: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  danger: "bg-destructive/10 text-destructive",
+};
+
+/** A titled insight card with an icon badge and a list (or empty text). */
+function InsightCard({
+  icon: Icon,
+  tone,
+  title,
+  items,
+  emptyText,
+}: {
+  icon: LucideIcon;
+  tone: InsightTone;
+  title: string;
+  items: string[];
+  emptyText: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-2.5">
+          <span
+            className={cn(
+              "flex size-8 items-center justify-center rounded-lg",
+              INSIGHT_TONES[tone]
+            )}
+          >
+            <Icon className="size-4" />
+          </span>
+          <h3 className="font-heading text-sm font-medium">{title}</h3>
+        </div>
+        {items.length > 0 ? (
+          <ul className="space-y-2">
+            {items.map((item, index) => (
+              <li key={index} className="text-sm leading-relaxed text-muted-foreground">
+                {item}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">{emptyText}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Month-over-month growth stat card with a green (▲) / red (▼) indicator. */
+function GrowthCard({
+  growth,
+}: {
+  growth: NonNullable<AdvancedAnalytics["growth"]>;
+}) {
+  const { general } = usePreferences();
+  const formatMoney = (amount: number, currency: string) =>
+    fmtMoney(amount, currency, general);
+  const up = (growth.changePercent ?? 0) >= 0;
+  const Icon = up ? ArrowUpRight : ArrowDownRight;
+  const color = up
+    ? "text-emerald-600 dark:text-emerald-400"
+    : "text-destructive";
+  return (
+    <Card>
+      <CardContent className="space-y-1">
+        <p className="text-sm text-muted-foreground">Month-over-month</p>
+        <p
+          className={cn(
+            "flex items-center gap-1 font-heading text-2xl font-semibold tracking-tight",
+            color
+          )}
+        >
+          <Icon className="size-5" />
+          {up ? "+" : ""}
+          {growth.changePercent}%
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {up ? "Increased" : "Decreased"} by{" "}
+          {formatMoney(Math.abs(growth.changeAmount), growth.currency)}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Compact per-section empty state (reuses the Card system). */
+function SectionEmpty({
+  icon: Icon,
+  message,
+}: {
+  icon: LucideIcon;
+  message: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center gap-2 py-8 text-center">
+        <span className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Icon className="size-4" />
+        </span>
+        <p className="max-w-sm text-sm text-muted-foreground">{message}</p>
+      </CardContent>
+    </Card>
   );
 }

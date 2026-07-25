@@ -29,10 +29,11 @@ const TREND_MONTHS_LIMIT = 12;
 /**
  * Builds the `billingDate` filter for a range. `all` returns an empty match so
  * every record is included; bounded ranges look back N whole months from `now`.
+ * Exported so advanced analytics (F6) reuse the exact same range semantics.
  */
-function buildRangeMatch(
+export function buildRangeMatch(
   range: AnalyticsRange,
-  now: Date
+  now: Date = new Date()
 ): Record<string, unknown> {
   if (range === "all") return {};
   const months = ANALYTICS_RANGE_MONTHS[range];

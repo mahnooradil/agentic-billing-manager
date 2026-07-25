@@ -17,6 +17,7 @@
 import { API_BASE_URL } from "./config";
 import { notifyUnauthorized } from "./unauthorized-handler";
 import { authStore } from "@/services/auth/auth-store";
+import { emitClientEvent } from "@/services/events/client-events";
 import type { ApiErrorBody } from "@/services/types/api";
 
 export class ApiError extends Error {
@@ -87,6 +88,19 @@ export async function apiRequest<T>(
         : GENERIC_ERROR;
     const errors = Array.isArray(errorBody.errors) ? errorBody.errors : undefined;
     throw new ApiError(message, response.status, errors);
+  }
+
+  // A successful mutation to a protected business endpoint may have produced a
+  // notification on the backend. Signal the Notification Store to refresh
+  // instantly (F2.1) — excluding the notification/auth endpoints themselves to
+  // avoid feedback loops. This is the WS-free "instant on your own action" path.
+  if (
+    auth &&
+    method !== "GET" &&
+    !path.startsWith("/notifications") &&
+    !path.startsWith("/auth")
+  ) {
+    emitClientEvent("data:mutated");
   }
 
   return payload as T;

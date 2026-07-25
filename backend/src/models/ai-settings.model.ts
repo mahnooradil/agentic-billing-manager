@@ -26,6 +26,16 @@ export interface IAiSettings {
   /** Last four characters of the raw key, for a masked display hint. */
   apiKeyLast4: string;
   model: string;
+  /**
+   * Optional sampling temperature (0–2). When unset, no temperature is sent and
+   * the provider default applies — byte-for-byte identical to pre-F7 behavior.
+   */
+  temperature?: number;
+  /**
+   * Optional max response tokens. When unset, non-Claude providers send no cap
+   * and Claude keeps its built-in 1024 default (pre-F7 behavior preserved).
+   */
+  maxTokens?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -63,6 +73,18 @@ const aiSettingsSchema = new Schema<IAiSettings, AiSettingsModel>(
       required: [true, "Model name is required"],
       trim: true,
       maxlength: [100, "Model name must be at most 100 characters"],
+    },
+    temperature: {
+      type: Number,
+      min: [0, "Temperature must be at least 0"],
+      max: [2, "Temperature must be at most 2"],
+      // No default: unset means "use the provider default" (pre-F7 behavior).
+    },
+    maxTokens: {
+      type: Number,
+      min: [1, "Max tokens must be at least 1"],
+      max: [8192, "Max tokens must be at most 8192"],
+      // No default: unset means "no explicit cap" (Claude keeps its 1024 default).
     },
   },
   {

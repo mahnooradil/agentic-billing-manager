@@ -24,11 +24,15 @@ export function SectionHeader({
       )}
     >
       <div className="space-y-0.5">
-        <h2 className="font-heading text-lg font-medium tracking-tight">
+        <h2 className="flex items-center gap-2.5 font-heading text-lg font-medium tracking-tight">
+          <span
+            aria-hidden
+            className="h-4 w-1 shrink-0 rounded-full bg-brand-gradient"
+          />
           {title}
         </h2>
         {description ? (
-          <p className="text-sm text-muted-foreground">{description}</p>
+          <p className="pl-3.5 text-sm text-muted-foreground">{description}</p>
         ) : null}
       </div>
       {actions ? (

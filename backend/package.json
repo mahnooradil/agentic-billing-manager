@@ -4,6 +4,9 @@
   "description": "Backend API for the Agentic AI-Based Intelligent Billing Manager",
   "main": "dist/server.js",
   "type": "commonjs",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec tsx src/server.ts",
     "build": "tsc && tsc-alias",

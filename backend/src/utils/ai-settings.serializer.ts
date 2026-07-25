@@ -13,6 +13,10 @@ export interface PublicAiSettings {
   hasApiKey: boolean;
   /** Masked hint, e.g. "••••••••ab12". Empty when no key is stored. */
   maskedApiKey: string;
+  /** Sampling temperature (0–2), or null when unset (provider default). */
+  temperature: number | null;
+  /** Max response tokens, or null when unset (no explicit cap). */
+  maxTokens: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,6 +31,8 @@ export function toPublicAiSettings(
     model: settings.model,
     hasApiKey: Boolean(last4),
     maskedApiKey: last4 ? `••••••••${last4}` : "",
+    temperature: settings.temperature ?? null,
+    maxTokens: settings.maxTokens ?? null,
     createdAt: settings.createdAt,
     updatedAt: settings.updatedAt,
   };

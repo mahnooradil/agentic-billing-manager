@@ -6,6 +6,7 @@
 import { api } from "@/services/api/client";
 import type { ApiSuccess } from "@/services/types/api";
 import type {
+  AdvancedAnalyticsData,
   AnalyticsOverviewData,
   AnalyticsRange,
 } from "@/services/types/analytics";
@@ -16,5 +17,14 @@ export function getAnalyticsOverview(
 ): Promise<ApiSuccess<AnalyticsOverviewData>> {
   return api.get<ApiSuccess<AnalyticsOverviewData>>(
     `/analytics/overview?range=${encodeURIComponent(range)}`
+  );
+}
+
+/** GET /analytics/advanced?range=… (F6 billing intelligence) */
+export function getAdvancedAnalytics(
+  range: AnalyticsRange
+): Promise<ApiSuccess<AdvancedAnalyticsData>> {
+  return api.get<ApiSuccess<AdvancedAnalyticsData>>(
+    `/analytics/advanced?range=${encodeURIComponent(range)}`
   );
 }

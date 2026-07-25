@@ -18,6 +18,8 @@ import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { PageWrapper } from "@/components/common/page-wrapper";
 import { SectionHeader } from "@/components/common/section-header";
 import { cn } from "@/lib/utils";
+import { formatDateTime } from "@/lib/format";
+import { usePreferences } from "@/services/preferences/preferences-store";
 import { ApiError } from "@/services/api/client";
 import {
   getRecommendations,
@@ -54,6 +56,7 @@ const SEVERITY_STYLES: Record<RecommendationSeverity, string> = {
  * updates, and lets the user manage each recommendation's lifecycle.
  */
 export function AiRecommendations() {
+  const { general } = usePreferences();
   const [filter, setFilter] = React.useState<RecommendationStatusFilter>("active");
   const [status, setStatus] = React.useState<ViewStatus>("loading");
   const [items, setItems] = React.useState<Recommendation[]>([]);
@@ -136,7 +139,7 @@ export function AiRecommendations() {
         </div>
         {lastUpdatedAt ? (
           <span className="text-xs text-muted-foreground">
-            Last updated {new Date(lastUpdatedAt).toLocaleString()}
+            Last updated {formatDateTime(lastUpdatedAt, general)}
           </span>
         ) : null}
       </div>
@@ -162,7 +165,7 @@ export function AiRecommendations() {
           }
         />
       ) : (
-        <div className="space-y-3">
+        <div className="reveal-group space-y-3">
           {items.map((rec) => (
             <RecommendationCard key={rec.id} rec={rec} onChangeStatus={changeStatus} />
           ))}
@@ -180,12 +183,16 @@ function RecommendationCard({
   onChangeStatus: (id: string, next: RecommendationStatus) => void;
 }) {
   return (
-    <Card>
+    <Card className="hover-lift group">
       <CardContent className="space-y-2">
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-2">
-            <Lightbulb className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-            <h3 className="font-heading text-base font-medium">{rec.title}</h3>
+          <div className="flex items-start gap-2.5">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/15 transition-transform duration-300 group-hover:scale-105">
+              <Lightbulb className="size-4" />
+            </span>
+            <h3 className="mt-0.5 font-heading text-base font-medium leading-tight">
+              {rec.title}
+            </h3>
           </div>
           <span
             className={cn(

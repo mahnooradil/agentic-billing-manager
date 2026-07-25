@@ -17,7 +17,10 @@ export function LoadingSpinner({ className, label }: LoadingSpinnerProps) {
       aria-live="polite"
       className="flex flex-col items-center justify-center gap-3 p-10 text-muted-foreground"
     >
-      <Loader2 className={cn("size-6 animate-spin", className)} />
+      <span className="relative flex size-9 items-center justify-center">
+        <span className="absolute inset-0 rounded-full bg-primary/15 blur-md" />
+        <Loader2 className={cn("relative size-6 animate-spin text-primary", className)} />
+      </span>
       {label ? <p className="text-sm">{label}</p> : null}
       <span className="sr-only">{label ?? "Loading"}</span>
     </div>

@@ -1,6 +1,9 @@
 import { Router } from "express";
 
-import { getAnalyticsOverview } from "@/controllers/analytics.controller";
+import {
+  getAnalyticsOverview,
+  getAdvancedAnalytics,
+} from "@/controllers/analytics.controller";
 import { authenticate } from "@/middlewares/auth.middleware";
 
 const router = Router();
@@ -9,5 +12,6 @@ const router = Router();
 router.use(authenticate);
 
 router.get("/overview", getAnalyticsOverview);
+router.get("/advanced", getAdvancedAnalytics);
 
 export default router;

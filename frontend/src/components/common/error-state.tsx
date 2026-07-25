@@ -25,12 +25,12 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        "flex flex-col items-center justify-center rounded-xl border border-destructive/20 bg-destructive/5 p-10 text-center",
+        "flex flex-col items-center justify-center rounded-2xl border border-destructive/20 bg-destructive/5 p-12 text-center backdrop-blur-sm",
         className
       )}
     >
-      <div className="mb-4 rounded-full bg-destructive/10 p-3">
-        <AlertTriangle className="size-6 text-destructive" />
+      <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-destructive/10 text-destructive ring-1 ring-destructive/15">
+        <AlertTriangle className="size-6" />
       </div>
       <h3 className="font-heading text-base font-medium">{title}</h3>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">
