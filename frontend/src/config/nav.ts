@@ -9,6 +9,7 @@ import {
   CreditCard,
   BarChart3,
   Sparkles,
+  BotMessageSquare,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -25,5 +26,6 @@ export const dashboardNav: NavItem[] = [
   { title: "Billing", href: "/dashboard/billing", icon: CreditCard },
   { title: "Analytics", href: "/dashboard/usage", icon: BarChart3 },
   { title: "AI Assistant", href: "/dashboard/ai", icon: Sparkles },
+  { title: "Billing Agent", href: "/dashboard/agent", icon: BotMessageSquare },
   { title: "Settings", href: "/dashboard/settings", icon: Settings },
 ];

@@ -15,7 +15,9 @@ import { findAdapter, listAdapters } from "@/services/integrations/registry";
 import {
   isPipedreamConfigured,
   searchApps,
+  getAppCustomFields,
   type CatalogApp,
+  type PipedreamCustomField,
 } from "@/services/integrations/pipedream";
 import type { FieldSpec } from "@/services/integrations/types";
 
@@ -78,6 +80,45 @@ function normalizePipedreamAuth(authType: string | null): ResolvedAuthType {
   return authType?.toLowerCase() === "oauth" ? "oauth" : "keys";
 }
 
+// ── Short-TTL in-memory cache for a "keys" app's required-field list. ──
+const fieldsCache = new Map<string, { at: number; fields: PipedreamCustomField[] }>();
+
+/** Cached lookup of one Pipedream app's required credential fields. */
+async function cachedAppFields(appId: string): Promise<PipedreamCustomField[]> {
+  const hit = fieldsCache.get(appId);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.fields;
+  const fields = await getAppCustomFields(appId);
+  fieldsCache.set(appId, { at: Date.now(), fields });
+  return fields;
+}
+
+/** First `[label](url)` markdown link in a Pipedream field description, if any. */
+function extractHelpUrl(description: string | null): string | undefined {
+  return description?.match(/\[[^\]]+\]\((https?:\/\/[^\s)]+)\)/)?.[1];
+}
+
+/** Converts Pipedream's raw custom fields into our standard field spec shape. */
+function toFieldSpecs(customFields: PipedreamCustomField[]): FieldSpec[] {
+  return customFields.map((f) => ({
+    name: f.name,
+    label: f.label,
+    type: f.options?.length ? "select" : f.type === "password" ? "password" : "text",
+    required: !f.optional,
+    help: f.description ?? undefined,
+    helpUrl: extractHelpUrl(f.description),
+    ...(f.options?.length ? { options: f.options } : {}),
+  }));
+}
+
+/** A field's label, with its fixed choices inline when it's a "select" field —
+ *  e.g. "Environment (Sandbox or Live)" — so the exact valid values are never
+ *  left for the AI to guess at. */
+function fieldSummary(field: FieldSpec): string {
+  return field.options?.length
+    ? `${field.label} (${field.options.map((o) => o.label).join(" or ")})`
+    : field.label;
+}
+
 /** Native adapters whose name matches the query (case-insensitive substring). */
 function nativeMatches(query: string): PlatformMatch[] {
   const q = query.trim().toLowerCase();
@@ -132,7 +173,9 @@ function whereToGet(fields: FieldSpec[]) {
 /**
  * Resolves exactly how to connect one platform. Native adapters win (Channel B,
  * direct secure form); otherwise the live Pipedream catalog decides Channel A
- * (OAuth or vaulted keys — Pipedream collects the fields, so none are returned).
+ * (OAuth — a plain sign-in, nothing to pre-collect — or "keys", where we also
+ * fetch that app's exact field list so the AI can explain what's needed before
+ * the user even opens the popup).
  */
 export async function getConnectionRequirements(
   platform: string
@@ -165,6 +208,12 @@ export async function getConnectionRequirements(
 
   if (match) {
     const authType = normalizePipedreamAuth(match.authType);
+    const isKeys = authType !== "oauth";
+    // Only "keys" apps have fields worth pre-fetching — an OAuth popup is a
+    // plain sign-in, nothing to collect ahead of time.
+    const customFields = isKeys ? await cachedAppFields(match.id) : [];
+    const fields = customFields.length ? toFieldSpecs(customFields) : undefined;
+
     return {
       supported: true,
       platform: match.nameSlug,
@@ -172,16 +221,19 @@ export async function getConnectionRequirements(
       source: "pipedream",
       authType,
       method: authType === "oauth" ? "pipedream_oauth" : "pipedream_keys",
+      ...(fields ? { fields, whereToGet: whereToGet(fields) } : {}),
       guidance:
         authType === "oauth"
           ? `${match.name} connects through a secure Pipedream popup where you sign in to ${match.name} directly. Your credentials stay with the provider and Pipedream — this app never sees them.`
-          : `${match.name} connects through a secure Pipedream popup that collects and vaults the required fields. This app never sees your credentials.`,
+          : fields
+            ? `${match.name} connects through a secure Pipedream popup that will ask for: ${fields.map(fieldSummary).join(", ")}. Pipedream collects and vaults these directly — this app never sees them.`
+            : `${match.name} connects through a secure Pipedream popup that collects and vaults the required fields. This app never sees your credentials.`,
     };
   }
 
   return {
     supported: false,
     platform: name,
-    guidance: `${name} isn't available yet through a native connector or Pipedream. It can't be connected automatically right now.`,
+    guidance: `${name} isn't available for live auto-connect yet (no native connector or Pipedream integration for it). You can still track it in this app: go to the Platforms page, add "${name}" as a platform, and log its billing manually on the Billing page. If it ever becomes available for live connection, you'll be able to switch to that later.`,
   };
 }

@@ -18,11 +18,13 @@ export type AuthType = "api_key" | "oauth" | "manual";
 export interface FieldSpec {
   name: string;
   label: string;
-  type: "password" | "text" | "url";
+  type: "password" | "text" | "url" | "select";
   required: boolean;
   placeholder?: string;
   help?: string;
   helpUrl?: string;
+  /** Fixed set of valid values — present only when `type` is "select". */
+  options?: { label: string; value: string }[];
 }
 
 /** What a native (Channel B) adapter needs to connect — surfaced to the AI as

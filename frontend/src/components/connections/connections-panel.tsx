@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -11,12 +12,16 @@ import { ApiError } from "@/services/api/client";
 import { toast } from "@/components/notifications/toast-store";
 import { listPlatformConnections } from "@/services/connections/platform-connections.service";
 import {
+  PLATFORM_BY_KEY,
   PLATFORM_CATALOG,
   PLATFORM_CATEGORIES,
   integrationCardMeta,
   type CardMeta,
 } from "@/lib/platform-catalog";
-import type { PlatformConnection } from "@/services/types/platform-connections";
+import type {
+  ConnectionPlatform,
+  PlatformConnection,
+} from "@/services/types/platform-connections";
 import { ConnectionCard } from "./connection-card";
 import { ConnectApiKeyDialog } from "./connect-api-key-dialog";
 import { DisconnectDialog } from "./disconnect-dialog";
@@ -35,8 +40,30 @@ const CONNECTABLE = PLATFORM_CATALOG.filter(
  * page. Connect API-key providers (verified against the provider, credential
  * encrypted at rest), reconnect, and disconnect. No fake status: a card reads
  * "Connected" only after verification succeeds.
+ *
+ * Wrapped in Suspense because the inner component reads `useSearchParams()`
+ * (deep-link support for the Billing Agent's "Connect now" button), which
+ * Next.js requires to be Suspense-bounded.
  */
 export function ConnectionsPanel() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex items-center justify-center py-12">
+          <LoadingSpinner label="Loading integrations…" />
+        </div>
+      }
+    >
+      <ConnectionsPanelInner />
+    </React.Suspense>
+  );
+}
+
+function ConnectionsPanelInner() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const [status, setStatus] = React.useState<ViewStatus>("loading");
   const [connections, setConnections] = React.useState<PlatformConnection[]>([]);
   const [loadError, setLoadError] = React.useState("");
@@ -50,6 +77,7 @@ export function ConnectionsPanel() {
   }>({ open: false, meta: null, connection: null });
 
   const [catalogOpen, setCatalogOpen] = React.useState(false);
+  const [pipedreamQuery, setPipedreamQuery] = React.useState("");
 
   const [disconnect, setDisconnect] = React.useState<{
     open: boolean;
@@ -102,6 +130,43 @@ export function ConnectionsPanel() {
     [connections]
   );
 
+  // Deep-link from the Billing Agent chat ("Connect X now" button) — auto-opens
+  // the right dialog for that exact platform, pre-selected, once the
+  // connections list has loaded (needed to tell connect vs reconnect apart).
+  const autoTriggeredRef = React.useRef(false);
+  React.useEffect(() => {
+    if (status !== "ready" || autoTriggeredRef.current) return;
+    const connectParam = searchParams.get("connect");
+    if (!connectParam) return;
+    autoTriggeredRef.current = true;
+
+    let ignore = false;
+    (async () => {
+      await Promise.resolve();
+      if (ignore) return;
+
+      const sourceParam = searchParams.get("source");
+      const labelParam = searchParams.get("label") ?? connectParam;
+
+      if (sourceParam === "native") {
+        const meta = PLATFORM_BY_KEY[connectParam as ConnectionPlatform] as
+          | CardMeta
+          | undefined;
+        if (meta && meta.connectionType === "api_key") {
+          setKeyDialog({ open: true, meta, connection: byPlatform.get(meta.key) ?? null });
+        }
+      } else {
+        setPipedreamQuery(labelParam);
+        setCatalogOpen(true);
+      }
+
+      router.replace(pathname, { scroll: false });
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [status, searchParams, byPlatform, router, pathname]);
+
   const handleConnect = (meta: CardMeta) =>
     setKeyDialog({ open: true, meta, connection: null });
   const handleReconnect = (meta: CardMeta, connection: PlatformConnection) =>
@@ -120,7 +185,12 @@ export function ConnectionsPanel() {
         title="Integrations"
         description="Connect any of thousands of platforms via Pipedream, or connect an AI provider with a verified API key. Credentials are encrypted and never shown again."
         actions={
-          <Button onClick={() => setCatalogOpen(true)}>
+          <Button
+            onClick={() => {
+              setPipedreamQuery("");
+              setCatalogOpen(true);
+            }}
+          >
             <Plus />
             Connect a platform
           </Button>
@@ -194,9 +264,11 @@ export function ConnectionsPanel() {
       ) : null}
 
       <PipedreamCatalogDialog
+        key={pipedreamQuery}
         open={catalogOpen}
         onOpenChange={setCatalogOpen}
         onConnected={handleDone}
+        initialQuery={pipedreamQuery}
       />
 
       <DisconnectDialog

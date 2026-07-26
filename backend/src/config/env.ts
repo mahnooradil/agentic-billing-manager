@@ -32,6 +32,12 @@ export const env = {
   pipedreamClientSecret: process.env.PIPEDREAM_CLIENT_SECRET ?? "",
   pipedreamProjectId: process.env.PIPEDREAM_PROJECT_ID ?? "",
   pipedreamEnvironment: process.env.PIPEDREAM_ENVIRONMENT ?? "development",
+  // Claude Managed Agents (Billing Advisor Agent) — our own Anthropic account,
+  // separate from each user's personal AiSettings provider key. Agent/environment
+  // are pre-created once via the Console; only their IDs live here.
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
+  anthropicAgentId: process.env.ANTHROPIC_AGENT_ID ?? "",
+  anthropicEnvironmentId: process.env.ANTHROPIC_ENVIRONMENT_ID ?? "",
 } as const;
 
 export const isProduction = env.nodeEnv === "production";

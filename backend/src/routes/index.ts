@@ -12,6 +12,7 @@ import recommendationRoutes from "@/routes/recommendation.routes";
 import notificationRoutes from "@/routes/notification.routes";
 import userSettingsRoutes from "@/routes/user-settings.routes";
 import platformConnectionRoutes from "@/routes/platform-connection.routes";
+import agentChatRoutes from "@/routes/agent-chat.routes";
 
 /**
  * Root API router. All feature routers are mounted here so the
@@ -32,5 +33,6 @@ router.use("/recommendations", recommendationRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/settings", userSettingsRoutes);
 router.use("/platform-connections", platformConnectionRoutes);
+router.use("/agent/chat", agentChatRoutes);
 
 export default router;

@@ -76,6 +76,19 @@ export interface PipedreamAccount {
   revoked: boolean;
 }
 
+/** One credential field a "keys" auth-type app's Connect popup will ask for.
+ *  Metadata only, parsed from Pipedream's `custom_fields_json` — never a value. */
+export interface PipedreamCustomField {
+  name: string;
+  label: string;
+  description: string | null;
+  /** Pipedream's own field type, e.g. "password", "options", or unset (plain text). */
+  type: string | null;
+  optional: boolean;
+  /** Fixed set of valid values — present only when `type` is "options". */
+  options: { label: string; value: string }[] | null;
+}
+
 /** Raw Pipedream account fields we read (safe subset — never credentials). */
 interface AccountShape {
   id?: string;
@@ -188,6 +201,54 @@ export async function searchApps(
       imgSrc: a.img_src ?? null,
       authType: a.auth_type ?? null,
     }));
+}
+
+/**
+ * Fetches and parses one app's required credential fields — only meaningful
+ * for `auth_type: "keys"` apps (OAuth apps have nothing to pre-collect).
+ * Lets the assistant tell the user exactly what a "keys" app's Connect popup
+ * will ask for, and where to get each value, BEFORE they open it. Metadata
+ * only (field names/labels/help text) — never a value. Degrades to `[]` on
+ * any failure (unconfigured, unreachable, malformed) so callers can always
+ * fall back to the generic guidance instead of erroring the whole turn.
+ */
+export async function getAppCustomFields(appId: string): Promise<PipedreamCustomField[]> {
+  if (!isPipedreamConfigured()) return [];
+  try {
+    const detail = (await pdFetch(`/apps/${encodeURIComponent(appId)}`)) as {
+      data?: { custom_fields_json?: string | null };
+    } | null;
+    const raw = detail?.data?.custom_fields_json;
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw) as Array<{
+      name?: string;
+      label?: string;
+      description?: string | null;
+      type?: string;
+      optional?: boolean | null;
+      options?: Array<{ label?: string; value?: string }> | null;
+    }>;
+    return parsed
+      .filter((f): f is typeof f & { name: string } => Boolean(f.name))
+      .map((f) => ({
+        name: f.name,
+        label: f.label ?? f.name,
+        description: f.description ?? null,
+        type: f.type ?? null,
+        optional: Boolean(f.optional),
+        options: Array.isArray(f.options)
+          ? f.options
+              .filter(
+                (o): o is { label: string; value: string } =>
+                  typeof o?.label === "string" && typeof o?.value === "string"
+              )
+              .map((o) => ({ label: o.label, value: o.value }))
+          : null,
+      }));
+  } catch {
+    return [];
+  }
 }
 
 /** Mints a short-lived Connect token so the browser can connect an account on

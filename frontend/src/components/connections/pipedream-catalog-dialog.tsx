@@ -27,6 +27,8 @@ interface PipedreamCatalogDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConnected: (message: string) => void;
+  /** Pre-fills the search box when the dialog opens (e.g. deep-linked from the Billing Agent). */
+  initialQuery?: string;
 }
 
 type Status = "loading" | "error" | "ready";
@@ -46,8 +48,11 @@ export function PipedreamCatalogDialog({
   open,
   onOpenChange,
   onConnected,
+  initialQuery,
 }: PipedreamCatalogDialogProps) {
-  const [query, setQuery] = React.useState("");
+  // Initial value only — the parent forces a remount (via a `key` prop) when
+  // it wants a fresh initialQuery, so this never needs to be re-synced later.
+  const [query, setQuery] = React.useState(initialQuery ?? "");
   const [status, setStatus] = React.useState<Status>("loading");
   const [apps, setApps] = React.useState<CatalogApp[]>([]);
   const [configured, setConfigured] = React.useState(true);
@@ -115,6 +120,20 @@ export function PipedreamCatalogDialog({
           setConnecting(null);
         },
       });
+
+      // Fallback for a closed/cancelled popup: Pipedream's SDK doesn't always
+      // fire onError when the user just closes or backs out of it, which used
+      // to leave `connecting` stuck forever (blocking every other Connect
+      // button). The main window regains focus once the popup closes either
+      // way, so treat "still connecting this exact app a moment after focus
+      // returns" as cancelled.
+      const handleFocus = () => {
+        window.removeEventListener("focus", handleFocus);
+        setTimeout(() => {
+          setConnecting((current) => (current === app.nameSlug ? null : current));
+        }, 1000);
+      };
+      window.addEventListener("focus", handleFocus);
     } catch (error) {
       setActionError(
         error instanceof ApiError
