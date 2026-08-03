@@ -1,6 +1,6 @@
 import { CircleCheck, Clock, Receipt, TriangleAlert, Wallet } from "lucide-react";
 
-import { StatCard } from "@/components/common/stat-card";
+import { FlatStatCard, type FlatStatTone } from "@/components/common/flat-stat-card";
 import { formatNumber } from "@/lib/format";
 import type { BillingStats } from "@/services/types/billing";
 
@@ -9,30 +9,59 @@ interface BillingStatsGridProps {
 }
 
 /**
- * Billing dashboard KPI row. Reuses the shared StatCard so it matches the
- * overview dashboard. Counts come from the backend (all records, not the
- * filtered view). Revenue is the sum of paid invoice amounts, formatted via the
- * shared formatting layer (currency-agnostic — it can span multiple currencies).
+ * Billing KPI row — flat, static cards (no gradient glow, no hover motion),
+ * each with a small color-coded icon badge so the five figures stay quick to
+ * scan at a glance.
  */
 export function BillingStatsGrid({ stats }: BillingStatsGridProps) {
-  const cards = [
-    { label: "Total Records", value: String(stats.totalRecords), hint: "All invoices", icon: Receipt },
-    { label: "Paid", value: String(stats.paidRecords), hint: "Settled invoices", icon: CircleCheck },
-    { label: "Pending", value: String(stats.pendingRecords), hint: "Awaiting payment", icon: Clock },
-    { label: "Overdue", value: String(stats.overdueRecords), hint: "Past due", icon: TriangleAlert },
-    { label: "Total Revenue", value: formatNumber(stats.totalRevenue), hint: "Paid only", icon: Wallet },
+  const cards: {
+    label: string;
+    value: string;
+    icon: typeof Receipt;
+    tone: FlatStatTone;
+    hint: string;
+  }[] = [
+    {
+      label: "Total Records",
+      value: String(stats.totalRecords),
+      icon: Receipt,
+      tone: "neutral",
+      hint: "All invoices, any status",
+    },
+    {
+      label: "Paid",
+      value: String(stats.paidRecords),
+      icon: CircleCheck,
+      tone: "success",
+      hint: "Invoices marked Paid",
+    },
+    {
+      label: "Pending",
+      value: String(stats.pendingRecords),
+      icon: Clock,
+      tone: "warning",
+      hint: "Awaiting payment",
+    },
+    {
+      label: "Overdue",
+      value: String(stats.overdueRecords),
+      icon: TriangleAlert,
+      tone: "danger",
+      hint: "Past due, unpaid",
+    },
+    {
+      label: "Total Revenue",
+      value: formatNumber(stats.totalRevenue),
+      icon: Wallet,
+      tone: "primary",
+      hint: "Sum of Paid invoices, all currencies",
+    },
   ];
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       {cards.map((card) => (
-        <StatCard
-          key={card.label}
-          label={card.label}
-          value={card.value}
-          hint={card.hint}
-          icon={card.icon}
-        />
+        <FlatStatCard key={card.label} {...card} />
       ))}
     </div>
   );

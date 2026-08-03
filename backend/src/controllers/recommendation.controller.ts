@@ -4,7 +4,8 @@
  * Read + lifecycle endpoints over the persistent Recommendation collection, plus
  * an internal `/refresh` for ops/debugging (not surfaced in the UI). Generation
  * itself lives in the Recommendation Engine; this layer stays thin. All routes
- * are protected by `authenticate`.
+ * are protected by `authenticate`, and every query is scoped to the
+ * authenticated user.
  */
 import { asyncHandler } from "@/utils/asyncHandler";
 import { AppError } from "@/utils/appError";
@@ -20,8 +21,14 @@ import { isValidObjectId } from "mongoose";
 
 /** GET /api/recommendations?status=active|dismissed|completed|all */
 export const listRecommendations = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new AppError("Authentication required", 401);
+  }
+
   const { status } = listRecommendationsQuerySchema.parse(req.query);
-  const filter = status === "all" ? {} : { status };
+  const filter =
+    status === "all" ? { user: user._id } : { user: user._id, status };
 
   const docs = await Recommendation.find(filter).sort({ updatedAt: -1 });
   const recommendations = docs.map(toPublicRecommendation);
@@ -38,13 +45,18 @@ export const listRecommendations = asyncHandler(async (req, res) => {
 
 /** PATCH /api/recommendations/:id/status — dismiss/complete/reactivate. */
 export const updateRecommendationStatus = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new AppError("Authentication required", 401);
+  }
+
   const id = req.params.id as string;
   if (!isValidObjectId(id)) {
     throw new AppError("Recommendation not found", 404);
   }
 
   const { status } = req.body as UpdateRecommendationStatusInput;
-  const doc = await Recommendation.findById(id);
+  const doc = await Recommendation.findOne({ _id: id, user: user._id });
   if (!doc) {
     throw new AppError("Recommendation not found", 404);
   }
@@ -70,9 +82,10 @@ export const refreshRecommendations = asyncHandler(async (req, res) => {
   }
 
   const result = await runRefresh(user._id.toString());
-  const docs = await Recommendation.find({ status: "active" }).sort({
-    updatedAt: -1,
-  });
+  const docs = await Recommendation.find({
+    user: user._id,
+    status: "active",
+  }).sort({ updatedAt: -1 });
 
   sendSuccess(res, 200, "Recommendation refresh completed", {
     result,

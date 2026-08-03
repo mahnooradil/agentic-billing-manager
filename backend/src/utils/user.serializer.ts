@@ -12,6 +12,7 @@ export function toPublicUser(user: UserDocument): PublicUser {
     fullName: user.fullName,
     email: user.email,
     profilePicture: user.profilePicture,
+    planTier: user.planTier,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

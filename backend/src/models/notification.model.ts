@@ -30,6 +30,8 @@ export const NOTIFICATION_CATEGORIES = [
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
 export interface INotification {
+  /** Owning user — every query MUST be scoped by this. */
+  user: Types.ObjectId;
   title: string;
   message: string;
   severity: NotificationSeverity;
@@ -51,6 +53,12 @@ type NotificationModel = Model<INotification>;
 
 const notificationSchema = new Schema<INotification, NotificationModel>(
   {
+    user: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
     title: { type: String, required: true, trim: true, maxlength: 200 },
     message: { type: String, required: true, trim: true, maxlength: 1000 },
     severity: {
@@ -68,7 +76,7 @@ const notificationSchema = new Schema<INotification, NotificationModel>(
     read: { type: Boolean, default: false, index: true },
     archived: { type: Boolean, default: false, index: true },
     source: { type: String, default: "notification-engine" },
-    signature: { type: String, required: true, index: true },
+    signature: { type: String, required: true },
     recommendationId: {
       type: Schema.Types.ObjectId,
       ref: "Recommendation",
@@ -85,6 +93,9 @@ const notificationSchema = new Schema<INotification, NotificationModel>(
     },
   }
 );
+
+// Dedup lookup is "this user's notification with this signature".
+notificationSchema.index({ user: 1, signature: 1 });
 
 export const Notification = model<INotification, NotificationModel>(
   "Notification",

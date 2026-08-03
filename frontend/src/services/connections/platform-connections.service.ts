@@ -55,12 +55,15 @@ export function updatePlatformConnection(
   );
 }
 
-/** GET /platform-connections/catalog?q= — live Pipedream app catalog. */
+/** GET /platform-connections/catalog?q=&limit= — live Pipedream app catalog. */
 export function getPipedreamCatalog(
-  query: string
+  query: string,
+  limit?: number
 ): Promise<ApiSuccess<PipedreamCatalogData>> {
+  const params = new URLSearchParams({ q: query });
+  if (limit) params.set("limit", String(limit));
   return api.get<ApiSuccess<PipedreamCatalogData>>(
-    `/platform-connections/catalog?q=${encodeURIComponent(query)}`
+    `/platform-connections/catalog?${params.toString()}`
   );
 }
 

@@ -13,6 +13,7 @@ import {
   model,
   type HydratedDocument,
   type Model,
+  type Types,
 } from "mongoose";
 
 /** Lifecycle status. History is preserved — nothing is auto-deleted. */
@@ -32,6 +33,8 @@ export const RECOMMENDATION_RESOLVERS = ["ai", "user"] as const;
 export type RecommendationResolver = (typeof RECOMMENDATION_RESOLVERS)[number];
 
 export interface IRecommendation {
+  /** Owning user — every query MUST be scoped by this. */
+  user: Types.ObjectId;
   title: string;
   detail: string;
   severity: RecommendationSeverity;
@@ -56,6 +59,12 @@ type RecommendationModel = Model<IRecommendation>;
 
 const recommendationSchema = new Schema<IRecommendation, RecommendationModel>(
   {
+    user: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
     title: { type: String, required: true, trim: true, maxlength: 200 },
     detail: { type: String, required: true, trim: true, maxlength: 1000 },
     severity: {
@@ -72,7 +81,7 @@ const recommendationSchema = new Schema<IRecommendation, RecommendationModel>(
       default: "active",
       index: true,
     },
-    signature: { type: String, required: true, index: true },
+    signature: { type: String, required: true },
     resolvedBy: { type: String, enum: RECOMMENDATION_RESOLVERS, default: null },
     provider: { type: String },
     model: { type: String },
@@ -88,6 +97,9 @@ const recommendationSchema = new Schema<IRecommendation, RecommendationModel>(
     },
   }
 );
+
+// Reconciliation looks up "this user's recommendation with this signature".
+recommendationSchema.index({ user: 1, signature: 1 });
 
 export const Recommendation = model<IRecommendation, RecommendationModel>(
   "Recommendation",

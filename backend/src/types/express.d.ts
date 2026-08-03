@@ -10,6 +10,8 @@ declare global {
     interface Request {
       /** Present only on routes guarded by the `authenticate` middleware. */
       user?: UserDocument;
+      /** The current token's session id (jti), when the token carries one. */
+      sessionJti?: string;
     }
   }
 }

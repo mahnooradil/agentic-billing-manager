@@ -33,12 +33,16 @@ export interface NotificationSnapshot {
   status: NotificationStatus;
 }
 
-const POLL_INTERVAL_MS = 20_000;
+const POLL_INTERVAL_MS = 5_000;
 // After a mutation by the current user, the backend creates the notification
 // ASYNCHRONOUSLY (fire-and-forget engine), so an immediate refresh can run before
-// it exists. A dense, fast burst catches it within ~300ms of it being persisted
-// (perceived real-time). Polling remains only a fallback. No WebSockets/SSE.
-const MUTATION_REFRESH_DELAYS_MS = [120, 350, 700, 1200, 2000];
+// it exists. A dense, fast burst catches the common case (billing/platform rules,
+// no AI call) within ~1s of it being persisted, and keeps checking with backoff
+// for the slower AI-recommendation path — so the 5s poll is a rare fallback, not
+// the normal delivery path. No WebSockets/SSE.
+const MUTATION_REFRESH_DELAYS_MS = [
+  150, 400, 700, 1000, 1500, 2200, 3200, 4500, 6000, 8000, 10500, 13500, 17000,
+];
 
 const LOADING_SNAPSHOT: NotificationSnapshot = {
   notifications: [],

@@ -1,8 +1,8 @@
 /**
- * User settings (preferences) types — mirror the backend `/settings` contract
- * (Phase F7). The AI PROVIDER config (provider/model/key/temperature/maxTokens)
- * is a separate concern and lives in `types/ai.ts`; this file is the non-secret
- * application preferences.
+ * User settings (preferences) types — mirror the backend `/settings` contract.
+ * Only real, wired preferences live here (general formatting, notification
+ * toggles, appearance). Profile identity (full name) is a separate concern —
+ * see `services/types/auth.ts` + `PATCH /api/auth/profile`.
  */
 export const DATE_FORMATS = ["ISO", "US", "EU", "LONG"] as const;
 export type DateFormat = (typeof DATE_FORMATS)[number];
@@ -18,20 +18,25 @@ export const LANGUAGES = [
 ] as const;
 export type Language = (typeof LANGUAGES)[number];
 
-export const SETTINGS_ANALYTICS_RANGES = ["all", "3m", "6m", "12m"] as const;
-export type SettingsAnalyticsRange = (typeof SETTINGS_ANALYTICS_RANGES)[number];
-
-export const RECOMMENDATION_FOCUSES = ["all", "overdue", "spend"] as const;
-export type RecommendationFocus = (typeof RECOMMENDATION_FOCUSES)[number];
-
 export const THEMES = ["light", "dark", "system"] as const;
 export type Theme = (typeof THEMES)[number];
+
+/** Where the app lands right after login. */
+export const LANDING_PAGES = ["overview", "billing", "usage"] as const;
+export type LandingPage = (typeof LANDING_PAGES)[number];
+
+export const LANDING_PAGE_PATHS: Record<LandingPage, string> = {
+  overview: "/dashboard/overview",
+  billing: "/dashboard/billing",
+  usage: "/dashboard/usage",
+};
 
 export interface GeneralSettings {
   currency: string;
   dateFormat: DateFormat;
   timezone: string;
   language: Language;
+  defaultLandingPage: LandingPage;
 }
 
 export interface NotificationSettings {
@@ -42,35 +47,6 @@ export interface NotificationSettings {
   highSpendThreshold: number;
 }
 
-export interface AnalyticsSettings {
-  defaultRange: SettingsAnalyticsRange;
-  trendMonths: number;
-  concentrationThreshold: number;
-  highCostThreshold: number;
-  growthAlertThreshold: number;
-}
-
-export interface AutomationSettings {
-  enabled: boolean;
-  autoApprove: boolean;
-}
-
-export interface MemorySettings {
-  enabled: boolean;
-  maxRecall: number;
-  summarizeTrigger: number;
-  keepRecent: number;
-}
-
-export interface RecommendationSettings {
-  maxCount: number;
-  defaultFocus: RecommendationFocus;
-}
-
-export interface WorkspaceSettings {
-  displayName: string;
-}
-
 export interface AppearanceSettings {
   theme: Theme;
 }
@@ -78,11 +54,6 @@ export interface AppearanceSettings {
 export interface UserSettings {
   general: GeneralSettings;
   notifications: NotificationSettings;
-  analytics: AnalyticsSettings;
-  automation: AutomationSettings;
-  memory: MemorySettings;
-  recommendations: RecommendationSettings;
-  workspace: WorkspaceSettings;
   appearance: AppearanceSettings;
 }
 
@@ -108,11 +79,6 @@ export function toUserSettings(resource: UserSettingsResource): UserSettings {
   return {
     general: resource.general,
     notifications: resource.notifications,
-    analytics: resource.analytics,
-    automation: resource.automation,
-    memory: resource.memory,
-    recommendations: resource.recommendations,
-    workspace: resource.workspace,
     appearance: resource.appearance,
   };
 }
@@ -120,7 +86,13 @@ export function toUserSettings(resource: UserSettingsResource): UserSettings {
 /** Client-side defaults, mirroring the backend `DEFAULT_USER_SETTINGS`. Used so
  *  the preferences store / formatters have sensible values before load. */
 export const DEFAULT_USER_SETTINGS: UserSettings = {
-  general: { currency: "USD", dateFormat: "ISO", timezone: "UTC", language: "en-US" },
+  general: {
+    currency: "USD",
+    dateFormat: "ISO",
+    timezone: "UTC",
+    language: "en-US",
+    defaultLandingPage: "overview",
+  },
   notifications: {
     enabled: true,
     billingAlerts: true,
@@ -128,16 +100,5 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     usageAlerts: true,
     highSpendThreshold: 60,
   },
-  analytics: {
-    defaultRange: "all",
-    trendMonths: 12,
-    concentrationThreshold: 40,
-    highCostThreshold: 25,
-    growthAlertThreshold: 20,
-  },
-  automation: { enabled: true, autoApprove: false },
-  memory: { enabled: true, maxRecall: 12, summarizeTrigger: 24, keepRecent: 12 },
-  recommendations: { maxCount: 8, defaultFocus: "all" },
-  workspace: { displayName: "" },
   appearance: { theme: "system" },
 };

@@ -171,36 +171,101 @@ async function pdFetch(
   return data;
 }
 
-/** Searches the live Pipedream app catalog (empty query returns popular apps). */
+interface RawApp {
+  id?: string;
+  name_slug?: string;
+  name?: string;
+  description?: string;
+  categories?: string[];
+  img_src?: string;
+  auth_type?: string;
+}
+
+function mapApp(a: RawApp): CatalogApp {
+  return {
+    id: a.id as string,
+    nameSlug: a.name_slug as string,
+    name: a.name as string,
+    description: a.description ?? null,
+    categories: a.categories ?? [],
+    imgSrc: a.img_src ?? null,
+    authType: a.auth_type ?? null,
+  };
+}
+
+// The full catalog (~3000+ apps) is near-static, so it's fetched once (paged
+// through in full) and cached in memory rather than re-fetched on every
+// empty-query browse — Pipedream's `/apps` has no popularity ordering and no
+// `offset` param, only alphabetical pages walked via an opaque cursor.
+const FULL_CATALOG_TTL_MS = 6 * 60 * 60 * 1000;
+const FULL_CATALOG_MAX_PAGES = 60; // safety cap (~6,000 apps) against a runaway loop
+let fullCatalogCache: { apps: CatalogApp[]; fetchedAtMs: number } | null = null;
+
+async function fetchFullCatalog(): Promise<CatalogApp[]> {
+  if (
+    fullCatalogCache &&
+    Date.now() - fullCatalogCache.fetchedAtMs < FULL_CATALOG_TTL_MS
+  ) {
+    return fullCatalogCache.apps;
+  }
+
+  const apps: CatalogApp[] = [];
+  let after: string | undefined;
+  for (let page = 0; page < FULL_CATALOG_MAX_PAGES; page++) {
+    const params = new URLSearchParams({ limit: "100" });
+    if (after) params.set("after", after);
+    const data = (await pdFetch(`/apps?${params.toString()}`)) as {
+      data?: RawApp[];
+      page_info?: { end_cursor?: string; count?: number };
+    } | null;
+    const batch = (data?.data ?? [])
+      .filter((a) => a.id && a.name_slug && a.name)
+      .map(mapApp);
+    apps.push(...batch);
+
+    const count = data?.page_info?.count ?? batch.length;
+    const nextCursor = data?.page_info?.end_cursor;
+    if (count < 100 || !nextCursor) break;
+    after = nextCursor;
+  }
+
+  fullCatalogCache = { apps, fetchedAtMs: Date.now() };
+  return apps;
+}
+
+/**
+ * Searches the live Pipedream app catalog. An empty query returns the FULL
+ * catalog (cached — see `fetchFullCatalog`) so every platform is browsable
+ * without searching; a real query is forwarded to Pipedream's own search,
+ * which already ranks and limits results well.
+ */
 export async function searchApps(
   query: string,
   limit = 40
 ): Promise<CatalogApp[]> {
-  const params = new URLSearchParams();
-  if (query.trim()) params.set("q", query.trim());
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return fetchFullCatalog();
+  }
+
+  const params = new URLSearchParams({ q: trimmed });
   params.set("limit", String(Math.min(Math.max(limit, 1), 100)));
   const data = (await pdFetch(`/apps?${params.toString()}`)) as {
-    data?: Array<{
-      id?: string;
-      name_slug?: string;
-      name?: string;
-      description?: string;
-      categories?: string[];
-      img_src?: string;
-      auth_type?: string;
-    }>;
+    data?: RawApp[];
   } | null;
   return (data?.data ?? [])
     .filter((a) => a.id && a.name_slug && a.name)
-    .map((a) => ({
-      id: a.id as string,
-      nameSlug: a.name_slug as string,
-      name: a.name as string,
-      description: a.description ?? null,
-      categories: a.categories ?? [],
-      imgSrc: a.img_src ?? null,
-      authType: a.auth_type ?? null,
-    }));
+    .map(mapApp);
+}
+
+/** Best-effort startup warm-up so the first real request isn't the one
+ *  paying for the ~30-page full-catalog fetch. Never throws — a failure here
+ *  just means the first browse request warms the cache instead. */
+export function warmCatalogCache(): void {
+  if (!isPipedreamConfigured()) return;
+  void fetchFullCatalog().catch(() => {
+    // Silently retried on the next real request.
+  });
 }
 
 /**
@@ -315,4 +380,52 @@ export async function getAccount(
     healthy: acc.healthy !== false && !revoked,
     revoked,
   };
+}
+
+/** URL-safe (no padding) base64, as Pipedream's proxy path segment requires. */
+function base64UrlEncode(value: string): string {
+  return Buffer.from(value, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/**
+ * Calls a connected account's OWN third-party API through Pipedream's Connect
+ * proxy — Pipedream injects that account's real credentials (OAuth token or
+ * API key, whichever the app uses) so this app never sees or stores them. Used
+ * by the billing-sync adapters (services/billing-sync) to pull a platform's
+ * own billing/usage data on the user's behalf.
+ */
+export async function connectProxyRequest(
+  externalUserId: string,
+  accountId: string,
+  targetUrl: string,
+  init: { method?: string; headers?: Record<string, string> } = {}
+): Promise<unknown> {
+  const token = await getAccessToken();
+  const params = new URLSearchParams({
+    external_user_id: externalUserId,
+    account_id: accountId,
+  });
+  const proxyUrl = `${API_BASE}/connect/${env.pipedreamProjectId}/proxy/${base64UrlEncode(
+    targetUrl
+  )}?${params.toString()}`;
+
+  const res = await pdRawFetch(proxyUrl, {
+    method: init.method ?? "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "x-pd-environment": env.pipedreamEnvironment,
+      ...init.headers,
+    },
+  });
+  if (!res.ok) {
+    throw new AppError(
+      `The connected platform's API returned an error (${res.status}).`,
+      502
+    );
+  }
+  return res.json().catch(() => null);
 }

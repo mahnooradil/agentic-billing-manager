@@ -23,21 +23,27 @@ export const env = {
   // falls back to a key derived from JWT_SECRET. Presence validated on first use
   // (see utils/crypto.ts) so a misconfigured deploy fails with a clear message.
   aiEncryptionKey: process.env.AI_ENCRYPTION_KEY ?? "",
-  // Shared secret for inbound Pipedream webhooks (sent as `X-Webhook-Token`).
-  // If unset, the webhook fails closed and rejects all requests.
-  pipedreamWebhookSecret: process.env.PIPEDREAM_WEBHOOK_SECRET ?? "",
   // Pipedream Connect (F9.2) — managed OAuth for 2,700+ providers. When these
   // are unset, the Pipedream features report "not configured" (never faked).
   pipedreamClientId: process.env.PIPEDREAM_CLIENT_ID ?? "",
   pipedreamClientSecret: process.env.PIPEDREAM_CLIENT_SECRET ?? "",
   pipedreamProjectId: process.env.PIPEDREAM_PROJECT_ID ?? "",
   pipedreamEnvironment: process.env.PIPEDREAM_ENVIRONMENT ?? "development",
-  // Claude Managed Agents (Billing Advisor Agent) — our own Anthropic account,
-  // separate from each user's personal AiSettings provider key. Agent/environment
+  // Claude Managed Agents (Billing Advisor Agent) — powers both the agent chat
+  // and (via a throwaway session) the recommendation engine. Agent/environment
   // are pre-created once via the Console; only their IDs live here.
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   anthropicAgentId: process.env.ANTHROPIC_AGENT_ID ?? "",
   anthropicEnvironmentId: process.env.ANTHROPIC_ENVIRONMENT_ID ?? "",
+  // Resend (transactional email) — the only channel this app emails users
+  // through (verification codes, support notifications). Requires a verified
+  // sending domain in the Resend dashboard; unset means email sending reports
+  // "not configured".
+  resendApiKey: process.env.RESEND_API_KEY ?? "",
+  resendFromEmail: process.env.RESEND_FROM_EMAIL ?? "",
+  // Where support requests are emailed (Priority support feature). Falls back
+  // to the Resend sending address itself, so no extra config is required.
+  supportInboxEmail: process.env.SUPPORT_INBOX_EMAIL ?? process.env.RESEND_FROM_EMAIL ?? "",
 } as const;
 
 export const isProduction = env.nodeEnv === "production";

@@ -1,12 +1,14 @@
 /**
- * User settings model — Phase F7.
+ * User settings model — Phase F7 (pruned).
  *
  * One preferences document per user (`user` ref, unique) holding every
  * configurable, non-secret behavior of the application, grouped by domain
- * (general, notifications, analytics, automation, memory, recommendations,
- * workspace, appearance). The AI PROVIDER configuration (provider, model,
- * encrypted key, temperature, max tokens) lives separately in the AiSettings
- * model — this document intentionally never stores secrets.
+ * (general, notifications, appearance). Earlier fields (analytics thresholds,
+ * automation, AI memory, recommendation tuning, workspace display name) were
+ * removed — none of them were ever read by any backend logic; they were
+ * placeholder scaffolding, not real settings a user should be asked to tune.
+ * Profile identity (full name) now lives on the User model itself, edited via
+ * `PATCH /api/auth/profile` — not here.
  *
  * Design notes:
  *  - Every field carries a schema default, and `DEFAULT_USER_SETTINGS` is the
@@ -41,14 +43,12 @@ export const LANGUAGES = [
 ] as const;
 export type Language = (typeof LANGUAGES)[number];
 
-export const SETTINGS_ANALYTICS_RANGES = ["all", "3m", "6m", "12m"] as const;
-export type SettingsAnalyticsRange = (typeof SETTINGS_ANALYTICS_RANGES)[number];
-
-export const RECOMMENDATION_FOCUSES = ["all", "overdue", "spend"] as const;
-export type RecommendationFocus = (typeof RECOMMENDATION_FOCUSES)[number];
-
 export const THEMES = ["light", "dark", "system"] as const;
 export type Theme = (typeof THEMES)[number];
+
+/** Where the app lands right after login. */
+export const LANDING_PAGES = ["overview", "billing", "usage"] as const;
+export type LandingPage = (typeof LANDING_PAGES)[number];
 
 // ── Persisted shape ──
 export interface IUserSettings {
@@ -58,6 +58,7 @@ export interface IUserSettings {
     dateFormat: DateFormat;
     timezone: string;
     language: Language;
+    defaultLandingPage: LandingPage;
   };
   notifications: {
     enabled: boolean;
@@ -65,30 +66,6 @@ export interface IUserSettings {
     recommendationAlerts: boolean;
     usageAlerts: boolean;
     highSpendThreshold: number;
-  };
-  analytics: {
-    defaultRange: SettingsAnalyticsRange;
-    trendMonths: number;
-    concentrationThreshold: number;
-    highCostThreshold: number;
-    growthAlertThreshold: number;
-  };
-  automation: {
-    enabled: boolean;
-    autoApprove: boolean;
-  };
-  memory: {
-    enabled: boolean;
-    maxRecall: number;
-    summarizeTrigger: number;
-    keepRecent: number;
-  };
-  recommendations: {
-    maxCount: number;
-    defaultFocus: RecommendationFocus;
-  };
-  workspace: {
-    displayName: string;
   };
   appearance: {
     theme: Theme;
@@ -111,6 +88,7 @@ export const DEFAULT_USER_SETTINGS: Omit<
     dateFormat: "ISO",
     timezone: "UTC",
     language: "en-US",
+    defaultLandingPage: "overview",
   },
   notifications: {
     enabled: true,
@@ -118,30 +96,6 @@ export const DEFAULT_USER_SETTINGS: Omit<
     recommendationAlerts: true,
     usageAlerts: true,
     highSpendThreshold: 60,
-  },
-  analytics: {
-    defaultRange: "all",
-    trendMonths: 12,
-    concentrationThreshold: 40,
-    highCostThreshold: 25,
-    growthAlertThreshold: 20,
-  },
-  automation: {
-    enabled: true,
-    autoApprove: false,
-  },
-  memory: {
-    enabled: true,
-    maxRecall: 12,
-    summarizeTrigger: 24,
-    keepRecent: 12,
-  },
-  recommendations: {
-    maxCount: 8,
-    defaultFocus: "all",
-  },
-  workspace: {
-    displayName: "",
   },
   appearance: {
     theme: "system",
@@ -172,6 +126,11 @@ const generalSchema = new Schema<IUserSettings["general"]>(
       default: d.general.timezone,
     },
     language: { type: String, enum: LANGUAGES, default: d.general.language },
+    defaultLandingPage: {
+      type: String,
+      enum: LANDING_PAGES,
+      default: d.general.defaultLandingPage,
+    },
   },
   { _id: false }
 );
@@ -195,83 +154,6 @@ const notificationsSchema = new Schema<IUserSettings["notifications"]>(
   { _id: false }
 );
 
-const analyticsSchema = new Schema<IUserSettings["analytics"]>(
-  {
-    defaultRange: {
-      type: String,
-      enum: SETTINGS_ANALYTICS_RANGES,
-      default: d.analytics.defaultRange,
-    },
-    trendMonths: { type: Number, min: 1, max: 36, default: d.analytics.trendMonths },
-    concentrationThreshold: {
-      type: Number,
-      min: 1,
-      max: 100,
-      default: d.analytics.concentrationThreshold,
-    },
-    highCostThreshold: {
-      type: Number,
-      min: 1,
-      max: 100,
-      default: d.analytics.highCostThreshold,
-    },
-    growthAlertThreshold: {
-      type: Number,
-      min: 1,
-      max: 100,
-      default: d.analytics.growthAlertThreshold,
-    },
-  },
-  { _id: false }
-);
-
-const automationSchema = new Schema<IUserSettings["automation"]>(
-  {
-    enabled: { type: Boolean, default: d.automation.enabled },
-    autoApprove: { type: Boolean, default: d.automation.autoApprove },
-  },
-  { _id: false }
-);
-
-const memorySchema = new Schema<IUserSettings["memory"]>(
-  {
-    enabled: { type: Boolean, default: d.memory.enabled },
-    maxRecall: { type: Number, min: 1, max: 100, default: d.memory.maxRecall },
-    summarizeTrigger: {
-      type: Number,
-      min: 2,
-      max: 200,
-      default: d.memory.summarizeTrigger,
-    },
-    keepRecent: { type: Number, min: 1, max: 100, default: d.memory.keepRecent },
-  },
-  { _id: false }
-);
-
-const recommendationsSchema = new Schema<IUserSettings["recommendations"]>(
-  {
-    maxCount: { type: Number, min: 1, max: 20, default: d.recommendations.maxCount },
-    defaultFocus: {
-      type: String,
-      enum: RECOMMENDATION_FOCUSES,
-      default: d.recommendations.defaultFocus,
-    },
-  },
-  { _id: false }
-);
-
-const workspaceSchema = new Schema<IUserSettings["workspace"]>(
-  {
-    displayName: {
-      type: String,
-      trim: true,
-      maxlength: 80,
-      default: d.workspace.displayName,
-    },
-  },
-  { _id: false }
-);
-
 const appearanceSchema = new Schema<IUserSettings["appearance"]>(
   { theme: { type: String, enum: THEMES, default: d.appearance.theme } },
   { _id: false }
@@ -287,11 +169,6 @@ const userSettingsSchema = new Schema<IUserSettings, UserSettingsModel>(
     },
     general: { type: generalSchema, default: () => ({}) },
     notifications: { type: notificationsSchema, default: () => ({}) },
-    analytics: { type: analyticsSchema, default: () => ({}) },
-    automation: { type: automationSchema, default: () => ({}) },
-    memory: { type: memorySchema, default: () => ({}) },
-    recommendations: { type: recommendationsSchema, default: () => ({}) },
-    workspace: { type: workspaceSchema, default: () => ({}) },
     appearance: { type: appearanceSchema, default: () => ({}) },
   },
   {

@@ -25,11 +25,11 @@ export const TOOL_REGISTRY: AssistantTool[] = [
  * in parallel; a single tool failure degrades that section to null rather than
  * failing the whole context.
  */
-export async function buildAssistantContext(): Promise<string> {
+export async function buildAssistantContext(userId: string): Promise<string> {
   const entries = await Promise.all(
     TOOL_REGISTRY.map(async (tool) => {
       try {
-        return [tool.name, await tool.run()] as const;
+        return [tool.name, await tool.run(userId)] as const;
       } catch {
         return [tool.name, null] as const;
       }

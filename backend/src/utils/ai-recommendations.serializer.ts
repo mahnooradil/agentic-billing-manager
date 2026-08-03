@@ -12,8 +12,6 @@
  */
 import { z } from "zod";
 
-import type { AiProvider } from "@/models/ai-settings.model";
-
 /** Priority of a recommendation — the seed for future alert thresholds. */
 export const RECOMMENDATION_SEVERITIES = ["low", "medium", "high"] as const;
 export type RecommendationSeverity = (typeof RECOMMENDATION_SEVERITIES)[number];
@@ -25,15 +23,6 @@ export interface AiRecommendation {
   category: string;
   /** A concrete next step — groundwork for future automated action-triggering. */
   suggestedAction: string;
-}
-
-export interface AiRecommendationsResult {
-  recommendations: AiRecommendation[];
-  provider: AiProvider;
-  model: string;
-  generatedAt: Date;
-  /** False when there was no billing data to reason over (no AI call was made). */
-  dataAvailable: boolean;
 }
 
 /** Max recommendations surfaced from a single generation. */

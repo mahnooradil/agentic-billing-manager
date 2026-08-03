@@ -12,6 +12,6 @@ export interface AssistantTool<TResult = unknown> {
   name: string;
   /** Human/LLM-readable description of what the tool returns. */
   description: string;
-  /** Executes the tool and returns aggregated, PII-free data. */
-  run: () => Promise<TResult>;
+  /** Executes the tool and returns aggregated, PII-free data for ONE user. */
+  run: (userId: string) => Promise<TResult>;
 }

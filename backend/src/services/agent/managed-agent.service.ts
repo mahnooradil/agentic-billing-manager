@@ -103,6 +103,69 @@ export async function resetAgentSession(userId: Types.ObjectId | string): Promis
 }
 
 /**
+ * Runs ONE prompt through the Billing Advisor Agent on a throwaway session —
+ * created fresh and archived immediately after, never touching the user's
+ * persisted `AgentSession` (the one their visible chat thread continues on).
+ * Used by background/system callers (the recommendation engine) that need the
+ * agent's reasoning without leaking generation prompts into that chat history.
+ */
+export async function runAgentPrompt(
+  userId: Types.ObjectId | string,
+  prompt: string
+): Promise<string> {
+  const anthropic = getClient();
+  const session = await anthropic.beta.sessions.create({
+    agent: env.anthropicAgentId,
+    environment_id: env.anthropicEnvironmentId,
+    title: `Recommendation refresh — user ${userId.toString()}`,
+  });
+
+  try {
+    const stream = await anthropic.beta.sessions.events.stream(session.id);
+    await anthropic.beta.sessions.events.send(session.id, {
+      events: [{ type: "user.message", content: [{ type: "text", text: prompt }] }],
+    });
+
+    let reply = "";
+    for await (const event of stream) {
+      if (event.type === "agent.message") {
+        for (const block of event.content) {
+          if (block.type === "text") reply += block.text;
+        }
+      } else if (event.type === "agent.custom_tool_use") {
+        // Not relevant to a one-shot generation task — decline so the session
+        // can still terminate cleanly instead of waiting on a result forever.
+        await anthropic.beta.sessions.events.send(session.id, {
+          events: [
+            {
+              type: "user.custom_tool_result",
+              custom_tool_use_id: event.id,
+              content: [{ type: "text", text: "Not available for this request." }],
+              is_error: true,
+            },
+          ],
+        });
+      } else if (event.type === "session.status_terminated") {
+        break;
+      } else if (event.type === "session.status_idle") {
+        if (event.stop_reason?.type !== "requires_action") break;
+      } else if (event.type === "session.error") {
+        throw new AppError("The AI agent failed to generate a response.", 502);
+      }
+    }
+
+    if (!reply.trim()) {
+      throw new AppError("The AI agent didn't return a response.", 502);
+    }
+    return reply;
+  } finally {
+    await anthropic.beta.sessions.archive(session.id).catch(() => {
+      // Best-effort cleanup — a stray unarchived session is not fatal.
+    });
+  }
+}
+
+/**
  * Sends one user message to the user's agent session and waits for the
  * agent's reply, returning the concatenated text of its response.
  *
@@ -135,7 +198,11 @@ export async function sendAgentMessage(
       let isError = false;
       try {
         const input = (event.input ?? {}) as Record<string, unknown>;
-        const result = await executeCustomTool(event.name, input);
+        const result = await executeCustomTool(
+          userId.toString(),
+          event.name,
+          input
+        );
         resultText = JSON.stringify(result);
 
         // The agent confirmed a real, live-connectable platform — surface a

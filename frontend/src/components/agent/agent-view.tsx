@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   BotMessageSquare,
   Loader2,
-  MessageSquarePlus,
   Mic,
   Plug,
   Send,
@@ -17,12 +16,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { AiRecommendations } from "@/components/ai/ai-recommendations";
 import { EmptyState } from "@/components/common/empty-state";
 import { FormAlert } from "@/components/common/form-alert";
 import { PageWrapper } from "@/components/common/page-wrapper";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/services/api/client";
-import { sendAgentMessage, resetAgentSession } from "@/services/agent/agent-chat.service";
+import { sendAgentMessage } from "@/services/agent/agent-chat.service";
 import { agentChatStore } from "@/services/agent/agent-chat-store";
 import type { ConnectPlatformAction } from "@/services/types/agent";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
@@ -53,7 +53,6 @@ export function AgentView() {
   );
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
-  const [resetting, setResetting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
@@ -82,25 +81,6 @@ export function AgentView() {
       );
     } finally {
       setSending(false);
-    }
-  };
-
-  const handleNewChat = async () => {
-    if (sending || resetting) return;
-    setResetting(true);
-    setError(null);
-    try {
-      await resetAgentSession();
-      agentChatStore.clear();
-      setInput("");
-    } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : "Failed to start a new conversation. Please try again."
-      );
-    } finally {
-      setResetting(false);
     }
   };
 
@@ -169,12 +149,8 @@ export function AgentView() {
   return (
     <PageWrapper>
       {/* Hero */}
-      <div className="relative isolate overflow-hidden rounded-2xl bg-brand-gradient p-6 text-primary-foreground shadow-e2 sm:p-8">
-        <div aria-hidden className="pointer-events-none absolute inset-0">
-          <div className="animate-aurora absolute -top-16 -right-10 size-64 rounded-full bg-white/15 blur-3xl" />
-          <div className="absolute inset-0 opacity-10 [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:20px_20px]" />
-        </div>
-        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="rounded-2xl bg-brand-gradient p-6 text-primary-foreground sm:p-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <span className="flex size-9 items-center justify-center rounded-xl bg-white/15 backdrop-blur-sm">
@@ -215,17 +191,6 @@ export function AgentView() {
                 {speaking ? "Speaking…" : voiceReplies ? "Voice on" : "Voice off"}
               </Button>
             ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void handleNewChat()}
-              disabled={sending || resetting || messages.length === 0}
-              className="border-white/30 bg-white/10 text-primary-foreground hover:bg-white/20 hover:text-primary-foreground"
-            >
-              {resetting ? <Loader2 className="animate-spin" /> : <MessageSquarePlus />}
-              New Chat
-            </Button>
           </div>
         </div>
       </div>
@@ -333,6 +298,8 @@ export function AgentView() {
           </form>
         </div>
       </Card>
+
+      <AiRecommendations />
     </PageWrapper>
   );
 }

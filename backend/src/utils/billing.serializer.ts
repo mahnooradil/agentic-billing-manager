@@ -6,8 +6,13 @@
  * minimal { id, name, slug } is embedded so clients can render it directly. A
  * defensive fallback is used if the referenced platform no longer exists.
  */
-import type { BillingDocument, BillingStatus } from "@/models/billing.model";
+import type {
+  BillingDocument,
+  BillingSource,
+  BillingStatus,
+} from "@/models/billing.model";
 import type { PlatformDocument } from "@/models/platform.model";
+import type { PlatformConnectionDocument } from "@/models/platform-connection.model";
 
 export interface PublicBillingPlatform {
   id: string;
@@ -18,6 +23,7 @@ export interface PublicBillingPlatform {
 export interface PublicBilling {
   id: string;
   platform: PublicBillingPlatform;
+  source: BillingSource;
   customerName: string;
   invoiceNumber: string;
   amount: number;
@@ -31,16 +37,23 @@ export interface PublicBilling {
 
 export function toPublicBilling(billing: BillingDocument): PublicBilling {
   const platform = billing.platform as unknown as PlatformDocument | null;
+  const connection =
+    billing.platformConnection as unknown as PlatformConnectionDocument | null;
+
+  const publicPlatform: PublicBillingPlatform = platform
+    ? { id: platform._id.toString(), name: platform.name, slug: platform.slug }
+    : connection
+      ? {
+          id: connection._id.toString(),
+          name: connection.displayName,
+          slug: connection.platform,
+        }
+      : { id: "", name: "Unknown platform", slug: "" };
 
   return {
     id: billing._id.toString(),
-    platform: platform
-      ? {
-          id: platform._id.toString(),
-          name: platform.name,
-          slug: platform.slug,
-        }
-      : { id: "", name: "Unknown platform", slug: "" },
+    platform: publicPlatform,
+    source: billing.source,
     customerName: billing.customerName,
     invoiceNumber: billing.invoiceNumber,
     amount: billing.amount,

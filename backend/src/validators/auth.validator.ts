@@ -1,41 +1,66 @@
 /**
- * Zod schemas for authentication request bodies.
- * These are the single source of truth for register/login input rules and
- * feed both runtime validation (via the `validate` middleware) and static
- * types (via `z.infer`).
+ * Zod schemas for authentication request bodies. Passwordless: every request
+ * body only ever carries an email (+ name, for the register flow) or a
+ * 6-digit code — there is no password anywhere in this contract.
  */
 import { z } from "zod";
 
-export const registerSchema = z.object({
+const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email("A valid email address is required");
+
+/** Register flow: name + email are known upfront so a new account can be
+ *  created the moment the code is verified. */
+export const requestRegisterOtpSchema = z.object({
   fullName: z
     .string()
     .trim()
     .min(2, "Full name must be at least 2 characters")
     .max(100, "Full name must be at most 100 characters"),
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .email("A valid email address is required"),
-  password: z
-    .string()
-    .min(8, "Password must be at least 8 characters")
-    .max(128, "Password must be at most 128 characters"),
-  profilePicture: z
-    .string()
-    .trim()
-    .url("Profile picture must be a valid URL")
-    .optional(),
+  email: emailSchema,
 });
 
-export const loginSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .email("A valid email address is required"),
-  password: z.string().min(1, "Password is required"),
+/** Login flow: email only — the account must already exist. */
+export const requestLoginOtpSchema = z.object({
+  email: emailSchema,
 });
 
-export type RegisterInput = z.infer<typeof registerSchema>;
-export type LoginInput = z.infer<typeof loginSchema>;
+export const verifyOtpSchema = z.object({
+  email: emailSchema,
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "Enter the 6-digit code"),
+});
+
+/** Profile update: only the display name — email changes go through the
+ *  separate OTP-verified email-change flow below. */
+export const updateProfileSchema = z.object({
+  fullName: z
+    .string()
+    .trim()
+    .min(2, "Full name must be at least 2 characters")
+    .max(100, "Full name must be at most 100 characters"),
+});
+
+/** Change-email flow: request a code at the NEW address, then verify it. */
+export const requestEmailChangeSchema = z.object({
+  newEmail: emailSchema,
+});
+
+export const verifyEmailChangeSchema = z.object({
+  newEmail: emailSchema,
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "Enter the 6-digit code"),
+});
+
+export type RequestRegisterOtpInput = z.infer<typeof requestRegisterOtpSchema>;
+export type RequestLoginOtpInput = z.infer<typeof requestLoginOtpSchema>;
+export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type RequestEmailChangeInput = z.infer<typeof requestEmailChangeSchema>;
+export type VerifyEmailChangeInput = z.infer<typeof verifyEmailChangeSchema>;

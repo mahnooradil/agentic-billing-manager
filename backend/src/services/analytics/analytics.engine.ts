@@ -8,7 +8,7 @@
  * there is no injection surface. Money is never summed across currencies — see
  * `analytics.serializer.ts` for the shaping rules.
  */
-import type { PipelineStage } from "mongoose";
+import { Types, type PipelineStage } from "mongoose";
 
 import { Billing } from "@/models/billing.model";
 import {
@@ -43,14 +43,20 @@ export function buildRangeMatch(
 }
 
 /**
- * Computes the composite analytics overview for a range. Single source of truth
- * for the aggregation — callers just consume the returned `PublicAnalyticsOverview`.
+ * Computes the composite analytics overview for a range, scoped to ONE user —
+ * every pipeline below MUST start with the `user` match so data never crosses
+ * between tenants. Single source of truth for the aggregation — callers just
+ * consume the returned `PublicAnalyticsOverview`.
  */
 export async function computeAnalyticsOverview(
+  userId: string,
   range: AnalyticsRange
 ): Promise<PublicAnalyticsOverview> {
   const now = new Date();
-  const rangeMatch = buildRangeMatch(range, now);
+  const rangeMatch = {
+    user: new Types.ObjectId(userId),
+    ...buildRangeMatch(range, now),
+  };
 
   // Currency- and status-level aggregates do not depend on the primary currency,
   // so they run together first.

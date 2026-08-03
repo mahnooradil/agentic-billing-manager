@@ -7,84 +7,74 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FormAlert } from "@/components/common/form-alert";
 import { ApiError } from "@/services/api/client";
-import { loginUser } from "@/services/auth/auth.service";
-import { loginFormSchema, type LoginFormValues } from "@/lib/validations/auth";
+import { requestLoginOtp, verifyOtp } from "@/services/auth/auth.service";
+import { loginEmailFormSchema, type LoginEmailFormValues } from "@/lib/validations/auth";
 import { useAuth } from "@/hooks/use-auth";
+import { OtpCodeStep } from "@/components/auth/otp-code-step";
 
-type SubmitStatus =
-  | { type: "idle" }
-  | { type: "error"; message: string; errors?: string[] };
+type Step = { name: "email" } | { name: "code"; email: string };
 
 /**
- * Login form wired to the Phase 3 backend. On success it hands the token + user
- * to the auth context, which persists the session and redirects to the
- * dashboard.
+ * Passwordless login — enter an email, get a code, verify it. Verifying an
+ * unknown email is impossible here (the backend 404s at the request-otp
+ * step) since login never collects a name to create an account with.
  */
 export function LoginForm() {
-  const [status, setStatus] = React.useState<SubmitStatus>({ type: "idle" });
+  const [step, setStep] = React.useState<Step>({ name: "email" });
+  const [error, setError] = React.useState<string | null>(null);
   const { login } = useAuth();
 
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<LoginFormValues>({
-    resolver: zodResolver(loginFormSchema),
-    defaultValues: { email: "", password: "" },
+  } = useForm<LoginEmailFormValues>({
+    resolver: zodResolver(loginEmailFormSchema),
+    defaultValues: { email: "" },
   });
 
-  const onSubmit = async (values: LoginFormValues) => {
-    setStatus({ type: "idle" });
+  const onSubmitEmail = async (values: LoginEmailFormValues) => {
+    setError(null);
     try {
-      const response = await loginUser({
-        email: values.email,
-        password: values.password,
-      });
-      // Persist session + redirect to /dashboard/overview via the auth context.
-      login(response.data.token, response.data.user);
-    } catch (error) {
-      if (error instanceof ApiError) {
-        setStatus({
-          type: "error",
-          message: error.message,
-          errors: error.errors,
-        });
-      } else {
-        setStatus({
-          type: "error",
-          message: "Something went wrong. Please try again.",
-        });
-      }
+      await requestLoginOtp({ email: values.email });
+      setStep({ name: "code", email: values.email });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
     }
   };
+
+  if (step.name === "code") {
+    return (
+      <Card className="w-full max-w-sm">
+        <OtpCodeStep
+          email={step.email}
+          onVerify={async (code) => {
+            const response = await verifyOtp({ email: step.email, code });
+            login(response.data.token, response.data.user);
+          }}
+          onResend={async () => {
+            await requestLoginOtp({ email: step.email });
+          }}
+          onBack={() => setStep({ name: "email" })}
+        />
+      </Card>
+    );
+  }
 
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
         <CardTitle className="text-lg">Welcome back</CardTitle>
-        <CardDescription>Sign in to your account to continue.</CardDescription>
+        <CardDescription>Enter your email and we&apos;ll send you a code.</CardDescription>
       </CardHeader>
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
+      <form onSubmit={handleSubmit(onSubmitEmail)} noValidate>
         <CardContent className="space-y-4">
-          {status.type === "error" ? (
-            <FormAlert
-              variant="error"
-              message={status.message}
-              details={status.errors}
-            />
-          ) : null}
+          {error ? <FormAlert variant="error" message={error} /> : null}
 
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
@@ -101,36 +91,16 @@ export function LoginForm() {
             ) : null}
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              placeholder="••••••••"
-              autoComplete="current-password"
-              aria-invalid={Boolean(errors.password)}
-              {...register("password")}
-            />
-            {errors.password ? (
-              <p className="text-xs text-destructive">
-                {errors.password.message}
-              </p>
-            ) : null}
-          </div>
-
           <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? <Loader2 className="animate-spin" /> : null}
-            {isSubmitting ? "Signing in…" : "Sign in"}
+            {isSubmitting ? "Sending code…" : "Send code"}
           </Button>
         </CardContent>
       </form>
       <CardFooter className="justify-center">
         <p className="text-sm text-muted-foreground">
           Don&apos;t have an account?{" "}
-          <Link
-            href="/register"
-            className="font-medium text-foreground underline-offset-4 hover:underline"
-          >
+          <Link href="/register" className="font-medium text-foreground underline-offset-4 hover:underline">
             Register
           </Link>
         </p>

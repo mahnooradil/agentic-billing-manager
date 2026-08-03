@@ -7,7 +7,7 @@
  * underused (Inactive-but-billed) platforms. No AI/provider calls, no mutation,
  * no user-supplied operators — no injection surface.
  */
-import type { PipelineStage } from "mongoose";
+import { Types, type PipelineStage } from "mongoose";
 
 import { Billing } from "@/models/billing.model";
 import { Platform } from "@/models/platform.model";
@@ -28,14 +28,18 @@ import type { AnalyticsRange } from "@/validators/analytics.validator";
 const RECURRING_LIMIT = 20;
 const DUPLICATE_LIMIT = 20;
 
-/** Computes the full advanced billing intelligence for a range. */
+/** Computes the full advanced billing intelligence for a range, scoped to ONE user. */
 export async function computeAdvancedAnalytics(
+  userId: string,
   range: AnalyticsRange
 ): Promise<AdvancedAnalytics> {
   const now = new Date();
-  const rangeMatch = buildRangeMatch(range, now);
+  const rangeMatch = {
+    user: new Types.ObjectId(userId),
+    ...buildRangeMatch(range, now),
+  };
 
-  const overview = await computeAnalyticsOverview(range);
+  const overview = await computeAnalyticsOverview(userId, range);
   const primaryCurrency = overview.primaryCurrency;
 
   // Recurring: same (platform, amount, currency) seen across ≥2 distinct months.
@@ -140,7 +144,10 @@ export async function computeAdvancedAnalytics(
   ]);
 
   // Underused: Inactive platforms that still have billing records in range.
-  const inactive = await Platform.find({ status: "Inactive" }).select("name slug");
+  const inactive = await Platform.find({
+    user: new Types.ObjectId(userId),
+    status: "Inactive",
+  }).select("name slug");
   const underused: RawUnderusedRow[] = [];
   for (const platform of inactive) {
     const rows = await Billing.aggregate<{ _id: string; total: number; count: number }>([

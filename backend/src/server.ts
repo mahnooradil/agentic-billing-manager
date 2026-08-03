@@ -5,6 +5,8 @@ import { env } from "@/config/env";
 import { connectDatabase, disconnectDatabase } from "@/config/database";
 import { initRecommendationEngine } from "@/services/ai/recommendation-engine";
 import { initNotificationEngine } from "@/services/notification/notification-engine";
+import { warmCatalogCache } from "@/services/integrations/pipedream";
+import { startBillingSyncScheduler } from "@/services/billing-sync/scheduler";
 
 /**
  * Server bootstrap / entry point.
@@ -25,6 +27,8 @@ async function startServer(): Promise<void> {
     // Wire autonomous engines to the event bus before serving traffic.
     initRecommendationEngine();
     initNotificationEngine();
+    warmCatalogCache();
+    startBillingSyncScheduler();
 
     // 3: database is ready — start accepting HTTP traffic.
     const app = createApp();

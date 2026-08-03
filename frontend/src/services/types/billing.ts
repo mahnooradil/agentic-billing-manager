@@ -65,3 +65,10 @@ export interface BillingStats {
 export interface BillingStatsData {
   stats: BillingStats;
 }
+
+/** Result of a CSV bulk-import — a per-row error list, capped server-side. */
+export interface ImportBillingResult {
+  imported: number;
+  failed: number;
+  errors: { row: number; message: string }[];
+}

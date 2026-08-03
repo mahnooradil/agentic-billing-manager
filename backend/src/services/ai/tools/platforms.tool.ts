@@ -13,11 +13,11 @@ export interface PlatformSummary {
   inactivePlatforms: number;
 }
 
-async function runPlatformSummary(): Promise<PlatformSummary> {
+async function runPlatformSummary(userId: string): Promise<PlatformSummary> {
   const [totalPlatforms, activePlatforms, inactivePlatforms] = await Promise.all([
-    Platform.countDocuments(),
-    Platform.countDocuments({ status: "Active" }),
-    Platform.countDocuments({ status: "Inactive" }),
+    Platform.countDocuments({ user: userId }),
+    Platform.countDocuments({ user: userId, status: "Active" }),
+    Platform.countDocuments({ user: userId, status: "Inactive" }),
   ]);
   return { totalPlatforms, activePlatforms, inactivePlatforms };
 }

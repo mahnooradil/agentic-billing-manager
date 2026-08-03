@@ -82,6 +82,20 @@ function setSession(token: string, user: AuthUser): void {
   setSnapshot({ token, user, status: "ready" });
 }
 
+/** Updates the stored user in place (e.g. after a profile edit) — same token. */
+function updateUser(user: AuthUser): void {
+  if (snapshot.status !== "ready" || !snapshot.token) return;
+  writeStoredSession(snapshot.token, user);
+  setSnapshot({ token: snapshot.token, user, status: "ready" });
+}
+
+/** Swaps in a freshly-issued token (e.g. after "sign out everywhere") — same user. */
+function updateToken(token: string): void {
+  if (snapshot.status !== "ready" || !snapshot.user) return;
+  writeStoredSession(token, snapshot.user);
+  setSnapshot({ token, user: snapshot.user, status: "ready" });
+}
+
 function clearSession(): void {
   clearStoredSession();
   setSnapshot({ token: null, user: null, status: "ready" });
@@ -93,5 +107,7 @@ export const authStore = {
   getServerSnapshot,
   getToken,
   setSession,
+  updateUser,
+  updateToken,
   clearSession,
 };

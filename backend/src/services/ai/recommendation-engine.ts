@@ -4,9 +4,13 @@
  * Central pipeline: analytics -> AI reasoning -> parse -> reconcile -> persist.
  * It subscribes to `business.data.changed` on the event bus, so it is fully
  * DECOUPLED from the controllers that emit those events (billing/platform now;
- * webhooks/connectors/schedulers later reuse the same path unchanged).
+ * connectors/schedulers later reuse the same path unchanged).
  *
- * Reconciliation keeps ONE document per signature:
+ * Everything here is scoped to ONE user — recommendations are per-user
+ * workspace data and must never be reconciled against another user's billing
+ * data or documents.
+ *
+ * Reconciliation keeps ONE document per (user, signature):
  *  - generated + existing active/completed  -> update in place & (re)activate
  *  - generated + existing dismissed          -> respected (never resurrected)
  *  - generated + new                         -> inserted as active
@@ -16,22 +20,26 @@
  * Extension points for future engines (Notification/Alert/LangGraph/Automation):
  *  - subscribe to `business.data.changed` to react to the same events
  *  - subscribe to `recommendations.updated` (emitted here) to react to results
- * Cost control: single-flight + trailing run coalesces bursts of events, and AI
- * is skipped when there is no data / no AI provider configured.
+ * Cost control: single-flight + trailing PER USER coalesces bursts of events
+ * for that same user (a different user's refresh always runs independently),
+ * and AI is skipped when there is no data / no AI provider configured.
  */
 import { createHash } from "node:crypto";
 
-import { decryptSecret } from "@/utils/crypto";
-import { generateChatCompletion } from "@/utils/ai-provider";
+import { AppError } from "@/utils/appError";
+import { runAgentPrompt } from "@/services/agent/managed-agent.service";
 import { computeAnalyticsOverview } from "@/services/analytics/analytics.engine";
 import { buildRecommendationsPrompt } from "@/utils/ai-recommendations.prompt";
 import {
   parseRecommendations,
   type AiRecommendation,
 } from "@/utils/ai-recommendations.serializer";
-import { AiSettings } from "@/models/ai-settings.model";
 import { Recommendation } from "@/models/recommendation.model";
 import { eventBus } from "@/services/events/event-bus";
+
+/** Audit fields recorded on each generated Recommendation. Always the Billing
+ *  Advisor Agent now — there is no more per-user provider/model choice. */
+const AGENT_META = { provider: "Claude", model: "Billing Advisor Agent" };
 
 export interface ReconcileSummary {
   created: number;
@@ -43,7 +51,7 @@ export interface ReconcileSummary {
 export interface RefreshResult {
   status:
     | "ok"
-    | "skipped-no-settings"
+    | "skipped-agent-not-configured"
     | "skipped-no-data"
     | "no-recommendations";
   summary?: ReconcileSummary;
@@ -65,8 +73,9 @@ export function signatureFor(rec: {
   return createHash("sha1").update(basis).digest("hex").slice(0, 16);
 }
 
-/** Reconciles a freshly generated set against the stored recommendations. */
+/** Reconciles a freshly generated set against this user's stored recommendations. */
 export async function reconcile(
+  userId: string,
   parsed: AiRecommendation[],
   meta: { provider?: string; model?: string }
 ): Promise<ReconcileSummary> {
@@ -78,7 +87,7 @@ export async function reconcile(
     const signature = signatureFor(rec);
     generatedSignatures.push(signature);
 
-    const existing = await Recommendation.findOne({ signature });
+    const existing = await Recommendation.findOne({ user: userId, signature });
     if (existing) {
       // Respect a user's dismissal — never resurrect a dismissed rec.
       if (existing.status === "dismissed") continue;
@@ -101,6 +110,7 @@ export async function reconcile(
       updated++;
     } else {
       await Recommendation.create({
+        user: userId,
         title: rec.title,
         detail: rec.detail,
         severity: rec.severity,
@@ -120,6 +130,7 @@ export async function reconcile(
 
   // Auto-complete active recs the AI no longer considers applicable.
   const stale = await Recommendation.find({
+    user: userId,
     status: "active",
     signature: { $nin: generatedSignatures },
   });
@@ -129,85 +140,96 @@ export async function reconcile(
     await doc.save();
   }
 
-  const active = await Recommendation.countDocuments({ status: "active" });
+  const active = await Recommendation.countDocuments({
+    user: userId,
+    status: "active",
+  });
   return { created, updated, autoCompleted: stale.length, active };
 }
 
 /**
  * Runs a full refresh for the given (triggering) user. Awaitable — used by the
  * ops `/refresh` endpoint and by the background scheduler. Skips gracefully when
- * the user has no AI provider configured or there is no billing data.
+ * the Billing Advisor Agent isn't configured on this server or there is no
+ * billing data yet.
  */
 export async function runRefresh(
   userId: string | undefined,
   options: RefreshOptions = {}
 ): Promise<RefreshResult> {
-  if (!userId) return { status: "skipped-no-settings" };
+  if (!userId) return { status: "skipped-agent-not-configured" };
 
-  const settings = await AiSettings.findOne({ user: userId }).select("+apiKey");
-  if (!settings) return { status: "skipped-no-settings" };
-
-  const overview = await computeAnalyticsOverview("all");
+  const overview = await computeAnalyticsOverview(userId, "all");
   if (overview.invoiceCount === 0) return { status: "skipped-no-data" };
 
   const generate =
     options.generateFn ??
     (async () => {
-      const apiKey = decryptSecret(settings.apiKey);
       const prompt = buildRecommendationsPrompt(overview, "all");
-      const reply = await generateChatCompletion({
-        provider: settings.provider,
-        model: settings.model,
-        apiKey,
-        messages: [{ role: "user", content: prompt }],
-      });
+      const reply = await runAgentPrompt(userId, prompt);
       return parseRecommendations(reply);
     });
 
-  const parsed = await generate();
+  let parsed: AiRecommendation[];
+  try {
+    parsed = await generate();
+  } catch (error) {
+    if (error instanceof AppError && error.statusCode === 503) {
+      return { status: "skipped-agent-not-configured" };
+    }
+    throw error;
+  }
   // Guard: never let an empty/failed parse auto-complete every active rec.
   if (!parsed || parsed.length === 0) return { status: "no-recommendations" };
 
-  const summary = await reconcile(parsed, {
-    provider: settings.provider,
-    model: settings.model,
-  });
+  const summary = await reconcile(userId, parsed, AGENT_META);
 
-  eventBus.emit({ type: "recommendations.updated", summary, at: new Date() });
+  eventBus.emit({
+    type: "recommendations.updated",
+    userId,
+    summary,
+    at: new Date(),
+  });
   return { status: "ok", summary };
 }
 
-// ── Single-flight + trailing scheduler (bounds AI cost under event bursts) ──
-let running = false;
-let pending = false;
-let pendingUser: string | undefined;
+// ── Single-flight + trailing scheduler, PER USER (bounds AI cost under event
+// bursts without letting one user's refresh starve another's). ──
+interface UserRefreshState {
+  running: boolean;
+  pending: boolean;
+}
+const refreshState = new Map<string, UserRefreshState>();
 
 /**
- * Non-blocking refresh request. If a refresh is already running, coalesces into
- * a single trailing run after it finishes. Never throws to the caller.
+ * Non-blocking refresh request. If a refresh is already running for this user,
+ * coalesces into a single trailing run after it finishes. Never throws to the
+ * caller. A no-op when `userId` is undefined (nothing to scope the refresh to).
  */
 export async function scheduleRefresh(userId: string | undefined): Promise<void> {
-  if (running) {
-    pending = true;
-    pendingUser = userId;
+  if (!userId) return;
+
+  const state = refreshState.get(userId) ?? { running: false, pending: false };
+  refreshState.set(userId, state);
+
+  if (state.running) {
+    state.pending = true;
     return;
   }
-  running = true;
+  state.running = true;
   try {
-    let uid = userId;
     for (;;) {
-      pending = false;
+      state.pending = false;
       try {
-        await runRefresh(uid);
+        await runRefresh(userId);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`[recommendation-engine] refresh failed: ${message}`);
       }
-      if (!pending) break;
-      uid = pendingUser;
+      if (!state.pending) break;
     }
   } finally {
-    running = false;
+    state.running = false;
   }
 }
 

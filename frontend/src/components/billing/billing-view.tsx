@@ -20,7 +20,7 @@ import { listPlatforms } from "@/services/platforms/platform.service";
 import type { BillingRecord, BillingStats } from "@/services/types/billing";
 import type { Platform } from "@/services/types/platform";
 import { PlatformFormDialog } from "@/components/platforms/platform-form-dialog";
-import { BillingCard } from "./billing-card";
+import { BillingTable } from "./billing-table";
 import { BillingFormDialog } from "./billing-form-dialog";
 import { DeleteBillingDialog } from "./delete-billing-dialog";
 import { BillingStatsGrid } from "./billing-stats";
@@ -309,16 +309,11 @@ export function BillingView() {
                       Page {currentPage} of {totalPages}
                     </span>
                   </div>
-                  <div className="reveal-group grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {pageRecords.map((record) => (
-                      <BillingCard
-                        key={record.id}
-                        record={record}
-                        onEdit={openEdit}
-                        onDelete={openDelete}
-                      />
-                    ))}
-                  </div>
+                  <BillingTable
+                    records={pageRecords}
+                    onEdit={openEdit}
+                    onDelete={openDelete}
+                  />
                   <Pagination
                     page={currentPage}
                     totalPages={totalPages}

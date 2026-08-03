@@ -13,8 +13,10 @@ import {
   getConnectionRequirements,
 } from "@/services/integrations/capability-resolver";
 
-/** Executes a custom tool by name. Throws on an unrecognized tool name. */
+/** Executes a custom tool by name, scoped to the calling user. Throws on an
+ *  unrecognized tool name. */
 export async function executeCustomTool(
+  userId: string,
   name: string,
   input: Record<string, unknown>
 ): Promise<unknown> {
@@ -23,7 +25,7 @@ export async function executeCustomTool(
     case "get_platform_summary": {
       const tool = TOOL_REGISTRY.find((t) => t.name === name);
       if (!tool) throw new Error(`Unknown tool: ${name}`);
-      return tool.run();
+      return tool.run(userId);
     }
     case "search_supported_platforms": {
       const query = typeof input.query === "string" ? input.query : "";

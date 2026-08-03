@@ -27,6 +27,9 @@ export function formatMoney(
     return new Intl.NumberFormat(undefined, {
       style: "currency",
       currency: code,
+      // Plain "$"/"€" instead of the disambiguated "US$"/"CA$" form Intl falls
+      // back to outside an explicit en-US-style locale.
+      currencyDisplay: "narrowSymbol",
     }).format(amount);
   } catch {
     return `${code} ${amount.toFixed(2)}`;

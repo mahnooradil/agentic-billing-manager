@@ -47,5 +47,16 @@ export const createBillingSchema = z.object({
 /** Update allows any subset of the create fields. */
 export const updateBillingSchema = createBillingSchema.partial();
 
+/** One CSV row's fields, minus `platform` (resolved by name against the
+ *  caller's own platforms, not submitted as an id — see the import endpoint). */
+export const importBillingRowSchema = createBillingSchema.omit({ platform: true });
+
+/** POST /billing/import body — raw CSV text (read client-side via `File.text()`). */
+export const importBillingSchema = z.object({
+  csv: z.string().min(1, "The CSV file is empty"),
+});
+
 export type CreateBillingInput = z.infer<typeof createBillingSchema>;
 export type UpdateBillingInput = z.infer<typeof updateBillingSchema>;
+export type ImportBillingRowInput = z.infer<typeof importBillingRowSchema>;
+export type ImportBillingInput = z.infer<typeof importBillingSchema>;

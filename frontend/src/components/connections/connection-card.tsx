@@ -1,14 +1,5 @@
 "use client";
 
-import {
-  Plug,
-  Unplug,
-  RefreshCw,
-  CircleCheck,
-  CircleSlash,
-  TriangleAlert,
-} from "lucide-react";
-
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -25,33 +16,28 @@ interface ConnectionCardProps {
   onDisconnect: (connection: PlatformConnection) => void;
 }
 
-type Visual = {
-  label: string;
-  className: string;
-  icon: typeof CircleCheck;
-};
+type Visual = { label: string; dotClassName: string; textClassName: string };
 
-/** Real status → badge. Never "Connected" unless the record truly is. */
+/** Real status → plain dot + text. Never "Connected" unless the record truly is. */
 function statusVisual(connection: PlatformConnection | null): Visual {
   if (!connection || connection.status === "disconnected") {
     return {
       label: "Not connected",
-      className: "border-dashed border-border bg-muted/40 text-muted-foreground",
-      icon: CircleSlash,
+      dotClassName: "bg-muted-foreground/40",
+      textClassName: "text-muted-foreground",
     };
   }
   if (connection.status === "error") {
     return {
       label: "Connection error",
-      className: "border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400",
-      icon: TriangleAlert,
+      dotClassName: "bg-red-500",
+      textClassName: "text-red-600 dark:text-red-400",
     };
   }
   return {
     label: "Connected",
-    className:
-      "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-    icon: CircleCheck,
+    dotClassName: "bg-emerald-500",
+    textClassName: "text-emerald-700 dark:text-emerald-400",
   };
 }
 
@@ -64,42 +50,30 @@ export function ConnectionCard({
   onDisconnect,
 }: ConnectionCardProps) {
   const { general } = usePreferences();
-  const isConnected = connection !== null && connection.status !== "disconnected";
   const visual = statusVisual(connection);
-  const StatusIcon = visual.icon;
 
   return (
-    <Card
-      className={cn(
-        "hover-lift group flex flex-col",
-        isConnected ? "border-border" : "border-dashed"
-      )}
-    >
-      <CardContent className="flex flex-1 flex-col gap-4">
-        <div className="flex items-start gap-3">
+    <Card className="flex flex-col">
+      <CardContent className="flex flex-1 flex-col gap-3">
+        <div className="flex items-center gap-3">
           <span
             className={cn(
-              "flex size-11 shrink-0 items-center justify-center rounded-xl text-sm font-semibold tracking-tight",
+              "flex size-9 shrink-0 items-center justify-center rounded-lg text-xs font-semibold",
               meta.badge
             )}
           >
             {meta.monogram}
           </span>
-          <div className="min-w-0 flex-1 space-y-0.5">
-            <h3 className="truncate font-heading text-base font-semibold leading-tight">
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-sm font-semibold leading-tight">
               {connection?.displayName ?? meta.label}
             </h3>
             <p className="truncate text-xs text-muted-foreground">
               {meta.category === "Custom" ? "Custom platform" : meta.category}
             </p>
           </div>
-          <span
-            className={cn(
-              "mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
-              visual.className
-            )}
-          >
-            <StatusIcon className="size-3.5" />
+          <span className={cn("flex shrink-0 items-center gap-1.5 text-xs", visual.textClassName)}>
+            <span className={cn("size-1.5 rounded-full", visual.dotClassName)} />
             {visual.label}
           </span>
         </div>
@@ -115,7 +89,7 @@ export function ConnectionCard({
         ) : null}
 
         {connection && connection.status !== "disconnected" ? (
-          <dl className="mt-auto space-y-2 border-t pt-3 text-xs">
+          <dl className="mt-auto space-y-1.5 border-t pt-3 text-xs">
             {connection.accountIdentifier ? (
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">Account</dt>
@@ -144,7 +118,7 @@ export function ConnectionCard({
         )}
       </CardContent>
 
-      <CardFooter className="justify-end gap-2 border-t pt-4">
+      <CardFooter className="justify-end gap-2 border-t pt-3">
         {connection ? (
           <>
             {/* Reconnect only for verifiable (API-key) connections. */}
@@ -154,23 +128,20 @@ export function ConnectionCard({
                 size="sm"
                 onClick={() => onReconnect(meta, connection)}
               >
-                <RefreshCw />
                 Reconnect
               </Button>
             ) : null}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               className="text-destructive hover:text-destructive"
               onClick={() => onDisconnect(connection)}
             >
-              <Unplug />
               Disconnect
             </Button>
           </>
         ) : (
-          <Button size="sm" onClick={() => onConnect(meta)}>
-            <Plug />
+          <Button variant="outline" size="sm" onClick={() => onConnect(meta)}>
             Connect
           </Button>
         )}

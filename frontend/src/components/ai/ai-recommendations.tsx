@@ -1,24 +1,24 @@
 "use client";
 
 import * as React from "react";
-import {
-  Lightbulb,
-  Check,
-  X,
-  RotateCcw,
-  RefreshCw,
-  ArrowRight,
-} from "lucide-react";
+import { Lightbulb, Check, X, RotateCcw, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
-import { PageWrapper } from "@/components/common/page-wrapper";
 import { SectionHeader } from "@/components/common/section-header";
 import { cn } from "@/lib/utils";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import { usePreferences } from "@/services/preferences/preferences-store";
 import { ApiError } from "@/services/api/client";
 import {
@@ -43,17 +43,40 @@ const FILTER_OPTIONS: { value: RecommendationStatusFilter; label: string }[] = [
   { value: "dismissed", label: "Dismissed" },
 ];
 
-const SEVERITY_STYLES: Record<RecommendationSeverity, string> = {
-  high: "border-destructive/30 bg-destructive/10 text-destructive",
-  medium: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  low: "border-border bg-muted text-muted-foreground",
+const SEVERITY_LABELS: Record<RecommendationSeverity, string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
+const SEVERITY_STYLES: Record<RecommendationSeverity, { pill: string; dot: string }> = {
+  high: { pill: "bg-destructive/10 text-destructive", dot: "bg-destructive" },
+  medium: {
+    pill: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+    dot: "bg-amber-500",
+  },
+  low: { pill: "bg-muted text-muted-foreground", dot: "bg-muted-foreground" },
+};
+
+const STATUS_LABELS: Record<RecommendationStatus, string> = {
+  active: "Generated",
+  completed: "Completed",
+  dismissed: "Dismissed",
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  collections: "Collections",
+  "cash-flow": "Cash flow",
+  cost: "Cost",
+  general: "General",
 };
 
 /**
- * Autonomous AI Recommendations panel. Recommendations are generated and kept
- * up to date on the backend after business-data changes — there is no manual
- * "Generate" action. The panel simply reflects the stored state and polls for
- * updates, and lets the user manage each recommendation's lifecycle.
+ * Autonomous AI Recommendations panel — embedded as a section on the Overview
+ * page. Recommendations are generated and kept up to date on the backend
+ * (via the Billing Advisor Agent) after business-data changes — there is no
+ * manual "Generate" action. The panel simply reflects the stored state and
+ * polls for updates, and lets the user manage each recommendation's lifecycle.
  */
 export function AiRecommendations() {
   const { general } = usePreferences();
@@ -116,10 +139,10 @@ export function AiRecommendations() {
   );
 
   return (
-    <PageWrapper className="pt-0">
+    <div className="flex flex-col gap-4">
       <SectionHeader
-        title="AI Recommendations"
-        description="Automatically generated from your billing data and kept up to date."
+        title="Recommendations"
+        description="Your Billing Agent reviews your invoices and flags what needs attention — overdue payments, cash-flow risk, and where your spend is concentrated."
         actions={autoRefreshIndicator}
       />
 
@@ -160,81 +183,109 @@ export function AiRecommendations() {
           }
           description={
             filter === "active"
-              ? "Recommendations appear here automatically as your billing data changes. Make sure an AI provider is configured in Settings."
+              ? "Recommendations appear here automatically as your billing data changes."
               : "Nothing here yet."
           }
         />
       ) : (
-        <div className="reveal-group space-y-3">
-          {items.map((rec) => (
-            <RecommendationCard key={rec.id} rec={rec} onChangeStatus={changeStatus} />
-          ))}
-        </div>
+        <Card className="overflow-hidden p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Recommendation</TableHead>
+                <TableHead>Priority</TableHead>
+                <TableHead>Suggested action</TableHead>
+                <TableHead>Timeline</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((rec) => {
+                const severity = SEVERITY_STYLES[rec.severity];
+                const isResolved = rec.status !== "active";
+                return (
+                  <TableRow key={rec.id}>
+                    <TableCell className="max-w-sm align-top">
+                      <p className="font-medium text-foreground">{rec.title}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{rec.detail}</p>
+                      <span className="mt-1.5 inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                        {CATEGORY_LABELS[rec.category] ?? rec.category}
+                      </span>
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
+                          severity.pill
+                        )}
+                      >
+                        <span className={cn("size-1.5 rounded-full", severity.dot)} />
+                        {SEVERITY_LABELS[rec.severity]}
+                      </span>
+                    </TableCell>
+                    <TableCell className="max-w-xs align-top text-muted-foreground">
+                      {rec.suggestedAction || "—"}
+                    </TableCell>
+                    <TableCell className="align-top whitespace-nowrap">
+                      <p className="text-xs text-muted-foreground">
+                        Generated{" "}
+                        <span className="text-foreground">
+                          {formatRelativeTime(rec.generatedAt, general)}
+                        </span>
+                      </p>
+                      {isResolved ? (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {STATUS_LABELS[rec.status]}{" "}
+                          <span className="text-foreground">
+                            {formatRelativeTime(rec.updatedAt, general)}
+                          </span>
+                        </p>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <div className="flex justify-end gap-1">
+                        {rec.status === "active" ? (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label="Mark as done"
+                              title="Mark as done"
+                              onClick={() => changeStatus(rec.id, "completed")}
+                            >
+                              <Check className="size-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label="Dismiss"
+                              title="Dismiss"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => changeStatus(rec.id, "dismissed")}
+                            >
+                              <X className="size-4" />
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Reactivate"
+                            title="Reactivate"
+                            onClick={() => changeStatus(rec.id, "active")}
+                          >
+                            <RotateCcw className="size-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Card>
       )}
-    </PageWrapper>
-  );
-}
-
-function RecommendationCard({
-  rec,
-  onChangeStatus,
-}: {
-  rec: Recommendation;
-  onChangeStatus: (id: string, next: RecommendationStatus) => void;
-}) {
-  return (
-    <Card className="hover-lift group">
-      <CardContent className="space-y-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-2.5">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/15 transition-transform duration-300 group-hover:scale-105">
-              <Lightbulb className="size-4" />
-            </span>
-            <h3 className="mt-0.5 font-heading text-base font-medium leading-tight">
-              {rec.title}
-            </h3>
-          </div>
-          <span
-            className={cn(
-              "shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium capitalize",
-              SEVERITY_STYLES[rec.severity]
-            )}
-          >
-            {rec.severity}
-          </span>
-        </div>
-
-        <p className="text-sm text-muted-foreground">{rec.detail}</p>
-
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-          <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground capitalize">
-            {rec.category}
-          </span>
-          {rec.suggestedAction ? (
-            <span className="inline-flex items-center gap-1 text-foreground">
-              <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
-              {rec.suggestedAction}
-            </span>
-          ) : null}
-        </div>
-
-        <div className="flex flex-wrap gap-2 pt-1">
-          {rec.status === "active" ? (
-            <>
-              <Button size="sm" variant="outline" onClick={() => onChangeStatus(rec.id, "completed")}>
-                <Check /> Complete
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => onChangeStatus(rec.id, "dismissed")}>
-                <X /> Dismiss
-              </Button>
-            </>
-          ) : (
-            <Button size="sm" variant="ghost" onClick={() => onChangeStatus(rec.id, "active")}>
-              <RotateCcw /> Reactivate
-            </Button>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    </div>
   );
 }

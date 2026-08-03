@@ -3,7 +3,6 @@
 import * as React from "react";
 import {
   BarChart3,
-  Coins,
   Layers,
   Receipt,
   TrendingUp,
@@ -25,13 +24,21 @@ import {
 
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
+import { FlatStatCard } from "@/components/common/flat-stat-card";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
 import { SectionHeader } from "@/components/common/section-header";
-import { StatCard } from "@/components/common/stat-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {
   formatMoney as fmtMoney,
@@ -68,41 +75,26 @@ const INSIGHT_STYLES: Record<
   info: { icon: Info, className: "text-muted-foreground" },
 };
 
-/** A single labelled horizontal bar (width relative to `max`). */
-function BarRow({
-  label,
-  caption,
-  value,
-  max,
-}: {
-  label: string;
-  caption: string;
-  value: number;
-  max: number;
-}) {
-  // Keep a small minimum width so non-zero bars stay visible.
+/** A slim inline bar (used inside a table cell) showing value relative to max. */
+function ShareBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.max((value / max) * 100, 2) : 0;
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="truncate font-medium">{label}</span>
-        <span className="shrink-0 text-muted-foreground">{caption}</span>
-      </div>
-      <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-primary transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+    <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted sm:w-24">
+      <div
+        className="h-full rounded-full bg-primary transition-all"
+        style={{ width: `${pct}%` }}
+      />
     </div>
   );
 }
 
 /**
  * Analytics screen: fetches the composite analytics overview and renders KPIs,
- * per-currency totals, spend-by-platform and monthly-trend bars, a status
- * breakdown, and rule-based insights. Pure CSS/flex visualizations — no chart
- * library. Handles loading, error and empty (no billing data) states.
+ * per-currency totals, spend-by-platform and monthly-trend tables, a status
+ * breakdown, and rule-based insights. Data-dense sections are plain tables —
+ * the professional, scannable presentation for tabular financial figures —
+ * rather than card grids. Handles loading, error and empty (no billing data)
+ * states.
  */
 export function AnalyticsView() {
   // Money + month labels honor the user's General preferences (shared layer).
@@ -216,32 +208,36 @@ export function AnalyticsView() {
       ) : data ? (
         <div className="space-y-8">
           {/* Headline KPIs (money in the primary currency). */}
-          <div className="reveal-group grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <FlatStatCard
               label="Total Invoices"
               value={String(data.invoiceCount)}
-              hint="In selected range"
               icon={Receipt}
+              tone="neutral"
+              hint="All statuses, selected range"
             />
-            <StatCard
+            <FlatStatCard
               label={`Total Spend${primaryTotal ? ` (${primaryTotal.currency})` : ""}`}
               value={primaryTotal ? formatMoney(primaryTotal.total, primaryTotal.currency) : "—"}
-              hint="Primary currency"
               icon={Wallet}
+              tone="primary"
+              hint="Paid + Pending + Overdue"
             />
-            <StatCard
+            <FlatStatCard
               label="Paid"
               value={primaryTotal ? formatMoney(primaryTotal.paid, primaryTotal.currency) : "—"}
-              hint="Settled invoices"
               icon={CircleCheck}
+              tone="success"
+              hint="Invoices already settled"
             />
-            <StatCard
+            <FlatStatCard
               label="Outstanding"
               value={
                 primaryTotal ? formatMoney(primaryTotal.outstanding, primaryTotal.currency) : "—"
               }
-              hint="Pending + overdue"
               icon={CircleAlert}
+              tone="warning"
+              hint="Not yet paid: Pending + Overdue"
             />
           </div>
 
@@ -275,30 +271,38 @@ export function AnalyticsView() {
               title="Totals by currency"
               description="Amounts are grouped per currency and never combined."
             />
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {data.totalsByCurrency.map((c) => (
-                <Card key={c.currency}>
-                  <CardContent className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-2 font-heading text-base font-medium">
-                        <Coins className="size-4 text-muted-foreground" />
-                        {c.currency}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {c.count} invoice{c.count === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                    <p className="font-heading text-xl font-semibold tracking-tight">
-                      {formatMoney(c.total, c.currency)}
-                    </p>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Paid {formatMoney(c.paid, c.currency)}</span>
-                      <span>Outstanding {formatMoney(c.outstanding, c.currency)}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            <Card className="overflow-hidden p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Currency</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Paid</TableHead>
+                    <TableHead className="text-right">Outstanding</TableHead>
+                    <TableHead className="text-right">Invoices</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.totalsByCurrency.map((c) => (
+                    <TableRow key={c.currency}>
+                      <TableCell className="font-medium">{c.currency}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatMoney(c.total, c.currency)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {formatMoney(c.paid, c.currency)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-amber-600 dark:text-amber-400">
+                        {formatMoney(c.outstanding, c.currency)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                        {c.count}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
           </section>
 
           {/* Status breakdown (counts, currency-agnostic). */}
@@ -306,7 +310,7 @@ export function AnalyticsView() {
             <SectionHeader title="Invoice status" description="Count of invoices by status." />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {data.byStatus.map((s) => (
-                <StatCard
+                <FlatStatCard
                   key={s.status}
                   label={s.status}
                   value={String(s.count)}
@@ -316,6 +320,9 @@ export function AnalyticsView() {
                       : s.status === "Overdue"
                         ? TriangleAlert
                         : CircleAlert
+                  }
+                  tone={
+                    s.status === "Paid" ? "success" : s.status === "Overdue" ? "danger" : "warning"
                   }
                 />
               ))}
@@ -333,18 +340,33 @@ export function AnalyticsView() {
               }
             />
             {data.byPlatform.length > 0 ? (
-              <Card>
-                <CardContent className="space-y-4">
-                  {data.byPlatform.map((p) => (
-                    <BarRow
-                      key={p.platformId || p.slug || p.name}
-                      label={p.name}
-                      caption={`${formatMoney(p.total, p.currency)} · ${p.count}`}
-                      value={p.total}
-                      max={maxPlatform}
-                    />
-                  ))}
-                </CardContent>
+              <Card className="overflow-hidden p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Platform</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead className="text-right">Invoices</TableHead>
+                      <TableHead>Share</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.byPlatform.map((p) => (
+                      <TableRow key={p.platformId || p.slug || p.name}>
+                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatMoney(p.total, p.currency)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {p.count}
+                        </TableCell>
+                        <TableCell>
+                          <ShareBar value={p.total} max={maxPlatform} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </Card>
             ) : (
               <EmptyState
@@ -366,18 +388,33 @@ export function AnalyticsView() {
               }
             />
             {data.monthlyTrend.length > 0 ? (
-              <Card>
-                <CardContent className="space-y-4">
-                  {data.monthlyTrend.map((m) => (
-                    <BarRow
-                      key={m.month}
-                      label={formatMonth(m.month)}
-                      caption={`${formatMoney(m.total, m.currency)} · ${m.count}`}
-                      value={m.total}
-                      max={maxMonth}
-                    />
-                  ))}
-                </CardContent>
+              <Card className="overflow-hidden p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Month</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead className="text-right">Invoices</TableHead>
+                      <TableHead>Trend</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.monthlyTrend.map((m) => (
+                      <TableRow key={m.month}>
+                        <TableCell className="font-medium">{formatMonth(m.month)}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatMoney(m.total, m.currency)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {m.count}
+                        </TableCell>
+                        <TableCell>
+                          <ShareBar value={m.total} max={maxMonth} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </Card>
             ) : (
               <EmptyState
@@ -401,8 +438,9 @@ export function AnalyticsView() {
 /**
  * Advanced billing-intelligence sections (F6, polished in F6.1). Every section
  * always renders — with an informative empty state when it has no data — so the
- * layout is stable and reads like a professional SaaS dashboard. Presentation
- * only: no analytics logic, no data shaping.
+ * layout is stable and reads like a professional SaaS dashboard. Tabular data
+ * (expenses, duplicates, high-cost/underused platforms) renders as tables;
+ * narrative insight lists stay as cards. Presentation only.
  */
 function AdvancedSections({ advanced }: { advanced: AdvancedAnalytics }) {
   const { general } = usePreferences();
@@ -418,6 +456,7 @@ function AdvancedSections({ advanced }: { advanced: AdvancedAnalytics }) {
     underusedSubscriptions,
   } = advanced;
   const maxExpense = Math.max(0, ...largestExpenses.map((e) => e.amount));
+  const maxHighCost = Math.max(0, ...highCostPlatforms.map((p) => p.total));
 
   return (
     <>
@@ -469,17 +508,17 @@ function AdvancedSections({ advanced }: { advanced: AdvancedAnalytics }) {
         {growth && growth.changePercent !== null ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <GrowthCard growth={growth} />
-            <StatCard
-              label="This month"
+            <FlatStatCard
+              label={`This month · ${formatMonth(growth.currentMonth)}`}
               value={formatMoney(growth.currentTotal, growth.currency)}
-              hint={formatMonth(growth.currentMonth)}
               icon={Wallet}
+              tone="primary"
             />
-            <StatCard
-              label="Previous month"
+            <FlatStatCard
+              label={`Previous month · ${formatMonth(growth.previousMonth)}`}
               value={formatMoney(growth.previousTotal, growth.currency)}
-              hint={formatMonth(growth.previousMonth)}
-              icon={Coins}
+              icon={Sparkles}
+              tone="neutral"
             />
           </div>
         ) : (
@@ -490,118 +529,165 @@ function AdvancedSections({ advanced }: { advanced: AdvancedAnalytics }) {
         )}
       </section>
 
-      {/* Largest Recurring Expenses — bars or empty state. */}
+      {/* Largest Recurring Expenses — table or empty state. */}
       <section className="space-y-4">
         <SectionHeader
           title="Largest Recurring Expenses"
           description="Charges that repeat across multiple months."
         />
         {largestExpenses.length > 0 ? (
-          <Card>
-            <CardContent className="space-y-4">
-              {largestExpenses.map((e, index) => (
-                <BarRow
-                  key={`${e.platform}-${e.amount}-${index}`}
-                  label={e.platform}
-                  caption={`${formatMoney(e.amount, e.currency)} · ${e.months} mo · ${e.occurrences}×`}
-                  value={e.amount}
-                  max={maxExpense}
-                />
-              ))}
-            </CardContent>
+          <Card className="overflow-hidden p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Platform</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="text-right">Months</TableHead>
+                  <TableHead className="text-right">Occurrences</TableHead>
+                  <TableHead>Share</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {largestExpenses.map((e, index) => (
+                  <TableRow key={`${e.platform}-${e.amount}-${index}`}>
+                    <TableCell className="font-medium">{e.platform}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatMoney(e.amount, e.currency)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {e.months}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {e.occurrences}×
+                    </TableCell>
+                    <TableCell>
+                      <ShareBar value={e.amount} max={maxExpense} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </Card>
         ) : (
           <SectionEmpty icon={Repeat} message="No recurring expenses detected." />
         )}
       </section>
 
-      {/* Duplicate Charges — cards or empty state. */}
+      {/* Duplicate Charges — table or empty state. */}
       <section className="space-y-4">
         <SectionHeader
           title="Duplicate Charges"
           description="The same platform billed the same amount more than once in a month."
         />
         {duplicateSubscriptions.length > 0 ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {duplicateSubscriptions.map((d, index) => (
-              <Card key={`${d.platform}-${d.month}-${index}`}>
-                <CardContent className="flex items-center gap-3">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                    <Copy className="size-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{d.platform}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatMoney(d.amount, d.currency)} × {d.count} in{" "}
+          <Card className="overflow-hidden p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Platform</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="text-right">Count</TableHead>
+                  <TableHead>Month</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {duplicateSubscriptions.map((d, index) => (
+                  <TableRow key={`${d.platform}-${d.month}-${index}`}>
+                    <TableCell className="flex items-center gap-2 font-medium">
+                      <Copy className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                      {d.platform}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatMoney(d.amount, d.currency)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {d.count}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
                       {formatMonth(d.month)}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
         ) : (
           <SectionEmpty icon={Copy} message="No duplicate charges detected." />
         )}
       </section>
 
-      {/* High-cost Platforms — platform cards or empty state. */}
+      {/* High-cost Platforms — table or empty state. */}
       <section className="space-y-4">
         <SectionHeader
           title="High-cost Platforms"
           description="Where your spend concentrates most."
         />
         {highCostPlatforms.length > 0 ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {highCostPlatforms.map((p, index) => (
-              <Card key={`${p.platform}-${index}`}>
-                <CardContent className="space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate font-medium">{p.platform}</span>
-                    <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs font-semibold">
+          <Card className="overflow-hidden p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Platform</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="text-right">Share</TableHead>
+                  <TableHead>Of total spend</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {highCostPlatforms.map((p, index) => (
+                  <TableRow key={`${p.platform}-${index}`}>
+                    <TableCell className="font-medium">{p.platform}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatMoney(p.total, p.currency)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
                       {p.sharePercent}%
-                    </span>
-                  </div>
-                  <p className="font-heading text-lg font-semibold tracking-tight">
-                    {formatMoney(p.total, p.currency)}
-                  </p>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${Math.min(p.sharePercent, 100)}%` }}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                    </TableCell>
+                    <TableCell>
+                      <ShareBar value={p.total} max={maxHighCost} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
         ) : (
           <SectionEmpty icon={Layers} message="No high-cost platforms detected." />
         )}
       </section>
 
-      {/* Underused Subscriptions — cards or empty state. */}
+      {/* Underused Subscriptions — table or empty state. */}
       <section className="space-y-4">
         <SectionHeader
           title="Underused Subscriptions"
           description="Inactive platforms that are still being billed."
         />
         {underusedSubscriptions.length > 0 ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {underusedSubscriptions.map((u, index) => (
-              <Card key={`${u.platform}-${index}`}>
-                <CardContent className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate font-medium">{u.platform}</span>
-                    <span className="shrink-0 text-sm text-muted-foreground">
+          <Card className="overflow-hidden p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Platform</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Reason</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {underusedSubscriptions.map((u, index) => (
+                  <TableRow key={`${u.platform}-${index}`}>
+                    <TableCell className="flex items-center gap-2 font-medium">
+                      <Ban className="size-3.5 shrink-0 text-muted-foreground" />
+                      {u.platform}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
                       {formatMoney(u.total, u.currency)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{u.reason}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{u.reason}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
         ) : (
           <SectionEmpty icon={Ban} message="No underused subscriptions found." />
         )}
@@ -673,28 +759,35 @@ function GrowthCard({
     fmtMoney(amount, currency, general);
   const up = (growth.changePercent ?? 0) >= 0;
   const Icon = up ? ArrowUpRight : ArrowDownRight;
+  const tone = up ? "success" : "danger";
   const color = up
     ? "text-emerald-600 dark:text-emerald-400"
     : "text-destructive";
   return (
     <Card>
-      <CardContent className="space-y-1">
-        <p className="text-sm text-muted-foreground">Month-over-month</p>
-        <p
+      <div className="flex items-center gap-3.5 p-5">
+        <span
           className={cn(
-            "flex items-center gap-1 font-heading text-2xl font-semibold tracking-tight",
-            color
+            "flex size-11 shrink-0 items-center justify-center rounded-xl",
+            INSIGHT_TONES[tone]
           )}
         >
-          <Icon className="size-5" />
-          {up ? "+" : ""}
-          {growth.changePercent}%
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {up ? "Increased" : "Decreased"} by{" "}
-          {formatMoney(Math.abs(growth.changeAmount), growth.currency)}
-        </p>
-      </CardContent>
+          <Icon className="size-5.5" />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-muted-foreground">
+            Month-over-month
+          </p>
+          <p className={cn("font-heading text-2xl font-semibold tracking-tight", color)}>
+            {up ? "+" : ""}
+            {growth.changePercent}%
+          </p>
+          <p className="truncate text-xs text-muted-foreground">
+            {up ? "Increased" : "Decreased"} by{" "}
+            {formatMoney(Math.abs(growth.changeAmount), growth.currency)}
+          </p>
+        </div>
+      </div>
     </Card>
   );
 }

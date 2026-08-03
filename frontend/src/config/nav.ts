@@ -8,7 +8,6 @@ import {
   Boxes,
   CreditCard,
   BarChart3,
-  Sparkles,
   BotMessageSquare,
   Settings,
   type LucideIcon,
@@ -22,10 +21,9 @@ export interface NavItem {
 
 export const dashboardNav: NavItem[] = [
   { title: "Dashboard", href: "/dashboard/overview", icon: LayoutDashboard },
-  { title: "Platforms", href: "/dashboard/platforms", icon: Boxes },
+  { title: "Integrations", href: "/dashboard/platforms", icon: Boxes },
   { title: "Billing", href: "/dashboard/billing", icon: CreditCard },
   { title: "Analytics", href: "/dashboard/usage", icon: BarChart3 },
-  { title: "AI Assistant", href: "/dashboard/ai", icon: Sparkles },
   { title: "Billing Agent", href: "/dashboard/agent", icon: BotMessageSquare },
   { title: "Settings", href: "/dashboard/settings", icon: Settings },
 ];

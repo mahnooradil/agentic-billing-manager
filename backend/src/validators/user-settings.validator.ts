@@ -11,8 +11,7 @@ import { z } from "zod";
 import {
   DATE_FORMATS,
   LANGUAGES,
-  SETTINGS_ANALYTICS_RANGES,
-  RECOMMENDATION_FOCUSES,
+  LANDING_PAGES,
   THEMES,
 } from "@/models/user-settings.model";
 
@@ -26,6 +25,7 @@ const generalSchema = z
     dateFormat: z.enum(DATE_FORMATS),
     timezone: z.string().trim().min(1).max(64),
     language: z.enum(LANGUAGES),
+    defaultLandingPage: z.enum(LANDING_PAGES),
   })
   .partial();
 
@@ -39,45 +39,6 @@ const notificationsSchema = z
   })
   .partial();
 
-const analyticsSchema = z
-  .object({
-    defaultRange: z.enum(SETTINGS_ANALYTICS_RANGES),
-    trendMonths: z.number().int().min(1).max(36),
-    concentrationThreshold: z.number().int().min(1).max(100),
-    highCostThreshold: z.number().int().min(1).max(100),
-    growthAlertThreshold: z.number().int().min(1).max(100),
-  })
-  .partial();
-
-const automationSchema = z
-  .object({
-    enabled: z.boolean(),
-    autoApprove: z.boolean(),
-  })
-  .partial();
-
-const memorySchema = z
-  .object({
-    enabled: z.boolean(),
-    maxRecall: z.number().int().min(1).max(100),
-    summarizeTrigger: z.number().int().min(2).max(200),
-    keepRecent: z.number().int().min(1).max(100),
-  })
-  .partial();
-
-const recommendationsSchema = z
-  .object({
-    maxCount: z.number().int().min(1).max(20),
-    defaultFocus: z.enum(RECOMMENDATION_FOCUSES),
-  })
-  .partial();
-
-const workspaceSchema = z
-  .object({
-    displayName: z.string().trim().max(80),
-  })
-  .partial();
-
 const appearanceSchema = z
   .object({
     theme: z.enum(THEMES),
@@ -88,11 +49,6 @@ export const updateUserSettingsSchema = z
   .object({
     general: generalSchema,
     notifications: notificationsSchema,
-    analytics: analyticsSchema,
-    automation: automationSchema,
-    memory: memorySchema,
-    recommendations: recommendationsSchema,
-    workspace: workspaceSchema,
     appearance: appearanceSchema,
   })
   .partial();

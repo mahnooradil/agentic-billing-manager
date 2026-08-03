@@ -13,6 +13,8 @@ import { sendSuccess } from "@/utils/apiResponse";
 import { encryptSecret, decryptSecret } from "@/utils/crypto";
 import { toPublicPlatformConnection } from "@/utils/platform-connection.serializer";
 import { getAdapter } from "@/services/integrations/registry";
+import { syncConnectionBilling } from "@/services/billing-sync/sync-engine";
+import { assertPlatformConnectionLimit } from "@/utils/plan-limits";
 import {
   searchApps,
   createConnectToken,
@@ -68,6 +70,7 @@ export const createPlatformConnection = asyncHandler(async (req, res) => {
   if (exists) {
     throw new AppError(`${body.platform} is already connected.`, 409);
   }
+  await assertPlatformConnectionLimit(user._id, user.planTier);
 
   const builtIn = isBuiltInPlatform(body.platform);
   const adapter = getAdapter(body.platform);
@@ -226,7 +229,9 @@ export const getPipedreamCatalog = asyncHandler(async (req, res) => {
     return;
   }
   const q = typeof req.query.q === "string" ? req.query.q : "";
-  const apps = await searchApps(q);
+  const limit =
+    typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
+  const apps = await searchApps(q, Number.isFinite(limit) ? limit : undefined);
   sendSuccess(res, 200, "Catalog retrieved", { configured: true, apps });
 });
 
@@ -261,6 +266,17 @@ export const connectViaPipedream = asyncHandler(async (req, res) => {
   }
 
   const platform = body.platform;
+
+  // Only a genuinely NEW connection counts against the limit — reconnecting/
+  // re-verifying an existing one (the upsert below) must never be blocked.
+  const alreadyConnected = await PlatformConnection.exists({
+    user: user._id,
+    platform,
+  });
+  if (!alreadyConnected) {
+    await assertPlatformConnectionLimit(user._id, user.planTier);
+  }
+
   const set: Record<string, unknown> = {
     isCustom: false,
     connectionType: "oauth",
@@ -277,6 +293,13 @@ export const connectViaPipedream = asyncHandler(async (req, res) => {
     { $set: set, $setOnInsert: { user: user._id, platform } },
     { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
   );
+
+  // Fire-and-forget: an immediate first pull for any platform with a billing-
+  // sync adapter, so the user doesn't wait up to the recurring job's interval
+  // to see their first data. A failure here never blocks the connect response.
+  if (account.healthy) {
+    void syncConnectionBilling(connection);
+  }
 
   sendSuccess(res, 200, "Platform connected", {
     connection: toPublicPlatformConnection(connection),

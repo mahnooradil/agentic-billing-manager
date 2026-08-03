@@ -30,8 +30,8 @@ export interface AnalyticsSummary {
 }
 
 /** Builds a compact, PII-free analytics summary from all-time aggregates. */
-async function runAnalyticsSummary(): Promise<AnalyticsSummary> {
-  const overview = await computeAnalyticsOverview("all");
+async function runAnalyticsSummary(userId: string): Promise<AnalyticsSummary> {
+  const overview = await computeAnalyticsOverview(userId, "all");
   return {
     invoiceCount: overview.invoiceCount,
     primaryCurrency: overview.primaryCurrency,

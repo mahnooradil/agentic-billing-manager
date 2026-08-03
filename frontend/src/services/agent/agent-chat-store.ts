@@ -9,11 +9,19 @@
  * Same external-store pattern as chat-store.ts (`useSyncExternalStore`, no
  * extra package, SSR-safe hydration-after-mount).
  */
+import { readStoredSession } from "@/services/auth/session-storage";
 import type { AgentChatMessage } from "@/services/types/agent";
 
-const STORAGE_KEY = "billing.agent.chat.v1";
+const STORAGE_KEY_BASE = "billing.agent.chat.v1";
 /** Bounded so a long conversation can never bloat localStorage. */
 const MAX_MESSAGES = 200;
+
+/** Namespaces storage by the currently logged-in user, so switching accounts
+ *  in the same browser can never show one user's transcript to another. */
+function storageKey(): string {
+  const userId = readStoredSession().user?.id;
+  return userId ? `${STORAGE_KEY_BASE}.${userId}` : STORAGE_KEY_BASE;
+}
 
 export interface AgentChatState {
   messages: AgentChatMessage[];
@@ -49,7 +57,7 @@ function persist(): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(
-      STORAGE_KEY,
+      storageKey(),
       JSON.stringify({ messages: state.messages })
     );
   } catch {
@@ -62,7 +70,7 @@ function hydrate(): void {
   if (hydrated || typeof window === "undefined") return;
   hydrated = true;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(storageKey());
     if (!raw) return;
     const parsed = JSON.parse(raw) as Partial<AgentChatState> | null;
     const messages = sanitize(parsed?.messages);
@@ -99,6 +107,16 @@ export const agentChatStore = {
   clear(): void {
     state = { messages: [] };
     persist();
+    emit();
+  },
+  /**
+   * Drops the in-memory conversation and forces the next `subscribe()` to
+   * re-hydrate from storage. Called on login/logout so a same-tab account
+   * switch can never keep a previous user's messages in memory.
+   */
+  reset(): void {
+    hydrated = false;
+    state = EMPTY;
     emit();
   },
 };

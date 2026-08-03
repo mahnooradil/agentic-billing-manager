@@ -7,7 +7,13 @@
  * - `slug` is unique (URL-friendly identifier).
  * - `timestamps` adds `createdAt` / `updatedAt` automatically.
  */
-import { Schema, model, type HydratedDocument, type Model } from "mongoose";
+import {
+  Schema,
+  model,
+  type HydratedDocument,
+  type Model,
+  type Types,
+} from "mongoose";
 
 /** Allowed platform statuses. Single source of truth for schema + validators. */
 export const PLATFORM_STATUSES = ["Active", "Inactive"] as const;
@@ -15,6 +21,8 @@ export type PlatformStatus = (typeof PLATFORM_STATUSES)[number];
 
 /** Shape of the persisted platform fields. */
 export interface IPlatform {
+  /** Owning user — every query MUST be scoped by this. */
+  user: Types.ObjectId;
   name: string;
   slug: string;
   description?: string;
@@ -30,6 +38,12 @@ type PlatformModel = Model<IPlatform>;
 
 const platformSchema = new Schema<IPlatform, PlatformModel>(
   {
+    user: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
     name: {
       type: String,
       required: [true, "Name is required"],
@@ -40,7 +54,8 @@ const platformSchema = new Schema<IPlatform, PlatformModel>(
     slug: {
       type: String,
       required: [true, "Slug is required"],
-      unique: true, // also creates the index — no separate `index: true` needed
+      // Uniqueness is per-user (see compound index below), not global — two
+      // different users may each have their own platform with the same slug.
       lowercase: true,
       trim: true,
       minlength: [2, "Slug must be at least 2 characters"],
@@ -74,6 +89,9 @@ const platformSchema = new Schema<IPlatform, PlatformModel>(
     },
   }
 );
+
+// One slug per user (not global) — replaces the old bare-unique index.
+platformSchema.index({ user: 1, slug: 1 }, { unique: true });
 
 export const Platform = model<IPlatform, PlatformModel>(
   "Platform",

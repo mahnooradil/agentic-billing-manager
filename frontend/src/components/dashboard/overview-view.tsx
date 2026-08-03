@@ -1,44 +1,44 @@
 "use client";
 
 import * as React from "react";
-import {
-  Boxes,
-  CircleCheck,
-  CircleX,
-  Receipt,
-  Wallet,
-  CircleAlert,
-} from "lucide-react";
+import { Wallet, CheckCircle2, Clock3 } from "lucide-react";
 
-import { EmptyState } from "@/components/common/empty-state";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { StatCard } from "@/components/common/stat-card";
 import { ErrorState } from "@/components/common/error-state";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { PageWrapper } from "@/components/common/page-wrapper";
-import { SectionHeader } from "@/components/common/section-header";
-import { StatCard } from "@/components/common/stat-card";
+import { SpendTrendChart } from "@/components/dashboard/spend-trend-chart";
+import { PlatformSpendChart } from "@/components/dashboard/platform-spend-chart";
+import { InvoiceStatusRow } from "@/components/dashboard/invoice-status-row";
 import { ApiError } from "@/services/api/client";
 import { formatNumber } from "@/lib/format";
-import { getDashboardStats } from "@/services/dashboard/dashboard.service";
-import { getBillingStats } from "@/services/billing/billing.service";
+import { getAnalyticsOverview } from "@/services/analytics/analytics.service";
 import { useAuth } from "@/hooks/use-auth";
-import type { DashboardStats } from "@/services/types/dashboard";
-import type { BillingStats } from "@/services/types/billing";
+import type { AnalyticsOverview } from "@/services/types/analytics";
 
 type ViewStatus = "loading" | "error" | "ready";
 
+/** Time-of-day greeting — computed at render time, no state/effect needed. */
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
 /**
- * Overview screen: a real snapshot of the workspace. Fetches live platform and
- * billing statistics from existing endpoints and renders them in the shared
- * StatCard grid. Money is formatted through the shared formatting layer.
+ * Overview screen: a calm, chart-first snapshot of the workspace. The chart
+ * cards are always shown — each one falls back to its own "No history yet"
+ * message when there's nothing to plot, instead of swapping the whole page
+ * out for a generic empty state.
  */
 export function OverviewView() {
   const { user } = useAuth();
   const firstName = user?.fullName?.trim().split(/\s+/)[0];
 
   const [status, setStatus] = React.useState<ViewStatus>("loading");
-  const [platformStats, setPlatformStats] =
-    React.useState<DashboardStats | null>(null);
-  const [billingStats, setBillingStats] = React.useState<BillingStats | null>(
+  const [analytics, setAnalytics] = React.useState<AnalyticsOverview | null>(
     null
   );
   const [loadError, setLoadError] = React.useState("");
@@ -50,15 +50,9 @@ export function OverviewView() {
     let ignore = false;
     (async () => {
       try {
-        // Platform stats drive the page; billing stats are an enhancement and
-        // must never fail the page if unavailable.
-        const [dashboard, billing] = await Promise.all([
-          getDashboardStats(),
-          getBillingStats().catch(() => null),
-        ]);
+        const overview = await getAnalyticsOverview("6m");
         if (ignore) return;
-        setPlatformStats(dashboard.data.stats);
-        setBillingStats(billing?.data.stats ?? null);
+        setAnalytics(overview.data.analytics);
         setStatus("ready");
       } catch (error) {
         if (ignore) return;
@@ -80,28 +74,27 @@ export function OverviewView() {
     reload();
   };
 
-  const isEmpty =
-    platformStats?.totalPlatforms === 0 &&
-    (billingStats?.totalRecords ?? 0) === 0;
+  const primaryTotals = analytics?.totalsByCurrency[0] ?? null;
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
 
   return (
     <PageWrapper>
-      {/* Premium welcome hero. */}
-      <div className="relative isolate overflow-hidden rounded-2xl bg-brand-gradient p-6 text-primary-foreground shadow-e2 sm:p-8">
-        <div aria-hidden className="pointer-events-none absolute inset-0">
-          <div className="animate-aurora absolute -top-16 -right-10 size-64 rounded-full bg-white/15 blur-3xl" />
-          <div className="absolute inset-0 opacity-10 [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:20px_20px]" />
-        </div>
-        <div className="relative space-y-2">
-          <p className="text-xs font-semibold tracking-[0.18em] text-white/70 uppercase">
-            Welcome back
+      {/* Calm welcome header — no animated blob, just a clean panel. */}
+      <div className="rounded-2xl bg-brand-gradient p-6 text-primary-foreground sm:p-8">
+        <div className="space-y-2">
+          <p className="text-xs font-medium tracking-[0.18em] text-white/70 uppercase">
+            {today}
           </p>
           <h1 className="font-heading text-2xl font-semibold text-balance sm:text-3xl">
-            {firstName ? `Hello, ${firstName}` : "Your billing workspace"}
+            {firstName ? `${getGreeting()}, ${firstName}` : "Your billing workspace"}
           </h1>
           <p className="max-w-lg text-sm text-white/80">
-            Here&apos;s a live snapshot of everything you&apos;re billed on —
-            platforms, invoices, and revenue at a glance.
+            Every subscription, every invoice — one clear view, always
+            current.
           </p>
         </div>
       </div>
@@ -112,71 +105,87 @@ export function OverviewView() {
         </div>
       ) : status === "error" ? (
         <ErrorState description={loadError} onRetry={retry} />
-      ) : isEmpty ? (
-        <EmptyState
-          icon={Boxes}
-          title="Nothing to show yet"
-          description="Add a billing platform and your first invoice to see live statistics here."
-        />
-      ) : platformStats ? (
+      ) : (
         <>
-          <section className="space-y-4">
-            <SectionHeader
-              title="Platforms"
-              description="The services your billing is organized by."
-            />
-            <div className="reveal-group grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {primaryTotals ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <StatCard
-                label="Total Platforms"
-                value={String(platformStats.totalPlatforms)}
-                hint="All platforms"
-                icon={Boxes}
+                label={`Total spend (${primaryTotals.currency})`}
+                value={formatNumber(primaryTotals.total)}
+                hint="Last 6 months"
+                icon={Wallet}
               />
               <StatCard
-                label="Active Platforms"
-                value={String(platformStats.activePlatforms)}
-                hint="Currently active"
-                icon={CircleCheck}
+                label="Paid"
+                value={formatNumber(primaryTotals.paid)}
+                hint="Settled invoices"
+                icon={CheckCircle2}
               />
               <StatCard
-                label="Inactive Platforms"
-                value={String(platformStats.inactivePlatforms)}
-                hint="Currently inactive"
-                icon={CircleX}
+                label="Outstanding"
+                value={formatNumber(primaryTotals.outstanding)}
+                hint="Pending + overdue"
+                icon={Clock3}
               />
             </div>
-          </section>
-
-          {billingStats ? (
-            <section className="space-y-4">
-              <SectionHeader
-                title="Billing"
-                description="Your invoices at a glance."
-              />
-              <div className="reveal-group grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <StatCard
-                  label="Total Invoices"
-                  value={String(billingStats.totalRecords)}
-                  hint="All billing records"
-                  icon={Receipt}
-                />
-                <StatCard
-                  label="Total Revenue"
-                  value={formatNumber(billingStats.totalRevenue)}
-                  hint="Paid invoices"
-                  icon={Wallet}
-                />
-                <StatCard
-                  label="Overdue"
-                  value={String(billingStats.overdueRecords)}
-                  hint="Past due invoices"
-                  icon={CircleAlert}
-                />
-              </div>
-            </section>
           ) : null}
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Monthly spend
+                  {analytics?.primaryCurrency ? ` (${analytics.primaryCurrency})` : ""}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {analytics && analytics.monthlyTrend.length > 0 ? (
+                  <SpendTrendChart
+                    data={analytics.monthlyTrend}
+                    currency={analytics.primaryCurrency ?? ""}
+                  />
+                ) : (
+                  <p className="py-16 text-center text-sm text-muted-foreground">
+                    No history yet.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Invoice status
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <InvoiceStatusRow data={analytics?.byStatus ?? []} />
+              </CardContent>
+            </Card>
+
+            <Card className="lg:col-span-3">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Spend by platform
+                  {analytics?.primaryCurrency ? ` (${analytics.primaryCurrency})` : ""}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {analytics && analytics.byPlatform.length > 0 ? (
+                  <PlatformSpendChart
+                    data={analytics.byPlatform}
+                    currency={analytics.primaryCurrency ?? ""}
+                  />
+                ) : (
+                  <p className="py-16 text-center text-sm text-muted-foreground">
+                    No history yet.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </>
-      ) : null}
+      )}
     </PageWrapper>
   );
 }

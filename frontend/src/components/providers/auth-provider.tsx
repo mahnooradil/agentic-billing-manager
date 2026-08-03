@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import { AuthContext, type AuthContextValue } from "@/context/auth-context";
 import { authStore } from "@/services/auth/auth-store";
 import { setUnauthorizedHandler } from "@/services/api/unauthorized-handler";
+import { agentChatStore } from "@/services/agent/agent-chat-store";
+import { getUserSettings } from "@/services/settings/settings.service";
+import { LANDING_PAGE_PATHS } from "@/services/types/settings";
 import type { AuthUser } from "@/services/types/auth";
 
 /**
@@ -23,15 +26,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const login = React.useCallback(
-    (token: string, user: AuthUser) => {
+    async (token: string, user: AuthUser) => {
       authStore.setSession(token, user);
-      router.replace("/dashboard/overview");
+      // Force the agent chat store to re-hydrate under this user's own storage
+      // key — otherwise a same-tab account switch could still show the
+      // previous user's in-memory transcript for a moment before any storage read.
+      agentChatStore.reset();
+
+      // Redirect to the user's preferred landing page; fall back to the
+      // dashboard overview if the settings fetch fails for any reason.
+      let destination = "/dashboard/overview";
+      try {
+        const response = await getUserSettings();
+        destination = LANDING_PAGE_PATHS[response.data.settings.general.defaultLandingPage];
+      } catch {
+        // Keep the default destination.
+      }
+      router.replace(destination);
     },
     [router]
   );
 
   const logout = React.useCallback(() => {
     authStore.clearSession();
+    agentChatStore.reset();
     router.replace("/login");
   }, [router]);
 

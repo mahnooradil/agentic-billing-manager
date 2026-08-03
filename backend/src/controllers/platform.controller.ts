@@ -5,8 +5,11 @@
  * by `authenticate`, so these handlers focus on business logic. Errors are
  * thrown as `AppError`s and formatted centrally; async rejections are forwarded
  * via `asyncHandler`. Follows the same model→controller pattern as auth.
+ *
+ * Every query is scoped to the authenticated user — platforms belong to
+ * exactly one user and must never be visible to, or mutable by, anyone else.
  */
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, type Types } from "mongoose";
 
 import { asyncHandler } from "@/utils/asyncHandler";
 import { AppError } from "@/utils/appError";
@@ -20,21 +23,31 @@ import type {
   UpdatePlatformInput,
 } from "@/validators/platform.validator";
 
-/** Loads a platform by id or throws a 404 (also for malformed ids). */
-async function findPlatformOr404(id: string): Promise<PlatformDocument> {
+/** Loads a platform by id, scoped to its owner, or throws a 404 (also for malformed ids). */
+async function findPlatformOr404(
+  id: string,
+  userId: Types.ObjectId
+): Promise<PlatformDocument> {
   if (!isValidObjectId(id)) {
     throw new AppError("Platform not found", 404);
   }
-  const platform = await Platform.findById(id);
+  const platform = await Platform.findOne({ _id: id, user: userId });
   if (!platform) {
     throw new AppError("Platform not found", 404);
   }
   return platform;
 }
 
-/** GET /api/platforms — list all platforms (newest first). */
-export const listPlatforms = asyncHandler(async (_req, res) => {
-  const platforms = await Platform.find().sort({ createdAt: -1 });
+/** GET /api/platforms — list the caller's platforms (newest first). */
+export const listPlatforms = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new AppError("Authentication required", 401);
+  }
+
+  const platforms = await Platform.find({ user: user._id }).sort({
+    createdAt: -1,
+  });
   sendSuccess(res, 200, "Platforms retrieved", {
     platforms: platforms.map(toPublicPlatform),
   });
@@ -42,7 +55,12 @@ export const listPlatforms = asyncHandler(async (_req, res) => {
 
 /** GET /api/platforms/:id — fetch a single platform. */
 export const getPlatform = asyncHandler(async (req, res) => {
-  const platform = await findPlatformOr404(req.params.id as string);
+  const user = req.user;
+  if (!user) {
+    throw new AppError("Authentication required", 401);
+  }
+
+  const platform = await findPlatformOr404(req.params.id as string, user._id);
   sendSuccess(res, 200, "Platform retrieved", {
     platform: toPublicPlatform(platform),
   });
@@ -50,18 +68,23 @@ export const getPlatform = asyncHandler(async (req, res) => {
 
 /** POST /api/platforms — create a platform. */
 export const createPlatform = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new AppError("Authentication required", 401);
+  }
+
   const body = req.body as CreatePlatformInput;
 
-  const existing = await Platform.findOne({ slug: body.slug });
+  const existing = await Platform.findOne({ slug: body.slug, user: user._id });
   if (existing) {
     throw new AppError("A platform with this slug already exists", 409);
   }
 
-  const platform = await Platform.create(body);
+  const platform = await Platform.create({ ...body, user: user._id });
   emitBusinessDataChanged({
     source: "platform",
     action: "create",
-    triggeredBy: req.user?._id?.toString(),
+    triggeredBy: user._id.toString(),
   });
   sendSuccess(res, 201, "Platform created", {
     platform: toPublicPlatform(platform),
@@ -70,13 +93,19 @@ export const createPlatform = asyncHandler(async (req, res) => {
 
 /** PUT /api/platforms/:id — update a platform. */
 export const updatePlatform = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new AppError("Authentication required", 401);
+  }
+
   const body = req.body as UpdatePlatformInput;
-  const platform = await findPlatformOr404(req.params.id as string);
+  const platform = await findPlatformOr404(req.params.id as string, user._id);
 
   // Guard slug uniqueness only when the slug is actually changing.
   if (body.slug && body.slug !== platform.slug) {
     const duplicate = await Platform.findOne({
       slug: body.slug,
+      user: user._id,
       _id: { $ne: platform._id },
     });
     if (duplicate) {
@@ -90,7 +119,7 @@ export const updatePlatform = asyncHandler(async (req, res) => {
   emitBusinessDataChanged({
     source: "platform",
     action: "update",
-    triggeredBy: req.user?._id?.toString(),
+    triggeredBy: user._id.toString(),
   });
   sendSuccess(res, 200, "Platform updated", {
     platform: toPublicPlatform(platform),
@@ -99,10 +128,18 @@ export const updatePlatform = asyncHandler(async (req, res) => {
 
 /** DELETE /api/platforms/:id — remove a platform. */
 export const deletePlatform = asyncHandler(async (req, res) => {
-  const platform = await findPlatformOr404(req.params.id as string);
+  const user = req.user;
+  if (!user) {
+    throw new AppError("Authentication required", 401);
+  }
+
+  const platform = await findPlatformOr404(req.params.id as string, user._id);
 
   // Prevent orphaning billing records — block deletion while any reference it.
-  const referencingRecord = await Billing.exists({ platform: platform._id });
+  const referencingRecord = await Billing.exists({
+    platform: platform._id,
+    user: user._id,
+  });
   if (referencingRecord) {
     throw new AppError(
       "This platform cannot be deleted because billing records are associated with it.",
@@ -114,7 +151,7 @@ export const deletePlatform = asyncHandler(async (req, res) => {
   emitBusinessDataChanged({
     source: "platform",
     action: "delete",
-    triggeredBy: req.user?._id?.toString(),
+    triggeredBy: user._id.toString(),
   });
   sendSuccess(res, 200, "Platform deleted", { id: platform._id.toString() });
 });

@@ -27,11 +27,6 @@ function toGroups(plain: Partial<SettingsGroups> | null): SettingsGroups {
   return {
     general: key("general"),
     notifications: key("notifications"),
-    analytics: key("analytics"),
-    automation: key("automation"),
-    memory: key("memory"),
-    recommendations: key("recommendations"),
-    workspace: key("workspace"),
     appearance: key("appearance"),
   };
 }
