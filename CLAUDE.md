@@ -203,10 +203,21 @@ EmptyState, ErrorState, LoadingSpinner, FormAlert, Pagination, Container) and
 | 7A | Billing Records CRUD (second business module; each record belongs to one Platform) | ✅ done, pushed | `73527b6` |
 | 7B | Billing dashboard stats, search, status filter, pagination + platform-delete guard (409 when billing records reference it) | ✅ done, pushed | `ae6ae74` |
 | 7C | Billing polish: sorting (date/amount), total-results counter, page info; composes with search/filter/pagination | ✅ done, pushed | `e8e04c9` |
-| 8A | AI Integration Foundation — per-user AI provider config only (no AI calls); API key encrypted at rest | ✅ done, pushed | `d74a3be` |
-| 8B | AI Assistant chat — POST /api/ai/chat relays to OpenAI/OpenRouter/Gemini; in-memory chat UI; Gemini header-auth + per-reason errors + deprecated-model fallback to gemini-3.5-flash | ✅ done, pushed | `27db33e` |
+| 8A | AI Integration Foundation — per-user AI provider config only (no AI calls); API key encrypted at rest | ⚠️ removed in `0c8782d` — `AiSettings` model/controller/routes deleted, superseded by per-user encrypted settings folded into other flows | `d74a3be` |
+| 8B | AI Assistant chat — POST /api/ai/chat relays to OpenAI/OpenRouter/Gemini; in-memory chat UI; Gemini header-auth + per-reason errors + deprecated-model fallback to gemini-3.5-flash | ⚠️ removed in `0c8782d` — superseded by Phase 12's Billing Advisor Agent | `27db33e` |
+| 8C | Pipedream webhook ingestion (`POST /api/webhooks/billing`, shared-secret header) + Claude (Anthropic) added as 4th AI provider + Analytics Engine foundation (`GET /api/analytics/overview`; `/dashboard/usage` repurposed as Analytics) | ⚠️ webhook route later removed entirely in `0c8782d` (no per-user design, no frontend caller); Claude provider + Analytics Engine still live | `76a505a` |
+| 10 | AI-powered recommendations — ephemeral `POST /api/ai/recommendations`, analytics snapshot → AI reasoning → structured recs | ✅ done, pushed — superseded by F1's persistent engine below | `cd954ed` |
+| 11 | Data-aware AI Assistant — read-only tool registry grounds plain AI chat replies with aggregated billing data | ⚠️ removed in `0c8782d` along with 8B's AI chat (superseded by Phase 12 agent) | `ae92674` |
+| F1 | Autonomous AI Recommendation Engine — persistent workspace data, lifecycle (active/dismissed/completed), event-bus driven regeneration, `/api/recommendations` (list/PATCH/refresh) | ✅ done, pushed | `ae92674` |
+| F2 | Notification Engine — rule-based alerts (overdue billing, high-spend concentration, recommendation changes) via the event bus, signature-based dedup | ✅ done, pushed | `c2d3714` |
+| F6 | Advanced Analytics — deeper billing intelligence endpoint on top of the Phase 9 analytics engine | ✅ done, pushed | `c2d3714` |
+| F7 | User Settings — one preferences doc per user (general/notifications/analytics/automation/memory/recommendations/workspace/appearance) | ✅ done, pushed | `c2d3714` |
+| — | Platform Connections + Pipedream integration — connect platforms via verified API key or Pipedream-managed OAuth, encrypted credentials at rest, per-user rate limiting | ✅ done, pushed | `c2d3714` |
+| 12 | Billing Advisor Agent — Claude Managed Agents session per user (`/api/agent/chat`), reads real billing/platform data via tools, connect-platform deep links into Platforms page | ✅ done, pushed — **further work paused 2026-07-27 by the user (see memory); do not extend without asking** | `e160171` |
+| — | Billing-sync adapter layer (129 adapters pulling connected platforms' own billing/usage/balance data via Pipedream Connect Proxy → normalized into Billing, `source: auto_sync`), support requests module, session/OTP security hardening (Session model, JWT `jti`, per-device session list + revoke, email-change OTP), plan tiers (`config/plans.ts`), Postmark → Resend email migration | ✅ done, pushed | `0c8782d` |
 
 **Next phase: NOT yet assigned — wait for the user's brief before building anything.**
+**Note:** Phase 12 (Billing Advisor Agent) work is explicitly paused per the user — do not resume/extend it unprompted.
 
 ### Module notes
 - **Platform** = a third-party service the user is billed on. Fields: `name` (2–100),
@@ -231,28 +242,65 @@ EmptyState, ErrorState, LoadingSpinner, FormAlert, Pagination, Container) and
   (customer + invoice), status filter, and 10/page pagination (same pattern as Platforms).
 - **Referential integrity** (7B): deleting a Platform is blocked with a 409 while any
   Billing record references it (`Billing.exists({platform})`) — no cascade, no orphans.
-- **AI provider settings** (8A, config only — NO AI calls yet): one config per user
-  (`AiSettings`, `user` ref unique). Endpoints (authed, scoped to `req.user`):
-  `GET/PUT/DELETE /api/ai/settings` — GET returns the user's config or `null`, PUT upserts
-  (blank `apiKey` on edit keeps the stored key; create 201 / edit 200), DELETE removes.
-  API key is **encrypted at rest** (AES-256-GCM, `utils/crypto.ts`, key derived from
-  `AI_ENCRYPTION_KEY` or JWT_SECRET) and **never returned** — only `maskedApiKey`
-  (`••••••••<last4>`) + `hasApiKey`. UI is an "AI Provider" section on `/dashboard/settings`;
-  Test Connection is a placeholder (no network). Providers: OpenAI / Gemini / OpenRouter.
-  Note: the schema field `model` is safe (runtime-verified); Mongoose uses `doc.$model`.
-- **AI Assistant chat** (8B): `POST /api/ai/chat` (authed) — body `{messages:[{role,content}]}` (in-memory
-  only, no persistence). Reads the user's AiSettings, decrypts the key in memory, and calls the provider
-  via built-in `fetch`. OpenAI/OpenRouter use `Authorization: Bearer`; Gemini uses the `x-goog-api-key`
-  header at `v1beta/models/<model>:generateContent`. Provider failures → clean **502** (never 401 —
-  that would trip the frontend auto-logout); the key is never logged/returned. Gemini extras (in
-  `utils/ai-provider.ts`, Gemini-only): per-reason error mapping + masked diagnostics, and
-  `resolveGeminiModel` which remaps deprecated/empty model ids to `gemini-3.5-flash` (current Google
-  default, verified live) while passing custom models through. UI: `components/ai/ai-chat.tsx` on
-  `/dashboard/ai`.
+- **AI provider settings** (8A) and **AI Assistant chat** (8B, 11) — ⚠️ **removed in
+  `0c8782d`** (`AiSettings`/`ai-chat` models, controllers, routes, validators all deleted).
+  Superseded by the **Billing Advisor Agent** (Phase 12, below), which is the current
+  AI surface in the app. Do not re-add the old `/api/ai/settings` or `/api/ai/chat`
+  endpoints — the replacement is `/api/agent/chat`.
 - **6C search/filter/pagination** is entirely **client-side** over the loaded list
   (no backend change): search matches name+slug, status filter All/Active/Inactive,
   `PAGE_SIZE=10`, page resets to 1 on search/filter change, distinct "no matching
   platforms" empty state with a Clear-filters action.
+- **Analytics Engine** (9, extracted to `services/analytics/analytics.engine.ts` in
+  Phase 10): `GET /api/analytics/overview` (authed) — read-only aggregations over
+  Billing (per-currency totals, spend-by-platform, monthly trend in a primary currency,
+  status breakdown, rule-based insights, no AI). Reused by both the analytics endpoint
+  and the recommendation engine. Advanced Analytics (F6) adds a deeper endpoint on top
+  of the same range semantics. Frontend: `/dashboard/usage` was repurposed as Analytics
+  (CSS/flex visuals, no chart package).
+- **Autonomous AI Recommendation Engine** (F1, `services/ai/recommendation-engine.ts`):
+  persistent recs (`Recommendation` model) with a lifecycle (active/dismissed/completed).
+  A typed event bus (`services/events`) — billing/platform controllers emit
+  `business.data.changed` — triggers background regeneration (single-flight + trailing
+  debounce). Reconciliation dedups by signature, auto-completes recs the AI stops
+  returning (`resolvedBy: ai`), reactivates on recurrence, never resurrects a user
+  dismissal. `GET/PATCH /api/recommendations`, ops-only `POST /refresh`.
+- **Notification Engine** (F2): rule-based alerts (overdue billing, high-spend
+  concentration, recommendation changes) subscribed to the same event bus,
+  signature-based dedup. `Notification` model + `/api/notifications`.
+- **User Settings** (F7): one `UserSettings` doc per user covering general,
+  notifications, analytics, automation, memory, recommendations, workspace, and
+  appearance preferences. `/api/settings`.
+- **Platform Connections + Pipedream integration**: connect a third-party platform via
+  a verified API key or Pipedream-managed OAuth; credentials encrypted at rest; per-user
+  rate limiting on connection endpoints. `PlatformConnection` model, `/api/platform-connections`.
+- **Billing Advisor Agent** (Phase 12, ⚠️ **further work paused 2026-07-27** — do not
+  extend without asking): `POST /api/agent/chat` backed by a Claude Managed Agents
+  session per user (`services/agent/`, `AgentSession` model) — separate from the old
+  plain AI chat. Reads real billing/platform data via custom tools, helps connect new
+  platforms through the existing capability resolver (native adapters + Pipedream) but
+  never handles credentials itself; returns a `connect_platform` action the frontend
+  renders as a one-click deep link into the Platforms page's Connect flow. Frontend:
+  standalone Billing Agent page/nav item with voice input/output and persistent local
+  chat history.
+- **Billing-sync adapter layer** (`services/billing-sync/`): 129 platform adapters
+  (`adapters/*.adapter.ts`) + `registry.ts` + `sync-engine.ts` + `scheduler.ts`. Each
+  adapter pulls a connected platform's own billing/usage/balance data automatically via
+  Pipedream's Connect Proxy, normalized into the Billing collection with `source:
+  auto_sync`. `server.ts` starts the scheduler; `platform-connection.controller.ts`
+  calls `syncConnectionBilling` on connect.
+- **Support requests**: `SupportRequest` model — category, `priority` snapshotted from
+  the requester's plan tier at submission (`standard`/`priority`), `status`
+  (`open`/`resolved`). No admin/reply UI exists — see production-hardening backlog.
+  Dual email notification (support inbox + requester confirmation) on submit.
+  `/api/support`. Frontend: dedicated Support tab on `/dashboard/settings`.
+- **Session/security hardening**: `Session` model + JWT `jti` claim enable a per-device
+  session list with revoke; OTP-based flows (`Otp` model) cover auth steps and
+  email-change confirmation. Frontend Security tab (session list) on `/dashboard/settings`.
+- **Plan tiers**: `config/plans.ts` + `plan-limits.ts` define tier limits/features;
+  `plan.controller.ts` + `/api/plan` expose them. Support-request priority and other
+  tier-gated behavior read from here.
+- **Email**: transactional email migrated from Postmark to Resend (`services/email/`).
 
 ---
 
