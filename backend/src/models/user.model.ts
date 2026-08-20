@@ -9,18 +9,24 @@
  */
 import { Schema, model, type HydratedDocument, type Model } from "mongoose";
 
-import { PLAN_TIERS, type PlanTier } from "@/config/plans";
-
 /** Shape of the persisted user fields. */
 export interface IUser {
   fullName: string;
   email: string;
   profilePicture?: string;
-  /** Self-service plan tier (no payment processor yet — see config/plans.ts). */
-  planTier: PlanTier;
   /** Bumped by "sign out of all other devices" — invalidates every JWT signed
    *  with an older version, since verifying one compares it to this value. */
   tokenVersion: number;
+  /** Credit-based usage tracker balance (see config/credits.ts,
+   *  services/credits/). Starts at 0 here — the signup grant is applied
+   *  explicitly via `grantCredits` (auth.controller.ts) so it's a real ledger
+   *  entry, not an unexplained default. Can dip slightly below zero — see
+   *  CreditTransaction's `balanceAfter` field for why. No payment processor
+   *  wired up yet. Deliberately PER-USER even inside an organization — each
+   *  member's own Billing Advisor Agent usage, not a shared org pool. Plan
+   *  tier (and its limits) moved to Organization — it gates the org's SHARED
+   *  Platform/Billing data, not any one member's usage. */
+  creditsBalance: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -49,12 +55,11 @@ const userSchema = new Schema<IUser, UserModel>(
       trim: true,
       default: undefined,
     },
-    planTier: {
-      type: String,
-      enum: PLAN_TIERS,
-      default: "Free",
-    },
     tokenVersion: {
+      type: Number,
+      default: 0,
+    },
+    creditsBalance: {
       type: Number,
       default: 0,
     },

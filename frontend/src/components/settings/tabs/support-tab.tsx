@@ -29,6 +29,7 @@ import { usePreferences } from "@/services/preferences/preferences-store";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiError } from "@/services/api/client";
 import { getSupportRequests, createSupportRequest } from "@/services/support/support.service";
+import { getMyPlan } from "@/services/plan/plan.service";
 import type { SupportCategory, SupportRequest } from "@/services/types/support";
 
 const CATEGORY_OPTIONS: { value: SupportCategory; label: string }[] = [
@@ -83,7 +84,9 @@ const STATUS_STYLES: Record<SupportRequest["status"], { pill: string; dot: strin
 export function SupportSettingsTab() {
   const { user } = useAuth();
   const { general } = usePreferences();
-  const isPriority = user?.planTier !== "Free";
+  // Plan tier moved to the organization (shared across members) — fetched
+  // here rather than read off the user, same as Billing & Plan's own tab.
+  const [isPriority, setIsPriority] = React.useState(false);
 
   const [requests, setRequests] = React.useState<SupportRequest[]>([]);
   const [status, setStatus] = React.useState<ViewStatus>("loading");
@@ -108,9 +111,10 @@ export function SupportSettingsTab() {
     let ignore = false;
     (async () => {
       try {
-        const response = await getSupportRequests();
+        const [requestsRes, planRes] = await Promise.all([getSupportRequests(), getMyPlan()]);
         if (ignore) return;
-        setRequests(response.data.requests);
+        setRequests(requestsRes.data.requests);
+        setIsPriority(planRes.data.plan.tier !== "Free");
         setStatus("ready");
       } catch (error) {
         if (ignore) return;

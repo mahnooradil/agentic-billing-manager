@@ -71,6 +71,14 @@ export const PLATFORM_DEFAULT_CONNECTION_TYPE: Record<
 };
 
 export interface IPlatformConnection {
+  /** Owning organization — every query MUST be scoped by this (shared across
+   *  every member of the organization). */
+  organization: Types.ObjectId;
+  /** Which member connected this account. ALSO still the Pipedream
+   *  `external_user_id` for every proxy/token call on this connection — that
+   *  external identity is NOT remapped to the organization, since existing
+   *  Pipedream-side accounts were already created keyed by this user id and
+   *  remapping would break them. */
   user: Types.ObjectId;
   /** Platform identifier — a built-in key (e.g. "Stripe") or a custom name. */
   platform: string;
@@ -109,6 +117,12 @@ const platformConnectionSchema = new Schema<
   PlatformConnectionModel
 >(
   {
+    organization: {
+      type: Schema.Types.ObjectId,
+      ref: "Organization",
+      required: [true, "Organization is required"],
+      index: true,
+    },
     user: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -203,8 +217,9 @@ const platformConnectionSchema = new Schema<
   }
 );
 
-// One connection per platform per user (adding a platform never needs a redesign).
-platformConnectionSchema.index({ user: 1, platform: 1 }, { unique: true });
+// One connection per platform per organization (adding a platform never needs
+// a redesign) — shared across every member, not duplicated per connector.
+platformConnectionSchema.index({ organization: 1, platform: 1 }, { unique: true });
 
 export const PlatformConnection = model<
   IPlatformConnection,

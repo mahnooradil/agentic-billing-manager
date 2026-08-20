@@ -20,12 +20,13 @@ import type { CreateSupportRequestInput } from "@/validators/support.validator";
 /** POST /api/support — submit a support request. */
 export const createSupportRequestHandler = asyncHandler(async (req, res) => {
   const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!user || !organization) {
     throw new AppError("Authentication required", 401);
   }
 
   const { category, subject, message } = req.body as CreateSupportRequestInput;
-  const isPriority = user.planTier !== "Free";
+  const isPriority = organization.planTier !== "Free";
 
   const request = await SupportRequest.create({
     user: user._id,

@@ -32,8 +32,10 @@ export interface BusinessDataChangedEvent {
 /** Emitted by the Recommendation Engine after a refresh completes. */
 export interface RecommendationsUpdatedEvent {
   type: "recommendations.updated";
-  /** The user this refresh ran for — downstream engines must scope by this. */
+  /** The user who triggered this refresh (for logging/labeling only). */
   userId: string;
+  /** The organization this refresh ran for — downstream engines must scope by this. */
+  organizationId: string;
   summary: {
     created: number;
     updated: number;
@@ -52,8 +54,8 @@ export interface RecommendationsUpdatedEvent {
 export interface NotificationCreatedEvent {
   type: "notification.created";
   notificationId: string;
-  /** The user this notification belongs to — downstream channels must scope by this. */
-  userId: string;
+  /** The organization this notification belongs to — downstream channels must scope by this. */
+  organizationId: string;
   severity: "info" | "warning" | "critical";
   category: string;
   title: string;

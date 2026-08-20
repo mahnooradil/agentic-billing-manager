@@ -28,18 +28,18 @@ import type { AnalyticsRange } from "@/validators/analytics.validator";
 const RECURRING_LIMIT = 20;
 const DUPLICATE_LIMIT = 20;
 
-/** Computes the full advanced billing intelligence for a range, scoped to ONE user. */
+/** Computes the full advanced billing intelligence for a range, scoped to ONE organization. */
 export async function computeAdvancedAnalytics(
-  userId: string,
+  organizationId: string,
   range: AnalyticsRange
 ): Promise<AdvancedAnalytics> {
   const now = new Date();
   const rangeMatch = {
-    user: new Types.ObjectId(userId),
+    organization: new Types.ObjectId(organizationId),
     ...buildRangeMatch(range, now),
   };
 
-  const overview = await computeAnalyticsOverview(userId, range);
+  const overview = await computeAnalyticsOverview(organizationId, range);
   const primaryCurrency = overview.primaryCurrency;
 
   // Recurring: same (platform, amount, currency) seen across ≥2 distinct months.
@@ -145,7 +145,7 @@ export async function computeAdvancedAnalytics(
 
   // Underused: Inactive platforms that still have billing records in range.
   const inactive = await Platform.find({
-    user: new Types.ObjectId(userId),
+    organization: new Types.ObjectId(organizationId),
     status: "Inactive",
   }).select("name slug");
   const underused: RawUnderusedRow[] = [];

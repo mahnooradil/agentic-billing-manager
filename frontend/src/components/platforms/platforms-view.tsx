@@ -4,7 +4,7 @@ import * as React from "react";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createFrontendClient } from "@pipedream/sdk/browser";
-import { Boxes, Loader2, Pencil, Plug, Plus, Search, SearchX, Trash2 } from "lucide-react";
+import { Boxes, Loader2, Mail, Pencil, Plug, Plus, Search, SearchX, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -55,6 +55,27 @@ const POPULAR_SLUGS = [
   "mailchimp",
   "aws",
 ];
+
+/** Reads `metadata.emailSync.lastSyncedAt` off a connection, if present —
+ *  stamped by the backend's email-sync engine after each completed run. */
+function lastEmailSyncedAt(metadata: Record<string, unknown>): Date | null {
+  const emailSync = metadata.emailSync as { lastSyncedAt?: string } | undefined;
+  if (!emailSync?.lastSyncedAt) return null;
+  const date = new Date(emailSync.lastSyncedAt);
+  return isNaN(date.getTime()) ? null : date;
+}
+
+/** Coarse "time ago" label — good enough for a status hint, not a live clock. */
+function timeAgo(date: Date): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -466,6 +487,16 @@ function PlatformsViewInner() {
       <PageHeader
         title="Integrations"
         description="Connect the platforms you're billed on — every invoice and subscription stays in sync, automatically."
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setQuery("Gmail")}
+          >
+            <Mail />
+            Connect email for invoice sync
+          </Button>
+        }
       />
 
       {alert ? <FormAlert variant={alert.type} message={alert.message} /> : null}
@@ -481,6 +512,15 @@ function PlatformsViewInner() {
           aria-label="Search platforms"
         />
       </div>
+      {query.toLowerCase() === "gmail" ? (
+        <p className="text-sm text-muted-foreground">
+          No direct billing sync for a platform? Connect{" "}
+          <span className="font-medium text-foreground">Gmail</span> below
+          (not the generic &quot;Google&quot; app) and we&apos;ll scan for
+          invoice emails automatically — a fallback behind direct sync, not a
+          replacement for it.
+        </p>
+      ) : null}
 
       {status === "loading" && apps.length === 0 ? (
         <div className="flex flex-1 items-center justify-center py-16">
@@ -520,6 +560,14 @@ function PlatformsViewInner() {
                         <p className="truncate text-xs text-muted-foreground">
                           {connection.accountIdentifier ?? "Connected"}
                         </p>
+                        {(() => {
+                          const syncedAt = lastEmailSyncedAt(connection.metadata);
+                          return syncedAt ? (
+                            <p className="truncate text-xs text-muted-foreground">
+                              Invoices last checked {timeAgo(syncedAt)}
+                            </p>
+                          ) : null;
+                        })()}
                       </div>
                       <span
                         className={cn(

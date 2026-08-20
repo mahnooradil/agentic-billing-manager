@@ -6,10 +6,10 @@
  * thrown as `AppError`s and formatted centrally; async rejections are forwarded
  * via `asyncHandler`. Follows the same model→controller pattern as platforms.
  *
- * Every query is scoped to the authenticated user — billing records belong to
- * exactly one user and must never be visible to, or mutable by, anyone else.
- * Every billing record belongs to one Platform; the reference is populated on
- * reads so the serialized record carries a minimal { id, name, slug } platform.
+ * Every query is scoped to the authenticated user's ORGANIZATION — billing
+ * records are shared across every member of the org. Every billing record
+ * belongs to one Platform; the reference is populated on reads so the
+ * serialized record carries a minimal { id, name, slug } platform.
  */
 import { isValidObjectId, type Types } from "mongoose";
 
@@ -32,15 +32,15 @@ import type {
   ImportBillingInput,
 } from "@/validators/billing.validator";
 
-/** Loads a billing record by id, scoped to its owner, or throws a 404. */
+/** Loads a billing record by id, scoped to its organization, or throws a 404. */
 async function findBillingOr404(
   id: string,
-  userId: Types.ObjectId
+  organizationId: Types.ObjectId
 ): Promise<BillingDocument> {
   if (!isValidObjectId(id)) {
     throw new AppError("Billing record not found", 404);
   }
-  const billing = await Billing.findOne({ _id: id, user: userId })
+  const billing = await Billing.findOne({ _id: id, organization: organizationId })
     .populate("platform")
     .populate("platformConnection");
   if (!billing) {
@@ -50,28 +50,28 @@ async function findBillingOr404(
 }
 
 /**
- * Ensures the referenced platform exists AND belongs to this user, else a 400
- * (bad reference) — without the owner check a user could attach a billing
- * record to another user's platform id.
+ * Ensures the referenced platform exists AND belongs to this organization,
+ * else a 400 (bad reference) — without this check a member could attach a
+ * billing record to another organization's platform id.
  */
 async function assertPlatformExists(
   platformId: string,
-  userId: Types.ObjectId
+  organizationId: Types.ObjectId
 ): Promise<void> {
-  const exists = await Platform.exists({ _id: platformId, user: userId });
+  const exists = await Platform.exists({ _id: platformId, organization: organizationId });
   if (!exists) {
     throw new AppError("The selected platform does not exist", 400);
   }
 }
 
-/** GET /api/billing — list the caller's billing records (newest billing date first). */
+/** GET /api/billing — list the organization's billing records (newest billing date first). */
 export const listBillingRecords = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!organization) {
     throw new AppError("Authentication required", 401);
   }
 
-  const records = await Billing.find({ user: user._id })
+  const records = await Billing.find({ organization: organization._id })
     .populate("platform")
     .populate("platformConnection")
     .sort({ billingDate: -1, createdAt: -1 });
@@ -80,14 +80,14 @@ export const listBillingRecords = asyncHandler(async (req, res) => {
   });
 });
 
-/** GET /api/billing/export — the caller's full billing history as a CSV download. */
+/** GET /api/billing/export — the organization's full billing history as a CSV download. */
 export const exportBillingRecords = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!organization) {
     throw new AppError("Authentication required", 401);
   }
 
-  const records = await Billing.find({ user: user._id })
+  const records = await Billing.find({ organization: organization._id })
     .populate("platform")
     .populate("platformConnection")
     .sort({ billingDate: -1, createdAt: -1 });
@@ -131,14 +131,15 @@ const IMPORT_COLUMNS = [
  * POST /api/billing/import — bulk-creates billing records from a CSV file
  * (read client-side via `File.text()` and posted as plain JSON, so no
  * multipart/file-upload dependency is needed). Every row must reference one
- * of the caller's OWN platforms by name (case-insensitive) — unknown
+ * of the organization's OWN platforms by name (case-insensitive) — unknown
  * platforms are reported as a per-row error, never auto-created. Imported
  * records are always `source: "manual"`, regardless of what a "Source"
  * column in the file says.
  */
 export const importBillingRecords = asyncHandler(async (req, res) => {
   const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!user || !organization) {
     throw new AppError("Authentication required", 401);
   }
 
@@ -162,14 +163,14 @@ export const importBillingRecords = asyncHandler(async (req, res) => {
   const cell = (row: string[], column: (typeof IMPORT_COLUMNS)[number]): string =>
     (row[columnIndex.get(column) as number] ?? "").trim();
 
-  const platforms = await Platform.find({ user: user._id });
+  const platforms = await Platform.find({ organization: organization._id });
   const platformByName = new Map(
     platforms.map((p) => [p.name.trim().toLowerCase(), p])
   );
 
   let remainingCapacity = await getRemainingBillingRecordCapacity(
-    user._id,
-    user.planTier
+    organization._id,
+    organization.planTier
   );
 
   let imported = 0;
@@ -216,6 +217,7 @@ export const importBillingRecords = asyncHandler(async (req, res) => {
     try {
       await Billing.create({
         ...parsed.data,
+        organization: organization._id,
         user: user._id,
         platform: platform._id,
         source: "manual",
@@ -247,8 +249,8 @@ export const importBillingRecords = asyncHandler(async (req, res) => {
 
 /** GET /api/billing/stats — aggregate counts + paid revenue for the dashboard. */
 export const getBillingStats = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!organization) {
     throw new AppError("Authentication required", 401);
   }
 
@@ -259,12 +261,12 @@ export const getBillingStats = asyncHandler(async (req, res) => {
     overdueRecords,
     revenueRows,
   ] = await Promise.all([
-    Billing.countDocuments({ user: user._id }),
-    Billing.countDocuments({ user: user._id, status: "Paid" }),
-    Billing.countDocuments({ user: user._id, status: "Pending" }),
-    Billing.countDocuments({ user: user._id, status: "Overdue" }),
+    Billing.countDocuments({ organization: organization._id }),
+    Billing.countDocuments({ organization: organization._id, status: "Paid" }),
+    Billing.countDocuments({ organization: organization._id, status: "Pending" }),
+    Billing.countDocuments({ organization: organization._id, status: "Overdue" }),
     Billing.aggregate<{ _id: null; revenue: number }>([
-      { $match: { user: user._id, status: "Paid" } },
+      { $match: { organization: organization._id, status: "Paid" } },
       { $group: { _id: null, revenue: { $sum: "$amount" } } },
     ]),
   ]);
@@ -285,12 +287,12 @@ export const getBillingStats = asyncHandler(async (req, res) => {
 
 /** GET /api/billing/:id — fetch a single billing record. */
 export const getBillingRecord = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!organization) {
     throw new AppError("Authentication required", 401);
   }
 
-  const billing = await findBillingOr404(req.params.id as string, user._id);
+  const billing = await findBillingOr404(req.params.id as string, organization._id);
   sendSuccess(res, 200, "Billing record retrieved", {
     billingRecord: toPublicBilling(billing),
   });
@@ -299,16 +301,21 @@ export const getBillingRecord = asyncHandler(async (req, res) => {
 /** POST /api/billing — create a billing record. */
 export const createBillingRecord = asyncHandler(async (req, res) => {
   const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!user || !organization) {
     throw new AppError("Authentication required", 401);
   }
 
   const body = req.body as CreateBillingInput;
 
-  await assertPlatformExists(body.platform, user._id);
-  await assertBillingRecordLimit(user._id, user.planTier);
+  await assertPlatformExists(body.platform, organization._id);
+  await assertBillingRecordLimit(organization._id, organization.planTier);
 
-  const billing = await Billing.create({ ...body, user: user._id });
+  const billing = await Billing.create({
+    ...body,
+    organization: organization._id,
+    user: user._id,
+  });
   await billing.populate("platform");
   emitBusinessDataChanged({
     source: "billing",
@@ -323,16 +330,17 @@ export const createBillingRecord = asyncHandler(async (req, res) => {
 /** PUT /api/billing/:id — update a billing record. */
 export const updateBillingRecord = asyncHandler(async (req, res) => {
   const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!user || !organization) {
     throw new AppError("Authentication required", 401);
   }
 
   const body = req.body as UpdateBillingInput;
-  const billing = await findBillingOr404(req.params.id as string, user._id);
+  const billing = await findBillingOr404(req.params.id as string, organization._id);
 
   // Only re-validate the platform reference when it is actually changing.
   if (body.platform) {
-    await assertPlatformExists(body.platform, user._id);
+    await assertPlatformExists(body.platform, organization._id);
   }
 
   Object.assign(billing, body);
@@ -352,11 +360,12 @@ export const updateBillingRecord = asyncHandler(async (req, res) => {
 /** DELETE /api/billing/:id — remove a billing record. */
 export const deleteBillingRecord = asyncHandler(async (req, res) => {
   const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!user || !organization) {
     throw new AppError("Authentication required", 401);
   }
 
-  const billing = await findBillingOr404(req.params.id as string, user._id);
+  const billing = await findBillingOr404(req.params.id as string, organization._id);
   await billing.deleteOne();
   emitBusinessDataChanged({
     source: "billing",

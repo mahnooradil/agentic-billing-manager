@@ -13,6 +13,8 @@ import { env } from "@/config/env";
 import { AppError } from "@/utils/appError";
 import { AgentSession } from "@/models/agent-session.model";
 import { executeCustomTool } from "@/services/agent/agent-tools";
+import { consumeCredits } from "@/services/credits/credit-ledger.service";
+import { tokensToCredits } from "@/config/credits";
 import type { ConnectionRequirements } from "@/services/integrations/capability-resolver";
 import type { Types } from "mongoose";
 
@@ -186,6 +188,8 @@ export async function sendAgentMessage(
 
   let reply = "";
   let action: ConnectPlatformAction | undefined;
+  let inputTokens = 0;
+  let outputTokens = 0;
   for await (const event of stream) {
     if (event.type === "agent.message") {
       for (const block of event.content) {
@@ -237,6 +241,11 @@ export async function sendAgentMessage(
           },
         ],
       });
+    } else if (event.type === "span.model_request_end") {
+      // A turn can involve multiple model requests (e.g. one per tool round
+      // trip) — accumulate across the whole turn, not just the first one.
+      inputTokens += event.model_usage.input_tokens;
+      outputTokens += event.model_usage.output_tokens;
     } else if (event.type === "session.status_terminated") {
       break;
     } else if (event.type === "session.status_idle") {
@@ -250,6 +259,14 @@ export async function sendAgentMessage(
       );
     }
   }
+
+  // Deduct AFTER the turn — actual cost is only known once it's done. Never
+  // blocks the reply on a ledger failure (see consumeCredits' own guarantee).
+  void consumeCredits(
+    userId,
+    tokensToCredits(inputTokens, outputTokens),
+    "agent_message"
+  );
 
   if (!reply.trim()) {
     throw new AppError(

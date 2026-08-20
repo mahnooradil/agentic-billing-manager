@@ -30,6 +30,7 @@ import {
 } from "@/models/user-settings.model";
 import { eventBus } from "@/services/events/event-bus";
 import { emitNotificationCreated } from "@/services/events/notification.events";
+import { getOrganizationIdForUser } from "@/services/organizations/membership-lookup.service";
 import type { Types } from "mongoose";
 
 /** Bound on how many recommendations a single run turns into notifications. */
@@ -56,16 +57,16 @@ interface UpsertInput {
 }
 
 /**
- * Creates or refreshes a notification by (user, signature). Emits
+ * Creates or refreshes a notification by (organization, signature). Emits
  * `notification.created` ONLY when a new document is inserted (never on a
  * dedup refresh).
  */
 export async function upsertNotification(
-  userId: string,
+  organizationId: string,
   input: UpsertInput
 ): Promise<{ created: boolean }> {
   const existing = await Notification.findOne({
-    user: userId,
+    organization: organizationId,
     signature: input.signature,
   });
   if (existing) {
@@ -89,7 +90,7 @@ export async function upsertNotification(
   }
 
   const doc = await Notification.create({
-    user: userId,
+    organization: organizationId,
     title: input.title,
     message: input.message,
     severity: input.severity,
@@ -139,22 +140,29 @@ const CHANGE_COPY: Record<string, { title: string; message: string }> = {
   },
 };
 
-/** Rules driven by a business-data change (analytics-based, no AI). */
+/** Rules driven by a business-data change (analytics-based, no AI). Notification
+ *  data is organization-scoped, but preferences (enabled/thresholds) are still
+ *  read from the triggering user's own settings — an accepted v1 simplification
+ *  since notification preferences haven't moved to the organization yet. */
 export async function runBusinessNotifications(
   userId: string,
   source: string,
   action: string
 ): Promise<void> {
+  const organizationId = await getOrganizationIdForUser(userId);
+  if (!organizationId) return;
+  const organizationIdStr = organizationId.toString();
+
   const prefs = await getNotificationPrefs(userId);
   if (!prefs.enabled) return;
 
-  const overview = await computeAnalyticsOverview(userId, "all");
+  const overview = await computeAnalyticsOverview(organizationIdStr, "all");
   let matched = false;
 
   const overdue =
     overview.byStatus.find((s) => s.status === "Overdue")?.count ?? 0;
   if (prefs.billingAlerts && overdue > 0) {
-    await upsertNotification(userId, {
+    await upsertNotification(organizationIdStr, {
       signature: "billing:overdue",
       category: "billing",
       severity: "warning",
@@ -173,7 +181,7 @@ export async function runBusinessNotifications(
     if (primary && primary.total > 0) {
       const share = Math.round((top.total / primary.total) * 100);
       if (share >= prefs.highSpendThreshold) {
-        await upsertNotification(userId, {
+        await upsertNotification(organizationIdStr, {
           signature: "usage:concentration",
           category: "usage",
           severity: "info",
@@ -192,7 +200,7 @@ export async function runBusinessNotifications(
       title: "Data updated",
       message: `Your ${source} data was updated.`,
     };
-    await upsertNotification(userId, {
+    await upsertNotification(organizationIdStr, {
       signature: "system:data-updated",
       category: "system",
       severity: "info",
@@ -202,17 +210,22 @@ export async function runBusinessNotifications(
   }
 }
 
-/** Rules driven by a recommendations refresh (reads the Recommendation collection). */
-export async function runRecommendationNotifications(userId: string): Promise<void> {
+/** Rules driven by a recommendations refresh (reads the Recommendation
+ *  collection). `organizationId` comes straight from the triggering event —
+ *  no extra lookup needed there; `userId` is still used for preferences. */
+export async function runRecommendationNotifications(
+  userId: string,
+  organizationId: string
+): Promise<void> {
   const prefs = await getNotificationPrefs(userId);
   if (!prefs.enabled || !prefs.recommendationAlerts) return;
 
   const active = await Recommendation.find({
-    user: userId,
+    organization: organizationId,
     status: "active",
   }).limit(REC_SCAN_LIMIT);
   for (const rec of active) {
-    await upsertNotification(userId, {
+    await upsertNotification(organizationId, {
       signature: `rec:new:${rec.signature}`,
       category: "recommendation",
       severity: severityFromRecommendation(rec.severity),
@@ -223,13 +236,13 @@ export async function runRecommendationNotifications(userId: string): Promise<vo
   }
 
   const resolved = await Recommendation.find({
-    user: userId,
+    organization: organizationId,
     status: "completed",
   })
     .sort({ updatedAt: -1 })
     .limit(REC_SCAN_LIMIT);
   for (const rec of resolved) {
-    await upsertNotification(userId, {
+    await upsertNotification(organizationId, {
       signature: `rec:resolved:${rec.signature}`,
       category: "recommendation",
       severity: "info",
@@ -239,7 +252,7 @@ export async function runRecommendationNotifications(userId: string): Promise<vo
     });
   }
 
-  await upsertNotification(userId, {
+  await upsertNotification(organizationId, {
     signature: "system:ai-analysis",
     category: "system",
     severity: "info",
@@ -273,7 +286,7 @@ export function initNotificationEngine(): void {
   });
 
   eventBus.subscribe("recommendations.updated", (event) => {
-    void runRecommendationNotifications(event.userId).catch((e) =>
+    void runRecommendationNotifications(event.userId, event.organizationId).catch((e) =>
       logError("recommendation rules", e)
     );
   });

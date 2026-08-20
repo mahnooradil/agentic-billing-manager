@@ -35,13 +35,24 @@ export interface TokenPayload {
   jti?: string;
 }
 
-/** Safe, password-free user shape returned to API clients. */
+/** Safe, password-free user shape returned to API clients. `planTier` moved
+ *  to the organization — see `PublicOrganization` (GET /api/organization). */
 export interface PublicUser {
   id: string;
   fullName: string;
   email: string;
   profilePicture?: string;
+  creditsBalance: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** The current user's organization + their role in it. */
+export interface PublicOrganization {
+  id: string;
+  name: string;
   planTier: PlanTier;
+  role: "owner" | "admin" | "member";
   createdAt: Date;
   updatedAt: Date;
 }

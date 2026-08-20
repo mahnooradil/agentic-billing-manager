@@ -1,11 +1,15 @@
 /**
  * Platform connection controllers — REAL connection engine (Phase F9.1).
  *
- * All routes are protected by `authenticate`, so every query is scoped to the
- * current user. API-key providers are VERIFIED against the real provider before a
- * connection is ever marked "connected" — there is no fake status. Credentials
- * are encrypted at rest (AES-256-GCM) and NEVER returned. OAuth providers are not
- * connectable yet (structure lands in F9.2); attempts are rejected cleanly.
+ * All routes are protected by `authenticate`. Connection RECORDS are scoped
+ * to the current user's ORGANIZATION (shared across every member) — but the
+ * Pipedream `external_user_id` for every proxy/token call stays the
+ * CONNECTING user's id, not the organization's, since Pipedream-side accounts
+ * were already created keyed by that user id and remapping would break them
+ * (see the `user` field's docstring on the model). API-key providers are
+ * VERIFIED against the real provider before a connection is ever marked
+ * "connected" — there is no fake status. Credentials are encrypted at rest
+ * (AES-256-GCM) and NEVER returned.
  */
 import { asyncHandler } from "@/utils/asyncHandler";
 import { AppError } from "@/utils/appError";
@@ -14,6 +18,8 @@ import { encryptSecret, decryptSecret } from "@/utils/crypto";
 import { toPublicPlatformConnection } from "@/utils/platform-connection.serializer";
 import { getAdapter } from "@/services/integrations/registry";
 import { syncConnectionBilling } from "@/services/billing-sync/sync-engine";
+import { syncConnectionEmail } from "@/services/email-sync/sync-engine";
+import { isEmailSyncPlatform } from "@/services/email-sync/registry";
 import { assertPlatformConnectionLimit } from "@/utils/plan-limits";
 import {
   searchApps,
@@ -36,14 +42,14 @@ import type {
   ConnectViaPipedreamInput,
 } from "@/validators/platform-connection.validator";
 
-/** GET /api/platform-connections — all of the current user's connections. */
+/** GET /api/platform-connections — all of the organization's connections. */
 export const getMyPlatformConnections = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) throw new AppError("Authentication required", 401);
+  const organization = req.organization;
+  if (!organization) throw new AppError("Authentication required", 401);
 
-  const connections = await PlatformConnection.find({ user: user._id }).sort({
-    createdAt: 1,
-  });
+  const connections = await PlatformConnection.find({
+    organization: organization._id,
+  }).sort({ createdAt: 1 });
 
   sendSuccess(res, 200, "Platform connections retrieved", {
     connections: connections.map(toPublicPlatformConnection),
@@ -59,18 +65,19 @@ export const getMyPlatformConnections = asyncHandler(async (req, res) => {
  */
 export const createPlatformConnection = asyncHandler(async (req, res) => {
   const user = req.user;
-  if (!user) throw new AppError("Authentication required", 401);
+  const organization = req.organization;
+  if (!user || !organization) throw new AppError("Authentication required", 401);
 
   const body = req.body as CreatePlatformConnectionInput;
 
   const exists = await PlatformConnection.exists({
-    user: user._id,
+    organization: organization._id,
     platform: body.platform,
   });
   if (exists) {
     throw new AppError(`${body.platform} is already connected.`, 409);
   }
-  await assertPlatformConnectionLimit(user._id, user.planTier);
+  await assertPlatformConnectionLimit(organization._id, organization.planTier);
 
   const builtIn = isBuiltInPlatform(body.platform);
   const adapter = getAdapter(body.platform);
@@ -110,6 +117,7 @@ export const createPlatformConnection = asyncHandler(async (req, res) => {
   }
 
   const connection = await PlatformConnection.create({
+    organization: organization._id,
     user: user._id,
     platform: body.platform,
     isCustom: !builtIn,
@@ -141,24 +149,25 @@ export const createPlatformConnection = asyncHandler(async (req, res) => {
  * stored credential's health. The connection's real status is updated either way.
  */
 export const verifyPlatformConnection = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) throw new AppError("Authentication required", 401);
+  const organization = req.organization;
+  if (!organization) throw new AppError("Authentication required", 401);
 
   const id = req.params.id as string;
   const body = req.body as VerifyPlatformConnectionInput;
 
   const connection = await PlatformConnection.findOne({
     _id: id,
-    user: user._id,
+    organization: organization._id,
   }).select("+credential");
   if (!connection) throw new AppError("Platform connection not found", 404);
 
   // Pipedream-managed (OAuth) connections: re-check health via Pipedream (the
-  // provider tokens live in Pipedream's vault; this app holds only a reference).
+  // provider tokens live in Pipedream's vault; this app holds only a
+  // reference) — using the ORIGINAL connecting user's id, never the org's.
   const meta = connection.metadata as { pipedreamAccountId?: string } | undefined;
   if (connection.connectionType === "oauth" && meta?.pipedreamAccountId) {
     const account = await getAccount(
-      user._id.toString(),
+      connection.user.toString(),
       meta.pipedreamAccountId
     );
     connection.status = account?.healthy ? "connected" : "error";
@@ -236,7 +245,9 @@ export const getPipedreamCatalog = asyncHandler(async (req, res) => {
 });
 
 /** POST /api/platform-connections/connect-token — mint a Pipedream Connect token
- *  for the current user so the browser can run the managed OAuth flow. */
+ *  for the current user so the browser can run the managed OAuth flow. Keyed
+ *  by the connecting user's id (Pipedream's own external identity), not the
+ *  organization's. */
 export const createPipedreamConnectToken = asyncHandler(async (req, res) => {
   const user = req.user;
   if (!user) throw new AppError("Authentication required", 401);
@@ -254,10 +265,13 @@ export const createPipedreamConnectToken = asyncHandler(async (req, res) => {
  * After the browser completes the managed OAuth flow, Pipedream returns an
  * account id; we VERIFY it belongs to this user and store only the reference —
  * Pipedream vaults the actual tokens, so this app never holds raw credentials.
+ * The resulting connection record is shared with the whole organization, but
+ * stays keyed to the connecting user's Pipedream external identity.
  */
 export const connectViaPipedream = asyncHandler(async (req, res) => {
   const user = req.user;
-  if (!user) throw new AppError("Authentication required", 401);
+  const organization = req.organization;
+  if (!user || !organization) throw new AppError("Authentication required", 401);
 
   const body = req.body as ConnectViaPipedreamInput;
   const account = await getAccount(user._id.toString(), body.accountId);
@@ -270,11 +284,11 @@ export const connectViaPipedream = asyncHandler(async (req, res) => {
   // Only a genuinely NEW connection counts against the limit — reconnecting/
   // re-verifying an existing one (the upsert below) must never be blocked.
   const alreadyConnected = await PlatformConnection.exists({
-    user: user._id,
+    organization: organization._id,
     platform,
   });
   if (!alreadyConnected) {
-    await assertPlatformConnectionLimit(user._id, user.planTier);
+    await assertPlatformConnectionLimit(organization._id, organization.planTier);
   }
 
   const set: Record<string, unknown> = {
@@ -289,8 +303,11 @@ export const connectViaPipedream = asyncHandler(async (req, res) => {
   if (account.name) set.accountIdentifier = account.name;
 
   const connection = await PlatformConnection.findOneAndUpdate(
-    { user: user._id, platform },
-    { $set: set, $setOnInsert: { user: user._id, platform } },
+    { organization: organization._id, platform },
+    {
+      $set: set,
+      $setOnInsert: { organization: organization._id, user: user._id, platform },
+    },
     { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
   );
 
@@ -299,6 +316,9 @@ export const connectViaPipedream = asyncHandler(async (req, res) => {
   // to see their first data. A failure here never blocks the connect response.
   if (account.healthy) {
     void syncConnectionBilling(connection);
+    if (isEmailSyncPlatform(platform)) {
+      void syncConnectionEmail(connection);
+    }
   }
 
   sendSuccess(res, 200, "Platform connected", {
@@ -308,8 +328,8 @@ export const connectViaPipedream = asyncHandler(async (req, res) => {
 
 /** PATCH /api/platform-connections/:id — rename / update metadata only. */
 export const updatePlatformConnection = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) throw new AppError("Authentication required", 401);
+  const organization = req.organization;
+  if (!organization) throw new AppError("Authentication required", 401);
 
   const id = req.params.id as string;
   const body = req.body as UpdatePlatformConnectionInput;
@@ -321,7 +341,7 @@ export const updatePlatformConnection = asyncHandler(async (req, res) => {
   if (body.metadata !== undefined) update.metadata = body.metadata;
 
   const connection = await PlatformConnection.findOneAndUpdate(
-    { _id: id, user: user._id },
+    { _id: id, organization: organization._id },
     { $set: update },
     { new: true, runValidators: true }
   );
@@ -334,13 +354,13 @@ export const updatePlatformConnection = asyncHandler(async (req, res) => {
 
 /** DELETE /api/platform-connections/:id — disconnect (remove the connection). */
 export const deletePlatformConnection = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) throw new AppError("Authentication required", 401);
+  const organization = req.organization;
+  if (!organization) throw new AppError("Authentication required", 401);
 
   const id = req.params.id as string;
   const deleted = await PlatformConnection.findOneAndDelete({
     _id: id,
-    user: user._id,
+    organization: organization._id,
   });
   if (!deleted) throw new AppError("Platform connection not found", 404);
 

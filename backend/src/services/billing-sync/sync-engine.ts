@@ -2,7 +2,7 @@
  * Billing-sync engine — pulls fresh billing data for ONE connection (if a
  * billing-sync adapter is registered for its platform) and upserts it into the
  * Billing collection. Idempotent: re-running never duplicates records, it only
- * refreshes them (keyed by `{user, platformConnection, externalId}`).
+ * refreshes them (keyed by `{organization, platformConnection, externalId}`).
  *
  * Called from two places: right after a connection is created (one immediate
  * pull) and by the recurring scheduler (services/billing-sync/scheduler.ts).
@@ -40,12 +40,13 @@ export async function syncConnectionBilling(
     for (const record of records) {
       await Billing.findOneAndUpdate(
         {
-          user: connection.user,
+          organization: connection.organization,
           platformConnection: connection._id,
           externalId: record.externalId,
         },
         {
           $set: {
+            organization: connection.organization,
             user: connection.user,
             platformConnection: connection._id,
             source: "auto_sync",

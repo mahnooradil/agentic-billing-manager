@@ -12,10 +12,7 @@ import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
 import { Pagination } from "@/components/common/pagination";
 import { ApiError } from "@/services/api/client";
-import {
-  getBillingStats,
-  listBillingRecords,
-} from "@/services/billing/billing.service";
+import { getBillingStats, listBillingRecords } from "@/services/billing/billing.service";
 import { listPlatforms } from "@/services/platforms/platform.service";
 import type { BillingRecord, BillingStats } from "@/services/types/billing";
 import type { Platform } from "@/services/types/platform";
@@ -24,11 +21,7 @@ import { BillingTable } from "./billing-table";
 import { BillingFormDialog } from "./billing-form-dialog";
 import { DeleteBillingDialog } from "./delete-billing-dialog";
 import { BillingStatsGrid } from "./billing-stats";
-import {
-  BillingToolbar,
-  type BillingSort,
-  type BillingStatusFilter,
-} from "./billing-toolbar";
+import { BillingToolbar, type BillingSort, type BillingStatusFilter } from "./billing-toolbar";
 
 type ViewStatus = "loading" | "error" | "ready";
 
@@ -58,9 +51,7 @@ export function BillingView() {
 
   // Delete dialog state.
   const [deleteOpen, setDeleteOpen] = React.useState(false);
-  const [deleteTarget, setDeleteTarget] = React.useState<BillingRecord | null>(
-    null
-  );
+  const [deleteTarget, setDeleteTarget] = React.useState<BillingRecord | null>(null);
   const [deleteKey, setDeleteKey] = React.useState(0);
 
   // "Create New Platform" shortcut — reuses the Platforms page's own dialog so
@@ -70,8 +61,7 @@ export function BillingView() {
 
   // Search / filter / pagination state (all client-side over the loaded list).
   const [search, setSearch] = React.useState("");
-  const [statusFilter, setStatusFilter] =
-    React.useState<BillingStatusFilter>("all");
+  const [statusFilter, setStatusFilter] = React.useState<BillingStatusFilter>("all");
   const [sort, setSort] = React.useState<BillingSort>("date-desc");
   const [page, setPage] = React.useState(1);
 
@@ -83,12 +73,11 @@ export function BillingView() {
     let ignore = false;
     (async () => {
       try {
-        const [billingResponse, statsResponse, platformsResponse] =
-          await Promise.all([
-            listBillingRecords(),
-            getBillingStats(),
-            listPlatforms(),
-          ]);
+        const [billingResponse, statsResponse, platformsResponse] = await Promise.all([
+          listBillingRecords(),
+          getBillingStats(),
+          listPlatforms(),
+        ]);
         if (ignore) return;
         setRecords(billingResponse.data.billingRecords);
         setStats(statsResponse.data.stats);
@@ -96,11 +85,7 @@ export function BillingView() {
         setStatus("ready");
       } catch (error) {
         if (ignore) return;
-        setLoadError(
-          error instanceof ApiError
-            ? error.message
-            : "Failed to load billing records."
-        );
+        setLoadError(error instanceof ApiError ? error.message : "Failed to load billing records.");
         setStatus("error");
       }
     })();
@@ -117,8 +102,7 @@ export function BillingView() {
         query === "" ||
         record.customerName.toLowerCase().includes(query) ||
         record.invoiceNumber.toLowerCase().includes(query);
-      const matchesStatus =
-        statusFilter === "all" || record.status === statusFilter;
+      const matchesStatus = statusFilter === "all" || record.status === statusFilter;
       return matchesQuery && matchesStatus;
     });
   }, [records, search, statusFilter]);
@@ -129,15 +113,9 @@ export function BillingView() {
     copy.sort((a, b) => {
       switch (sort) {
         case "date-asc":
-          return (
-            new Date(a.billingDate).getTime() -
-            new Date(b.billingDate).getTime()
-          );
+          return new Date(a.billingDate).getTime() - new Date(b.billingDate).getTime();
         case "date-desc":
-          return (
-            new Date(b.billingDate).getTime() -
-            new Date(a.billingDate).getTime()
-          );
+          return new Date(b.billingDate).getTime() - new Date(a.billingDate).getTime();
         case "amount-asc":
           return a.amount - b.amount;
         case "amount-desc":
@@ -249,80 +227,76 @@ export function BillingView() {
         </div>
       ) : status === "error" ? (
         <ErrorState description={loadError} onRetry={retry} />
-      ) : noPlatforms ? (
-        <EmptyState
-          icon={ReceiptText}
-          title="No platforms to bill"
-          description="Every billing record belongs to a platform. Create one to start billing."
-          action={
-            <Button onClick={openCreatePlatform}>
-              <Plus />
-              Create New Platform
-            </Button>
-          }
-        />
+      ) : records.length === 0 ? (
+        // Manually creating a record needs a Platform to attach it to — but
+        // auto_sync/email_sync records attach via a PlatformConnection instead,
+        // so having zero manual Platforms only blocks CREATION, never display
+        // (see the records.length > 0 branch below, reached regardless).
+        noPlatforms ? (
+          <EmptyState
+            icon={ReceiptText}
+            title="No platforms to bill"
+            description="Every manual billing record belongs to a platform. Create one to start billing, or connect a platform on the Integrations page for automatic sync."
+            action={
+              <Button onClick={openCreatePlatform}>
+                <Plus />
+                Create New Platform
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={ReceiptText}
+            title="No billing records yet"
+            description="Create your first billing record to get started."
+            action={
+              <Button onClick={openCreate}>
+                <Plus />
+                New billing record
+              </Button>
+            }
+          />
+        )
       ) : (
         <>
           {stats ? <BillingStatsGrid stats={stats} /> : null}
 
-          {records.length === 0 ? (
-            <EmptyState
-              icon={ReceiptText}
-              title="No billing records yet"
-              description="Create your first billing record to get started."
-              action={
-                <Button onClick={openCreate}>
-                  <Plus />
-                  New billing record
-                </Button>
-              }
+          <div className="space-y-6">
+            <BillingToolbar
+              search={search}
+              onSearchChange={handleSearchChange}
+              status={statusFilter}
+              onStatusChange={handleStatusChange}
+              sort={sort}
+              onSortChange={handleSortChange}
             />
-          ) : (
-            <div className="space-y-6">
-              <BillingToolbar
-                search={search}
-                onSearchChange={handleSearchChange}
-                status={statusFilter}
-                onStatusChange={handleStatusChange}
-                sort={sort}
-                onSortChange={handleSortChange}
-              />
 
-              {filtered.length === 0 ? (
-                <EmptyState
-                  icon={SearchX}
-                  title="No matching records"
-                  description="No billing records match your search or filter. Try adjusting them."
-                  action={
-                    <Button variant="outline" onClick={clearFilters}>
-                      Clear filters
-                    </Button>
-                  }
-                />
-              ) : (
-                <>
-                  <div className="flex items-center justify-between text-sm text-muted-foreground">
-                    <span>
-                      {totalResults} {totalResults === 1 ? "result" : "results"}
-                    </span>
-                    <span>
-                      Page {currentPage} of {totalPages}
-                    </span>
-                  </div>
-                  <BillingTable
-                    records={pageRecords}
-                    onEdit={openEdit}
-                    onDelete={openDelete}
-                  />
-                  <Pagination
-                    page={currentPage}
-                    totalPages={totalPages}
-                    onPageChange={setPage}
-                  />
-                </>
-              )}
-            </div>
-          )}
+            {filtered.length === 0 ? (
+              <EmptyState
+                icon={SearchX}
+                title="No matching records"
+                description="No billing records match your search or filter. Try adjusting them."
+                action={
+                  <Button variant="outline" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                }
+              />
+            ) : (
+              <>
+                <div className="text-muted-foreground flex items-center justify-between text-sm">
+                  <span>
+                    {totalResults} {totalResults === 1 ? "result" : "results"}
+                  </span>
+                  <span>
+                    Page {currentPage} of {totalPages}
+                  </span>
+                </div>
+                <BillingTable records={pageRecords} onEdit={openEdit} onDelete={openDelete} />
+                <Pagination page={currentPage} totalPages={totalPages} onPageChange={setPage} />
+              </>
+            )}
+          </div>
         </>
       )}
 

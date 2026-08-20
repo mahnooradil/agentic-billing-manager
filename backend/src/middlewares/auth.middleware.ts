@@ -12,6 +12,8 @@ import { AppError } from "@/utils/appError";
 import { verifyToken } from "@/utils/jwt";
 import { User } from "@/models/user.model";
 import { Session } from "@/models/session.model";
+import { Membership } from "@/models/membership.model";
+import { Organization } from "@/models/organization.model";
 
 const BEARER_PREFIX = "Bearer ";
 /** Throttle for the `lastSeenAt` touch — avoids a write on every single request. */
@@ -68,6 +70,22 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
     req.sessionJti = payload.jti;
   }
 
+  // Every authenticated route needs the user's organization to scope business
+  // data — v1 assumes exactly one Membership per user (see Membership model).
+  // Missing here means either a pre-Organizations account that hasn't been
+  // backfilled yet, or mid-signup — both are genuine 401s, not silently
+  // proceeding with no organization scope.
+  const membership = await Membership.findOne({ user: user._id });
+  if (!membership) {
+    throw new AppError("Your account has no organization set up.", 401);
+  }
+  const organization = await Organization.findById(membership.organization);
+  if (!organization) {
+    throw new AppError("Your account has no organization set up.", 401);
+  }
+
   req.user = user;
+  req.membership = membership;
+  req.organization = organization;
   next();
 });

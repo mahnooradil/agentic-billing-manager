@@ -8,7 +8,7 @@ export interface AuthUser {
   fullName: string;
   email: string;
   profilePicture?: string;
-  planTier: "Free" | "Pro" | "Business";
+  creditsBalance: number;
   createdAt: string;
   updatedAt: string;
 }

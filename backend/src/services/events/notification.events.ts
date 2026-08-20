@@ -18,7 +18,7 @@ export function emitNotificationCreated(doc: NotificationDocument): void {
   eventBus.emit({
     type: "notification.created",
     notificationId: doc._id.toString(),
-    userId: doc.user.toString(),
+    organizationId: doc.organization.toString(),
     severity: doc.severity,
     category: doc.category,
     title: doc.title,

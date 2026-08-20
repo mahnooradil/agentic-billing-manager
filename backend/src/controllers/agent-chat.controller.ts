@@ -7,6 +7,7 @@
 import { asyncHandler } from "@/utils/asyncHandler";
 import { AppError } from "@/utils/appError";
 import { sendSuccess } from "@/utils/apiResponse";
+import { assertCreditBalance } from "@/utils/credits";
 import {
   sendAgentMessage,
   resetAgentSession,
@@ -19,6 +20,8 @@ export const agentChat = asyncHandler(async (req, res) => {
   if (!user) {
     throw new AppError("Authentication required", 401);
   }
+
+  assertCreditBalance(user);
 
   const { message } = req.body as AgentChatInput;
   const { reply, action } = await sendAgentMessage(user._id, message);

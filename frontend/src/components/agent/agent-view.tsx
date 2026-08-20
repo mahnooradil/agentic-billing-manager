@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { ApiError } from "@/services/api/client";
 import { sendAgentMessage } from "@/services/agent/agent-chat.service";
 import { agentChatStore } from "@/services/agent/agent-chat-store";
+import { getMyCredits } from "@/services/credits/credits.service";
 import type { ConnectPlatformAction } from "@/services/types/agent";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useSpeechSynthesis } from "@/hooks/use-speech-synthesis";
@@ -56,14 +57,38 @@ export function AgentView() {
   const [error, setError] = React.useState<string | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
+  // Credit balance — refetched after every turn (consumption is only known
+  // server-side, after the turn completes) via a reload-key bump rather than
+  // computed locally, so it never drifts from the real ledger.
+  const [credits, setCredits] = React.useState<number | null>(null);
+  const [creditsReloadKey, setCreditsReloadKey] = React.useState(0);
+
+  React.useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        const response = await getMyCredits();
+        if (ignore) return;
+        setCredits(response.data.balance);
+      } catch {
+        // Non-critical — the balance pill just stays hidden on failure.
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [creditsReloadKey]);
+
   React.useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, sending]);
 
+  const outOfCredits = credits !== null && credits <= 0;
+
   const sendText = async (raw: string) => {
     const text = raw.trim();
-    if (!text || sending) return;
+    if (!text || sending || outOfCredits) return;
 
     agentChatStore.append({ role: "user", content: text });
     setInput("");
@@ -81,6 +106,7 @@ export function AgentView() {
       );
     } finally {
       setSending(false);
+      setCreditsReloadKey((key) => key + 1);
     }
   };
 
@@ -163,6 +189,16 @@ export function AgentView() {
                 <span className="size-1.5 rounded-full bg-emerald-300" />
                 Active
               </span>
+              {credits !== null ? (
+                <span
+                  className={cn(
+                    "flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.65rem] font-medium",
+                    outOfCredits ? "bg-red-500/30" : "bg-white/15"
+                  )}
+                >
+                  {Math.max(0, credits)} credit{credits === 1 ? "" : "s"} left
+                </span>
+              ) : null}
             </div>
             <h1 className="font-heading text-2xl font-semibold text-balance sm:text-3xl">
               Meet your Billing Agent
@@ -214,6 +250,7 @@ export function AgentView() {
                     type="button"
                     variant="outline"
                     size="sm"
+                    disabled={outOfCredits}
                     onClick={() => void sendText(prompt)}
                   >
                     {prompt}
@@ -269,12 +306,19 @@ export function AgentView() {
           {error ? (
             <FormAlert variant="error" message={error} className="mb-3" />
           ) : null}
+          {outOfCredits ? (
+            <FormAlert
+              variant="error"
+              message="You've used all your credits. Add more credits to keep chatting with the Billing Advisor."
+              className="mb-3"
+            />
+          ) : null}
           <form onSubmit={handleSubmit} className="flex items-center gap-2">
             <Input
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder={listening ? "Listening…" : "Ask your agent…"}
-              disabled={sending}
+              disabled={sending || outOfCredits}
               aria-label="Message"
             />
             {micSupported ? (
@@ -283,7 +327,7 @@ export function AgentView() {
                 variant={listening ? "destructive" : "outline"}
                 size="icon"
                 onClick={handleMicClick}
-                disabled={sending}
+                disabled={sending || outOfCredits}
                 aria-pressed={listening}
                 aria-label={listening ? "Stop voice input" : "Start voice input"}
                 title={listening ? "Stop voice input" : "Speak your message"}
@@ -291,7 +335,7 @@ export function AgentView() {
                 {listening ? <Square className="animate-pulse" /> : <Mic />}
               </Button>
             ) : null}
-            <Button type="submit" disabled={sending || !input.trim()}>
+            <Button type="submit" disabled={sending || outOfCredits || !input.trim()}>
               {sending ? <Loader2 className="animate-spin" /> : <Send />}
               Send
             </Button>

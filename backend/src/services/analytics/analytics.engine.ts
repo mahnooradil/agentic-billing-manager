@@ -43,18 +43,18 @@ export function buildRangeMatch(
 }
 
 /**
- * Computes the composite analytics overview for a range, scoped to ONE user —
- * every pipeline below MUST start with the `user` match so data never crosses
- * between tenants. Single source of truth for the aggregation — callers just
- * consume the returned `PublicAnalyticsOverview`.
+ * Computes the composite analytics overview for a range, scoped to ONE
+ * organization — every pipeline below MUST start with the `organization`
+ * match so data never crosses between organizations. Single source of truth
+ * for the aggregation — callers just consume the returned `PublicAnalyticsOverview`.
  */
 export async function computeAnalyticsOverview(
-  userId: string,
+  organizationId: string,
   range: AnalyticsRange
 ): Promise<PublicAnalyticsOverview> {
   const now = new Date();
   const rangeMatch = {
-    user: new Types.ObjectId(userId),
+    organization: new Types.ObjectId(organizationId),
     ...buildRangeMatch(range, now),
   };
 

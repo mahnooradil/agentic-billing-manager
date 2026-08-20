@@ -22,8 +22,15 @@ import { Notification } from "@/models/notification.model";
 import { AgentSession } from "@/models/agent-session.model";
 import { Session, type SessionDocument } from "@/models/session.model";
 import { SupportRequest } from "@/models/support-request.model";
+import { CreditTransaction } from "@/models/credit-transaction.model";
 import { sendOtpEmail } from "@/services/email/resend";
 import { resetAgentSession } from "@/services/agent/managed-agent.service";
+import { grantCredits } from "@/services/credits/credit-ledger.service";
+import { STARTING_CREDITS } from "@/config/credits";
+import { Membership } from "@/models/membership.model";
+import { Organization } from "@/models/organization.model";
+import { createPersonalOrganization } from "@/services/organizations/organization-bootstrap.service";
+import { consumeInvitationForNewSignup } from "@/services/organizations/invitation.service";
 import type {
   RequestRegisterOtpInput,
   RequestLoginOtpInput,
@@ -172,6 +179,18 @@ export const verifyOtp = asyncHandler(async (req, res) => {
   if (!user) {
     user = await User.create({ fullName: fullNameFromOtp ?? email, email });
     isNewUser = true;
+
+    // Signup credit grant — a real ledger entry (services/credits/), not a
+    // bare schema default, so the balance is explainable from day one.
+    const balance = await grantCredits(user._id, STARTING_CREDITS, "signup_grant");
+    if (balance !== null) user.creditsBalance = balance;
+
+    // A live invitation for this email joins that organization (with the
+    // invited role) instead of bootstrapping a fresh personal one.
+    const joined = await consumeInvitationForNewSignup(user._id, email);
+    if (!joined) {
+      await createPersonalOrganization(user._id, user.fullName);
+    }
   }
 
   const token = await issueSession(user, req);
@@ -246,11 +265,32 @@ export const updateProfile = asyncHandler(async (req, res) => {
 /**
  * DELETE /api/auth/account — permanently deletes the authenticated user and
  * every piece of data scoped to them. Irreversible; there is no soft-delete.
+ *
+ * Organization-aware: an Owner who is the ONLY member also takes the whole
+ * organization's shared data with them (nothing left to orphan). An Owner
+ * with other members is blocked — transferring ownership or removing
+ * everyone else first is a deliberate, explicit step, never implicit.
+ * Anyone else (admin/member) just leaves — the organization's shared data
+ * stays intact for the remaining members.
  */
 export const deleteAccount = asyncHandler(async (req, res) => {
   const user = req.user;
   if (!user) {
     throw new AppError("Authentication required", 401);
+  }
+
+  const membership = await Membership.findOne({ user: user._id });
+  if (membership?.role === "owner") {
+    const otherMembers = await Membership.countDocuments({
+      organization: membership.organization,
+      user: { $ne: user._id },
+    });
+    if (otherMembers > 0) {
+      throw new AppError(
+        "You're the owner of an organization with other members. Transfer ownership or remove every other member before deleting your account.",
+        409
+      );
+    }
   }
 
   // Archives the Managed Agents session server-side before the local
@@ -259,16 +299,26 @@ export const deleteAccount = asyncHandler(async (req, res) => {
     // Best-effort — a stale/unreachable agent session must not block deletion.
   });
 
+  const orgWideDeletes =
+    membership?.role === "owner"
+      ? [
+          Billing.deleteMany({ organization: membership.organization }),
+          Platform.deleteMany({ organization: membership.organization }),
+          PlatformConnection.deleteMany({ organization: membership.organization }),
+          Recommendation.deleteMany({ organization: membership.organization }),
+          Notification.deleteMany({ organization: membership.organization }),
+          Organization.deleteOne({ _id: membership.organization }),
+        ]
+      : [];
+
   await Promise.all([
+    ...orgWideDeletes,
+    ...(membership ? [membership.deleteOne()] : []),
     UserSettings.deleteMany({ user: user._id }),
-    Billing.deleteMany({ user: user._id }),
-    Platform.deleteMany({ user: user._id }),
-    PlatformConnection.deleteMany({ user: user._id }),
-    Recommendation.deleteMany({ user: user._id }),
-    Notification.deleteMany({ user: user._id }),
     AgentSession.deleteMany({ user: user._id }),
     Session.deleteMany({ user: user._id }),
     SupportRequest.deleteMany({ user: user._id }),
+    CreditTransaction.deleteMany({ user: user._id }),
     Otp.deleteMany({ email: user.email }),
   ]);
 

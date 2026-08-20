@@ -12,6 +12,9 @@ import platformConnectionRoutes from "@/routes/platform-connection.routes";
 import agentChatRoutes from "@/routes/agent-chat.routes";
 import planRoutes from "@/routes/plan.routes";
 import supportRoutes from "@/routes/support.routes";
+import creditsRoutes from "@/routes/credits.routes";
+import organizationRoutes from "@/routes/organization.routes";
+import invitationRoutes from "@/routes/invitation.routes";
 
 /**
  * Root API router. All feature routers are mounted here so the
@@ -36,5 +39,8 @@ router.use("/platform-connections", platformConnectionRoutes);
 router.use("/agent/chat", agentChatRoutes);
 router.use("/plan", planRoutes);
 router.use("/support", supportRoutes);
+router.use("/credits", creditsRoutes);
+router.use("/organization", organizationRoutes);
+router.use("/invitations", invitationRoutes);
 
 export default router;

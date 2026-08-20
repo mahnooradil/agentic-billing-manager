@@ -33,8 +33,9 @@ export const RECOMMENDATION_RESOLVERS = ["ai", "user"] as const;
 export type RecommendationResolver = (typeof RECOMMENDATION_RESOLVERS)[number];
 
 export interface IRecommendation {
-  /** Owning user — every query MUST be scoped by this. */
-  user: Types.ObjectId;
+  /** Owning organization — every query MUST be scoped by this. System-
+   *  generated, so there is no separate "created by" user to track. */
+  organization: Types.ObjectId;
   title: string;
   detail: string;
   severity: RecommendationSeverity;
@@ -59,9 +60,9 @@ type RecommendationModel = Model<IRecommendation>;
 
 const recommendationSchema = new Schema<IRecommendation, RecommendationModel>(
   {
-    user: {
+    organization: {
       type: Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Organization",
       required: true,
       index: true,
     },
@@ -98,8 +99,8 @@ const recommendationSchema = new Schema<IRecommendation, RecommendationModel>(
   }
 );
 
-// Reconciliation looks up "this user's recommendation with this signature".
-recommendationSchema.index({ user: 1, signature: 1 });
+// Reconciliation looks up "this organization's recommendation with this signature".
+recommendationSchema.index({ organization: 1, signature: 1 });
 
 export const Recommendation = model<IRecommendation, RecommendationModel>(
   "Recommendation",

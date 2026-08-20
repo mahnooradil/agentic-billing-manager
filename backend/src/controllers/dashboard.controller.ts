@@ -13,15 +13,15 @@ import { Platform } from "@/models/platform.model";
 
 /** GET /api/dashboard/stats — platform counts for the overview cards. */
 export const getDashboardStats = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!organization) {
     throw new AppError("Authentication required", 401);
   }
 
   const [totalPlatforms, activePlatforms, inactivePlatforms] = await Promise.all([
-    Platform.countDocuments({ user: user._id }),
-    Platform.countDocuments({ user: user._id, status: "Active" }),
-    Platform.countDocuments({ user: user._id, status: "Inactive" }),
+    Platform.countDocuments({ organization: organization._id }),
+    Platform.countDocuments({ organization: organization._id, status: "Active" }),
+    Platform.countDocuments({ organization: organization._id, status: "Inactive" }),
   ]);
 
   sendSuccess(res, 200, "Dashboard statistics retrieved", {

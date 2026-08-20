@@ -21,7 +21,10 @@ export type PlatformStatus = (typeof PLATFORM_STATUSES)[number];
 
 /** Shape of the persisted platform fields. */
 export interface IPlatform {
-  /** Owning user — every query MUST be scoped by this. */
+  /** Owning organization — every query MUST be scoped by this (shared across
+   *  every member of the organization). */
+  organization: Types.ObjectId;
+  /** Which member created this record — audit trail only, never a query filter. */
   user: Types.ObjectId;
   name: string;
   slug: string;
@@ -38,11 +41,16 @@ type PlatformModel = Model<IPlatform>;
 
 const platformSchema = new Schema<IPlatform, PlatformModel>(
   {
+    organization: {
+      type: Schema.Types.ObjectId,
+      ref: "Organization",
+      required: true,
+      index: true,
+    },
     user: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true,
     },
     name: {
       type: String,
@@ -54,8 +62,9 @@ const platformSchema = new Schema<IPlatform, PlatformModel>(
     slug: {
       type: String,
       required: [true, "Slug is required"],
-      // Uniqueness is per-user (see compound index below), not global — two
-      // different users may each have their own platform with the same slug.
+      // Uniqueness is per-organization (see compound index below), not global —
+      // two different organizations may each have their own platform with the
+      // same slug.
       lowercase: true,
       trim: true,
       minlength: [2, "Slug must be at least 2 characters"],
@@ -90,8 +99,9 @@ const platformSchema = new Schema<IPlatform, PlatformModel>(
   }
 );
 
-// One slug per user (not global) — replaces the old bare-unique index.
-platformSchema.index({ user: 1, slug: 1 }, { unique: true });
+// One slug per organization (not global, not per-user) — every member of an
+// org shares the same slug namespace.
+platformSchema.index({ organization: 1, slug: 1 }, { unique: true });
 
 export const Platform = model<IPlatform, PlatformModel>(
   "Platform",

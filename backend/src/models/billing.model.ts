@@ -19,24 +19,29 @@ import {
 export const BILLING_STATUSES = ["Pending", "Paid", "Overdue"] as const;
 export type BillingStatus = (typeof BILLING_STATUSES)[number];
 
-/** Where a billing record came from — manual entry, or an automatic pull from
- *  a connected platform's own billing/usage API (see services/billing-sync). */
-export const BILLING_SOURCES = ["manual", "auto_sync"] as const;
+/** Where a billing record came from — manual entry, an automatic pull from a
+ *  connected platform's own billing/usage API (see services/billing-sync), or
+ *  a periodic scan of a connected Gmail inbox for invoice-like emails, used as
+ *  a fallback for platforms with no billing-sync adapter (see services/email-sync). */
+export const BILLING_SOURCES = ["manual", "auto_sync", "email_sync"] as const;
 export type BillingSource = (typeof BILLING_SOURCES)[number];
 
 /** Shape of the persisted billing fields. */
 export interface IBilling {
-  /** Owning user — every query MUST be scoped by this. */
+  /** Owning organization — every query MUST be scoped by this. */
+  organization: Types.ObjectId;
+  /** Which member created this record — audit trail only, never a query filter. */
   user: Types.ObjectId;
   /** Manually-created platform this record belongs to. Required for `manual`
-   *  records; absent for `auto_sync` records (those link via `platformConnection`
-   *  instead — there is no manual Platform document for a Pipedream connection). */
+   *  records; absent for `auto_sync`/`email_sync` records (those link via
+   *  `platformConnection` instead — there is no manual Platform document for a
+   *  Pipedream connection). */
   platform?: Types.ObjectId;
-  /** The connected platform this record was auto-synced from (auto_sync only). */
+  /** The connected platform this record was synced from (auto_sync/email_sync). */
   platformConnection?: Types.ObjectId;
   source: BillingSource;
-  /** The source API's own invoice/period identifier — the upsert key that keeps
-   *  a re-sync from creating duplicates (auto_sync only). */
+  /** The source's own invoice/period/message identifier — the upsert key that
+   *  keeps a re-sync from creating duplicates (auto_sync/email_sync only). */
   externalId?: string;
   customerName: string;
   invoiceNumber: string;
@@ -54,11 +59,16 @@ type BillingModel = Model<IBilling>;
 
 const billingSchema = new Schema<IBilling, BillingModel>(
   {
+    organization: {
+      type: Schema.Types.ObjectId,
+      ref: "Organization",
+      required: true,
+      index: true,
+    },
     user: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true,
     },
     platform: {
       type: Schema.Types.ObjectId,
@@ -74,7 +84,7 @@ const billingSchema = new Schema<IBilling, BillingModel>(
       type: String,
       enum: {
         values: BILLING_SOURCES,
-        message: "Source must be manual or auto_sync",
+        message: "Source must be manual, auto_sync, or email_sync",
       },
       default: "manual",
     },
@@ -158,13 +168,13 @@ billingSchema.pre("validate", function () {
 
 // Re-syncing a connection must UPDATE its own previously-synced records, not
 // duplicate them. A partial (not merely sparse) index: `sparse` alone doesn't
-// help here since `user` is never missing, so every manual record (which omits
-// both platformConnection and externalId) would still collide on the same
-// `{user, null, null}` entry — limiting a user to one manual record. The
-// partial filter scopes the constraint to auto_sync records only, which are
-// the only ones that ever set both fields.
+// help here since `organization` is never missing, so every manual record
+// (which omits both platformConnection and externalId) would still collide on
+// the same `{organization, null, null}` entry — limiting an org to one manual
+// record. The partial filter scopes the constraint to auto_sync/email_sync
+// records only, which are the only ones that ever set both fields.
 billingSchema.index(
-  { user: 1, platformConnection: 1, externalId: 1 },
+  { organization: 1, platformConnection: 1, externalId: 1 },
   {
     unique: true,
     partialFilterExpression: {

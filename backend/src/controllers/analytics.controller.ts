@@ -17,27 +17,27 @@ import { analyticsQuerySchema } from "@/validators/analytics.validator";
 
 /** GET /api/analytics/overview — composite analytics for the dashboard. */
 export const getAnalyticsOverview = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!organization) {
     throw new AppError("Authentication required", 401);
   }
 
   // Read-only query param; unknown values are clamped to "all" by the schema.
   const { range } = analyticsQuerySchema.parse(req.query);
-  const analytics = await computeAnalyticsOverview(user._id.toString(), range);
+  const analytics = await computeAnalyticsOverview(organization._id.toString(), range);
 
   sendSuccess(res, 200, "Analytics overview retrieved", { analytics });
 });
 
 /** GET /api/analytics/advanced — deep billing intelligence (F6). */
 export const getAdvancedAnalytics = asyncHandler(async (req, res) => {
-  const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!organization) {
     throw new AppError("Authentication required", 401);
   }
 
   const { range } = analyticsQuerySchema.parse(req.query);
-  const analytics = await computeAdvancedAnalytics(user._id.toString(), range);
+  const analytics = await computeAdvancedAnalytics(organization._id.toString(), range);
 
   sendSuccess(res, 200, "Advanced analytics retrieved", { analytics });
 });

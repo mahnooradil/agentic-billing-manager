@@ -7,6 +7,7 @@ import { initRecommendationEngine } from "@/services/ai/recommendation-engine";
 import { initNotificationEngine } from "@/services/notification/notification-engine";
 import { warmCatalogCache } from "@/services/integrations/pipedream";
 import { startBillingSyncScheduler } from "@/services/billing-sync/scheduler";
+import { startEmailSyncScheduler } from "@/services/email-sync/scheduler";
 
 /**
  * Server bootstrap / entry point.
@@ -29,6 +30,7 @@ async function startServer(): Promise<void> {
     initNotificationEngine();
     warmCatalogCache();
     startBillingSyncScheduler();
+    startEmailSyncScheduler();
 
     // 3: database is ready — start accepting HTTP traffic.
     const app = createApp();

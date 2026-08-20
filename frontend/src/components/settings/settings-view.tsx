@@ -10,6 +10,8 @@ import {
   Shield,
   LifeBuoy,
   SlidersHorizontal,
+  Coins,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -24,14 +26,18 @@ import { NotificationsSettingsTab } from "./tabs/notifications-tab";
 import { DisplaySettingsTab } from "./tabs/display-tab";
 import { BillingPlanTab } from "./tabs/billing-plan-tab";
 import { SupportSettingsTab } from "./tabs/support-tab";
+import { CreditsSettingsTab } from "./tabs/credits-tab";
+import { TeamSettingsTab } from "./tabs/team-tab";
 
 const TABS = [
   { key: "general", label: "General", icon: SlidersHorizontal, Component: GeneralSettingsTab },
   { key: "personal", label: "Personal", icon: User, Component: PersonalSettingsTab },
+  { key: "team", label: "Team", icon: Users, Component: TeamSettingsTab },
   { key: "security", label: "Security", icon: Shield, Component: SecuritySettingsTab },
   { key: "notifications", label: "Notifications", icon: Bell, Component: NotificationsSettingsTab },
   { key: "display", label: "Display", icon: Monitor, Component: DisplaySettingsTab },
   { key: "billing", label: "Billing & Plan", icon: Wallet, Component: BillingPlanTab },
+  { key: "credits", label: "Credits", icon: Coins, Component: CreditsSettingsTab },
   { key: "support", label: "Support", icon: LifeBuoy, Component: SupportSettingsTab },
 ] as const;
 
