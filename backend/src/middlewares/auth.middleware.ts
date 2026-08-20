@@ -14,6 +14,7 @@ import { User } from "@/models/user.model";
 import { Session } from "@/models/session.model";
 import { Membership } from "@/models/membership.model";
 import { Organization } from "@/models/organization.model";
+import { createPersonalOrganization } from "@/services/organizations/organization-bootstrap.service";
 
 const BEARER_PREFIX = "Bearer ";
 /** Throttle for the `lastSeenAt` touch — avoids a write on every single request. */
@@ -72,16 +73,18 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
 
   // Every authenticated route needs the user's organization to scope business
   // data — v1 assumes exactly one Membership per user (see Membership model).
-  // Missing here means either a pre-Organizations account that hasn't been
-  // backfilled yet, or mid-signup — both are genuine 401s, not silently
-  // proceeding with no organization scope.
-  const membership = await Membership.findOne({ user: user._id });
-  if (!membership) {
-    throw new AppError("Your account has no organization set up.", 401);
-  }
-  const organization = await Organization.findById(membership.organization);
-  if (!organization) {
-    throw new AppError("Your account has no organization set up.", 401);
+  // A user can legitimately end up with none (removed from an org, an
+  // orphaned pre-backfill account, mid-signup race) — self-heal with a fresh
+  // personal organization rather than locking them out entirely, which would
+  // otherwise 401 every request forever with no way back in.
+  let membership = await Membership.findOne({ user: user._id });
+  let organization = membership
+    ? await Organization.findById(membership.organization)
+    : null;
+  if (!membership || !organization) {
+    const bootstrapped = await createPersonalOrganization(user._id, user.fullName);
+    membership = bootstrapped.membership;
+    organization = bootstrapped.organization;
   }
 
   req.user = user;
