@@ -146,10 +146,18 @@ export async function sendOrganizationInviteEmail(input: {
   const org = escapeHtml(input.organizationName);
   const inviter = escapeHtml(input.inviterName);
   const roleLabel = ROLE_LABEL[input.role] ?? input.role;
+  // A trailing date keeps a resend to the same person for the same org from
+  // Gmail-threading into one conversation as an identical-subject repeat —
+  // deleting that thread would otherwise silently swallow a genuinely new
+  // invite arriving into the same (now-deleted) thread.
+  const dateSuffix = new Date().toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 
   await sendEmail({
     to: input.to,
-    subject: `${input.inviterName} invited you to join ${input.organizationName}`,
+    subject: `${input.inviterName} invited you to join ${input.organizationName} (${dateSuffix})`,
     textBody: `${input.inviterName} invited you to join "${input.organizationName}" on Billing Manager as ${roleLabel}.\n\nAccept the invite: ${acceptUrl}\n\nThis link expires in 7 days. If you weren't expecting this, you can ignore this email.`,
     htmlBody: `
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f3f4f6;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
