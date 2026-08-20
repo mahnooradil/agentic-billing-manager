@@ -63,7 +63,7 @@ export function InviteAcceptView({ token }: { token: string }) {
     };
   }, [token]);
 
-  const handleAccept = async () => {
+  const handleAccept = React.useCallback(async () => {
     setAccepting(true);
     setAcceptError(null);
     try {
@@ -77,7 +77,32 @@ export function InviteAcceptView({ token }: { token: string }) {
     } finally {
       setAccepting(false);
     }
-  };
+  }, [token, router]);
+
+  // Auto-accept the moment we know the visitor is logged in as the invited
+  // email — covers the "log in, then land back here" redirect (see the
+  // login link below) so accepting never needs a second manual click. Only
+  // fires once per mount; `handleAccept` itself still guards re-entrancy.
+  const autoAcceptedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (autoAcceptedRef.current) return;
+    if (status !== "ready" || !preview || accepted || accepting) return;
+    if (!isAuthenticated || user?.email.toLowerCase() !== preview.email.toLowerCase()) return;
+    autoAcceptedRef.current = true;
+    let ignore = false;
+    (async () => {
+      // A no-op await defers the state-changing work to a later microtask —
+      // `handleAccept` sets state synchronously as its first statement,
+      // which react-hooks/set-state-in-effect forbids calling directly from
+      // an effect body (see CLAUDE.md's documented pattern for this).
+      await Promise.resolve();
+      if (ignore) return;
+      await handleAccept();
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [status, preview, accepted, accepting, isAuthenticated, user, handleAccept]);
 
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6">
@@ -117,7 +142,7 @@ export function InviteAcceptView({ token }: { token: string }) {
                 user?.email.toLowerCase() === preview.email.toLowerCase() ? (
                   <Button className="w-full" onClick={() => void handleAccept()} disabled={accepting}>
                     {accepting ? <Loader2 className="animate-spin" /> : null}
-                    Accept invitation
+                    {accepting ? "Accepting…" : "Accept invitation"}
                   </Button>
                 ) : (
                   <div className="space-y-3 text-center text-sm text-muted-foreground">
@@ -130,12 +155,12 @@ export function InviteAcceptView({ token }: { token: string }) {
               ) : preview.hasExistingAccount ? (
                 <div className="space-y-3">
                   <p className="text-center text-sm text-muted-foreground">
-                    You already have an account. Log in, then reopen this link to accept.
+                    You already have an account. Log in and you&apos;ll join automatically.
                   </p>
                   <Button
                     className="w-full"
                     render={
-                      <Link href="/login">
+                      <Link href={`/login?redirect=${encodeURIComponent(`/invite/${token}`)}`}>
                         <LogIn />
                         Log in
                       </Link>

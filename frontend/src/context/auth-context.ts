@@ -11,8 +11,10 @@ export interface AuthContextValue {
   isAuthenticated: boolean;
   /** True while the session is being restored from storage on first load. */
   isLoading: boolean;
-  /** Persist a session and navigate to the dashboard. */
-  login: (token: string, user: AuthUser) => void;
+  /** Persist a session and navigate — to `redirectTo` if given (e.g. back to
+   *  an invite page after logging in from there), otherwise the user's usual
+   *  landing page. */
+  login: (token: string, user: AuthUser, redirectTo?: string) => void;
   /** Clear the session and navigate to login. */
   logout: () => void;
 }

@@ -26,15 +26,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const login = React.useCallback(
-    async (token: string, user: AuthUser) => {
+    async (token: string, user: AuthUser, redirectTo?: string) => {
       authStore.setSession(token, user);
       // Force the agent chat store to re-hydrate under this user's own storage
       // key — otherwise a same-tab account switch could still show the
       // previous user's in-memory transcript for a moment before any storage read.
       agentChatStore.reset();
 
-      // Redirect to the user's preferred landing page; fall back to the
-      // dashboard overview if the settings fetch fails for any reason.
+      // An explicit redirect (e.g. back to an invite page) always wins —
+      // otherwise fall back to the user's preferred landing page, or the
+      // dashboard overview if that settings fetch fails for any reason.
+      if (redirectTo) {
+        router.replace(redirectTo);
+        return;
+      }
       let destination = "/dashboard/overview";
       try {
         const response = await getUserSettings();

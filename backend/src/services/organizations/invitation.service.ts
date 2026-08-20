@@ -26,8 +26,40 @@ import { Organization, type OrganizationDocument } from "@/models/organization.m
 import { Platform } from "@/models/platform.model";
 import { Billing } from "@/models/billing.model";
 import { PlatformConnection } from "@/models/platform-connection.model";
+import { Notification } from "@/models/notification.model";
+import { emitNotificationCreated } from "@/services/events/notification.events";
+import { User } from "@/models/user.model";
 
 const INVITATION_TTL_DAYS = 7;
+
+/** Notifies the organization (via the existing Notification/bell system) that
+ *  someone just joined — the ONLY way an owner currently finds out a pending
+ *  invite was accepted, short of re-opening the Team tab. Best-effort: a
+ *  notification failure must never break the join itself. */
+async function notifyMemberJoined(
+  organizationId: Types.ObjectId,
+  userId: Types.ObjectId,
+  role: MembershipRole
+): Promise<void> {
+  try {
+    const user = await User.findById(userId);
+    const name = user?.fullName ?? "Someone";
+    const doc = await Notification.create({
+      organization: organizationId,
+      title: "New team member",
+      message: `${name} joined as ${role}.`,
+      severity: "info",
+      category: "system",
+      signature: `member:joined:${userId.toString()}:${Date.now()}`,
+      read: false,
+      archived: false,
+      source: "invitation-service",
+    });
+    emitNotificationCreated(doc);
+  } catch {
+    // Best-effort — see docstring.
+  }
+}
 
 function generateToken(): string {
   return randomBytes(32).toString("hex");
@@ -91,6 +123,7 @@ export async function consumeInvitationForNewSignup(
   });
   invitation.status = "accepted";
   await invitation.save();
+  await notifyMemberJoined(organization._id, userId, invitation.role);
 
   return { organization, membership };
 }
@@ -165,6 +198,7 @@ export async function acceptInvitationForExistingUser(
   });
   invitation.status = "accepted";
   await invitation.save();
+  await notifyMemberJoined(organization._id, userId, invitation.role);
 
   return { organization, role: invitation.role };
 }

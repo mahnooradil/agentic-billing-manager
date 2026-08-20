@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
@@ -23,11 +24,32 @@ type Step = { name: "email" } | { name: "code"; email: string };
  * Passwordless login — enter an email, get a code, verify it. Verifying an
  * unknown email is impossible here (the backend 404s at the request-otp
  * step) since login never collects a name to create an account with.
+ *
+ * Wrapped in Suspense because the inner component reads `useSearchParams()`
+ * (an optional `?redirect=` back to, e.g., an invite page), which Next.js
+ * requires to be Suspense-bounded.
  */
 export function LoginForm() {
+  return (
+    <React.Suspense fallback={<Card className="w-full max-w-sm" />}>
+      <LoginFormInner />
+    </React.Suspense>
+  );
+}
+
+function LoginFormInner() {
   const [step, setStep] = React.useState<Step>({ name: "email" });
   const [error, setError] = React.useState<string | null>(null);
   const { login } = useAuth();
+  const searchParams = useSearchParams();
+  // Only a same-site path is ever honored — a bare "/..." not "//..." (which
+  // browsers treat as protocol-relative, i.e. off-site) — so a crafted
+  // `?redirect=` can't be used as an open redirect.
+  const rawRedirect = searchParams.get("redirect");
+  const redirectTo =
+    rawRedirect && rawRedirect.startsWith("/") && !rawRedirect.startsWith("//")
+      ? rawRedirect
+      : undefined;
 
   const {
     register,
@@ -55,7 +77,7 @@ export function LoginForm() {
           email={step.email}
           onVerify={async (code) => {
             const response = await verifyOtp({ email: step.email, code });
-            login(response.data.token, response.data.user);
+            login(response.data.token, response.data.user, redirectTo);
           }}
           onResend={async () => {
             await requestLoginOtp({ email: step.email });
