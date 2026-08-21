@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FormAlert } from "@/components/common/form-alert";
+import { useAlertState } from "@/hooks/use-alert-state";
 import { ApiError } from "@/services/api/client";
 import { updateUserSettings } from "@/services/settings/settings.service";
 import { THEMES, type Theme } from "@/services/types/settings";
@@ -29,9 +30,7 @@ const THEME_LABELS: Record<Theme, string> = {
 export function DisplaySettingsTab() {
   const { theme, setTheme } = useTheme();
   const [saving, setSaving] = React.useState(false);
-  const [alert, setAlert] = React.useState<{ type: "success" | "error"; message: string } | null>(
-    null
-  );
+  const [alert, setAlert] = useAlertState();
 
   const handleSave = async () => {
     setAlert(null);

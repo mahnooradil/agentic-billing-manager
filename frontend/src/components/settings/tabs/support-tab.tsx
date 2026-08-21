@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime, formatDateTime } from "@/lib/format";
 import { usePreferences } from "@/services/preferences/preferences-store";
 import { useAuth } from "@/hooks/use-auth";
+import { useAlertState } from "@/hooks/use-alert-state";
 import { ApiError } from "@/services/api/client";
 import { getSupportRequests, createSupportRequest } from "@/services/support/support.service";
 import { getMyPlan } from "@/services/plan/plan.service";
@@ -92,9 +93,7 @@ export function SupportSettingsTab() {
   const [status, setStatus] = React.useState<ViewStatus>("loading");
   const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
-  const [alert, setAlert] = React.useState<{ type: "success" | "error"; message: string } | null>(
-    null
-  );
+  const [alert, setAlert] = useAlertState();
 
   const {
     register,

@@ -29,21 +29,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-svh w-full">
-      {/* Desktop sidebar — a rich, layered, floating navigation panel. */}
+      {/* Desktop sidebar — flat panel, flush with the content column. */}
       <aside
         className={cn(
-          "sticky top-0 isolate hidden h-svh shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar/85 text-sidebar-foreground shadow-[8px_0_30px_-18px_oklch(0_0_0/0.7)] backdrop-blur-2xl transition-[width] duration-300 ease-out md:flex",
+          "sticky top-0 hidden h-svh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-out md:flex",
           collapsed ? "w-16" : "w-64"
         )}
       >
-        {/* Layered lighting — top glow, edge highlight, subtle depth. */}
-        <div aria-hidden className="pointer-events-none absolute inset-0">
-          <div className="absolute inset-x-0 top-0 h-44 bg-gradient-to-b from-primary/10 to-transparent" />
-          <div className="absolute -top-24 left-1/2 size-56 -translate-x-1/2 rounded-full bg-primary/15 blur-3xl" />
-          <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-white/12 via-white/5 to-transparent" />
-        </div>
-
-        <div className="relative z-10 flex flex-1 flex-col">
+        <div className="flex flex-1 flex-col">
           <div className="flex h-14 items-center border-b border-sidebar-border/80">
             <Brand collapsed={collapsed} />
           </div>

@@ -9,6 +9,7 @@ import { ErrorState } from "@/components/common/error-state";
 import { FormAlert } from "@/components/common/form-alert";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { cn } from "@/lib/utils";
+import { useAlertState } from "@/hooks/use-alert-state";
 import { ApiError } from "@/services/api/client";
 import { getMyPlan, updateMyPlan } from "@/services/plan/plan.service";
 import type { PlanData, PlanDefinition } from "@/services/types/plan";
@@ -32,9 +33,7 @@ export function BillingPlanTab() {
   const [data, setData] = React.useState<PlanData | null>(null);
   const [loadError, setLoadError] = React.useState("");
   const [switchingTo, setSwitchingTo] = React.useState<string | null>(null);
-  const [alert, setAlert] = React.useState<{ type: "success" | "error"; message: string } | null>(
-    null
-  );
+  const [alert, setAlert] = useAlertState();
   const [reloadKey, setReloadKey] = React.useState(0);
 
   React.useEffect(() => {

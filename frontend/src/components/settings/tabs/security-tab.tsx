@@ -13,6 +13,7 @@ import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { SectionHeader } from "@/components/common/section-header";
 import { OtpCodeStep } from "@/components/auth/otp-code-step";
 import { TextField } from "@/components/settings/settings-fields";
+import { useAlertState } from "@/hooks/use-alert-state";
 import { describeUserAgent } from "@/lib/user-agent";
 import { formatRelativeTime, formatDateTime } from "@/lib/format";
 import { usePreferences } from "@/services/preferences/preferences-store";
@@ -44,11 +45,7 @@ export function SecuritySettingsTab() {
   // ── Change email ──
   const [emailStep, setEmailStep] = React.useState<EmailStep>("idle");
   const [pendingEmail, setPendingEmail] = React.useState("");
-  const [emailAlert, setEmailAlert] = React.useState<{
-    type: "success" | "error";
-    message: string;
-    details?: string[];
-  } | null>(null);
+  const [emailAlert, setEmailAlert] = useAlertState();
 
   const {
     register: registerEmail,
@@ -84,10 +81,7 @@ export function SecuritySettingsTab() {
 
   // ── Sign out everywhere ──
   const [signingOut, setSigningOut] = React.useState(false);
-  const [signOutAlert, setSignOutAlert] = React.useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
+  const [signOutAlert, setSignOutAlert] = useAlertState();
 
   const handleSignOutEverywhere = async () => {
     setSignOutAlert(null);

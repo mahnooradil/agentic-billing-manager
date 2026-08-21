@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { SectionHeader } from "@/components/common/section-header";
 import { FormAlert } from "@/components/common/form-alert";
 import { ApiError } from "@/services/api/client";
+import { useAlertState } from "@/hooks/use-alert-state";
 import { updateProfile } from "@/services/auth/auth.service";
 import { authStore } from "@/services/auth/auth-store";
 import {
@@ -35,11 +36,7 @@ type PersonalFormValues = z.infer<typeof personalFormSchema>;
  *  name; email is the passwordless sign-in identity and isn't editable here. */
 export function PersonalSettingsTab() {
   const { user } = useAuth();
-  const [alert, setAlert] = React.useState<{
-    type: "success" | "error";
-    message: string;
-    details?: string[];
-  } | null>(null);
+  const [alert, setAlert] = useAlertState();
   const [exporting, setExporting] = React.useState(false);
   const [exportError, setExportError] = React.useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = React.useState(false);

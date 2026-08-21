@@ -11,6 +11,7 @@ import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
 import { Pagination } from "@/components/common/pagination";
+import { useAlertState } from "@/hooks/use-alert-state";
 import { ApiError } from "@/services/api/client";
 import { getBillingStats, listBillingRecords } from "@/services/billing/billing.service";
 import { listPlatforms } from "@/services/platforms/platform.service";
@@ -39,10 +40,7 @@ export function BillingView() {
   const [platforms, setPlatforms] = React.useState<Platform[]>([]);
   const [stats, setStats] = React.useState<BillingStats | null>(null);
   const [loadError, setLoadError] = React.useState("");
-  const [alert, setAlert] = React.useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
+  const [alert, setAlert] = useAlertState();
 
   // Create/Edit dialog state (key forces a fresh form on each open).
   const [formOpen, setFormOpen] = React.useState(false);

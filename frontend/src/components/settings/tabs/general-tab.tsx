@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ErrorState } from "@/components/common/error-state";
 import { FormAlert } from "@/components/common/form-alert";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
+import { useAlertState } from "@/hooks/use-alert-state";
 import { ApiError } from "@/services/api/client";
 import {
   getUserSettings,
@@ -76,11 +77,7 @@ type ViewStatus = "loading" | "error" | "ready";
 export function GeneralSettingsTab() {
   const [status, setStatus] = React.useState<ViewStatus>("loading");
   const [loadError, setLoadError] = React.useState("");
-  const [alert, setAlert] = React.useState<{
-    type: "success" | "error";
-    message: string;
-    details?: string[];
-  } | null>(null);
+  const [alert, setAlert] = useAlertState();
   const [reloadKey, setReloadKey] = React.useState(0);
 
   const {

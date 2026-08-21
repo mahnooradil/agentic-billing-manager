@@ -41,6 +41,12 @@ export function OtpCodeStep({ email, onVerify, onResend, onBack }: OtpCodeStepPr
   >({ type: "idle" });
   const [resending, setResending] = React.useState(false);
 
+  React.useEffect(() => {
+    if (resendStatus.type !== "sent") return;
+    const timer = setTimeout(() => setResendStatus({ type: "idle" }), 2000);
+    return () => clearTimeout(timer);
+  }, [resendStatus]);
+
   const {
     register,
     handleSubmit,
