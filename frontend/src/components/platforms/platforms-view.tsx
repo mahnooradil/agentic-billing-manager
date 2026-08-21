@@ -3,7 +3,6 @@
 import * as React from "react";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { createFrontendClient } from "@pipedream/sdk/browser";
 import { Boxes, Loader2, Mail, Pencil, Plug, Plus, Search, SearchX, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,11 +15,13 @@ import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
 import { cn } from "@/lib/utils";
+import { lastEmailSyncedAt, timeAgo } from "@/lib/email-sync-platforms";
+import { useAlertState } from "@/hooks/use-alert-state";
+import { usePipedreamConnect } from "@/hooks/use-pipedream-connect";
 import { ApiError } from "@/services/api/client";
 import {
   getPipedreamCatalog,
   listPlatformConnections,
-  createPipedreamConnectToken,
   connectViaPipedream,
 } from "@/services/connections/platform-connections.service";
 import { listPlatforms } from "@/services/platforms/platform.service";
@@ -58,24 +59,6 @@ const POPULAR_SLUGS = [
 
 /** Reads `metadata.emailSync.lastSyncedAt` off a connection, if present —
  *  stamped by the backend's email-sync engine after each completed run. */
-function lastEmailSyncedAt(metadata: Record<string, unknown>): Date | null {
-  const emailSync = metadata.emailSync as { lastSyncedAt?: string } | undefined;
-  if (!emailSync?.lastSyncedAt) return null;
-  const date = new Date(emailSync.lastSyncedAt);
-  return isNaN(date.getTime()) ? null : date;
-}
-
-/** Coarse "time ago" label — good enough for a status hint, not a live clock. */
-function timeAgo(date: Date): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -201,17 +184,8 @@ function PlatformsViewInner() {
   const [query, setQuery] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
 
-  const [connecting, setConnecting] = React.useState<string | null>(null);
-  // Per-app cleanup for the in-flight connect listeners/timers (focus,
-  // visibility, hard timeout) — keyed by nameSlug so a manual cancel or any
-  // completion path can tear them all down without leaking a stale listener
-  // onto the NEXT attempt for the same app.
-  const connectCleanupRef = React.useRef<Map<string, () => void>>(new Map());
   const [actionError, setActionError] = React.useState<string | null>(null);
-  const [alert, setAlert] = React.useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
+  const [alert, setAlert] = useAlertState();
 
   const [disconnect, setDisconnect] = React.useState<{
     open: boolean;
@@ -229,6 +203,23 @@ function PlatformsViewInner() {
 
   const reload = () => setReloadKey((key) => key + 1);
 
+  const { connectingSlug: connecting, connect, clearAll: clearConnecting } = usePipedreamConnect(
+    async (app, accountId) => {
+      const res = await connectViaPipedream({
+        platform: app.nameSlug,
+        displayName: app.name,
+        accountId,
+      });
+      setAlert({ type: "success", message: res.message ?? `${app.name} connected.` });
+      reload();
+    },
+    (message) => setActionError(message)
+  );
+  const handleConnect = (app: CatalogApp) => {
+    setActionError(null);
+    void connect(app);
+  };
+
   // Safety net for a back-navigation that restores this page from the
   // browser's bfcache (e.g. cancelling the Pipedream popup and going back):
   // any Connect button stuck mid-flight is cleared and the connections list
@@ -236,14 +227,12 @@ function PlatformsViewInner() {
   React.useEffect(() => {
     const handlePageShow = (event: PageTransitionEvent) => {
       if (!event.persisted) return;
-      for (const cleanup of connectCleanupRef.current.values()) cleanup();
-      connectCleanupRef.current.clear();
-      setConnecting(null);
+      clearConnecting();
       reload();
     };
     window.addEventListener("pageshow", handlePageShow);
     return () => window.removeEventListener("pageshow", handlePageShow);
-  }, []);
+  }, [clearConnecting]);
 
   // Deep-link from the Billing Agent chat ("Connect X now") — pre-fills the
   // search box with that platform so it surfaces immediately, then clears it.
@@ -372,85 +361,6 @@ function PlatformsViewInner() {
   const logoFor = (nameSlug: string): string | null =>
     apps.find((app) => app.nameSlug === nameSlug)?.imgSrc ?? null;
 
-  const handleConnect = async (app: CatalogApp) => {
-    // Clicking the same button again while it's connecting cancels it — an
-    // always-available manual escape hatch, since Pipedream's popup doesn't
-    // reliably report every way a user can back out of it.
-    if (connecting === app.nameSlug) {
-      connectCleanupRef.current.get(app.nameSlug)?.();
-      connectCleanupRef.current.delete(app.nameSlug);
-      setConnecting(null);
-      return;
-    }
-
-    setActionError(null);
-    setConnecting(app.nameSlug);
-
-    const finish = () => {
-      connectCleanupRef.current.get(app.nameSlug)?.();
-      connectCleanupRef.current.delete(app.nameSlug);
-      setConnecting((current) => (current === app.nameSlug ? null : current));
-    };
-
-    try {
-      const tokenRes = await createPipedreamConnectToken();
-      const pd = createFrontendClient();
-      pd.connectAccount({
-        app: app.nameSlug,
-        token: tokenRes.data.token,
-        onSuccess: async (account: { id: string }) => {
-          try {
-            const res = await connectViaPipedream({
-              platform: app.nameSlug,
-              displayName: app.name,
-              accountId: account.id,
-            });
-            setAlert({
-              type: "success",
-              message: res.message ?? `${app.name} connected.`,
-            });
-            reload();
-          } catch (error) {
-            setActionError(
-              error instanceof ApiError
-                ? error.message
-                : "Could not finalize the connection."
-            );
-          } finally {
-            finish();
-          }
-        },
-        onError: (err: { message?: string }) => {
-          setActionError(err?.message ?? "The connection was cancelled.");
-          finish();
-        },
-      });
-
-      // Pipedream's SDK doesn't always fire onError when the popup is just
-      // closed, backed-out of, or cancelled — these three fallbacks (window
-      // focus, tab visibility, and a hard timeout) guarantee `connecting`
-      // never stays stuck forever even if every one of them is missed.
-      const handleReturn = () => setTimeout(finish, 1000);
-      const handleVisibility = () => {
-        if (document.visibilityState === "visible") handleReturn();
-      };
-      window.addEventListener("focus", handleReturn);
-      document.addEventListener("visibilitychange", handleVisibility);
-      const hardTimeout = setTimeout(finish, 45_000);
-
-      connectCleanupRef.current.set(app.nameSlug, () => {
-        window.removeEventListener("focus", handleReturn);
-        document.removeEventListener("visibilitychange", handleVisibility);
-        clearTimeout(hardTimeout);
-      });
-    } catch (error) {
-      setActionError(
-        error instanceof ApiError ? error.message : "Could not start the connection."
-      );
-      finish();
-    }
-  };
-
   const openDisconnect = (connection: PlatformConnection) => {
     setAlert(null);
     setDisconnect({ open: true, connection });
@@ -488,11 +398,7 @@ function PlatformsViewInner() {
         title="Integrations"
         description="Connect the platforms you're billed on — every invoice and subscription stays in sync, automatically."
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setQuery("Gmail")}
-          >
+          <Button variant="outline" size="sm" onClick={() => setQuery("Gmail")}>
             <Mail />
             Connect email for invoice sync
           </Button>
@@ -512,13 +418,27 @@ function PlatformsViewInner() {
           aria-label="Search platforms"
         />
       </div>
-      {query.toLowerCase() === "gmail" ? (
+      {query.toLowerCase() === "gmail" || query.toLowerCase() === "outlook" ? (
         <p className="text-sm text-muted-foreground">
           No direct billing sync for a platform? Connect{" "}
-          <span className="font-medium text-foreground">Gmail</span> below
-          (not the generic &quot;Google&quot; app) and we&apos;ll scan for
-          invoice emails automatically — a fallback behind direct sync, not a
-          replacement for it.
+          <button
+            type="button"
+            onClick={() => setQuery("Gmail")}
+            className="font-medium text-foreground underline underline-offset-2"
+          >
+            Gmail
+          </button>{" "}
+          or{" "}
+          <button
+            type="button"
+            onClick={() => setQuery("Outlook")}
+            className="font-medium text-foreground underline underline-offset-2"
+          >
+            Microsoft Outlook Email
+          </button>{" "}
+          below (not the generic &quot;Google&quot;/&quot;Microsoft&quot; app)
+          and we&apos;ll scan for invoice emails automatically — a fallback
+          behind direct sync, not a replacement for it.
         </p>
       ) : null}
 

@@ -35,8 +35,10 @@ const HTML_ENTITY_MAP: Record<string, string> = {
 };
 
 /** Strips tags/scripts/styles and decodes a handful of common entities — just
- *  enough to turn an HTML invoice email into scannable text, not a real parser. */
-function stripHtml(html: string): string {
+ *  enough to turn an HTML invoice email into scannable text, not a real parser.
+ *  Exported for other providers (e.g. Outlook) whose message body already
+ *  arrives as one HTML string rather than a MIME tree to walk. */
+export function stripHtml(html: string): string {
   return html
     .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<[^>]+>/g, " ")

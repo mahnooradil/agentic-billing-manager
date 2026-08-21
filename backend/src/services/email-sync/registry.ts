@@ -2,11 +2,12 @@
  * Email-sync platform registry — which connected platforms are treated as an
  * email-based fallback billing source (see services/email-sync/sync-engine.ts).
  * Structured as a list (mirrors services/billing-sync/registry.ts's shape) so a
- * future Outlook/IMAP channel can be added without redesigning the call sites.
+ * future IMAP channel can be added without redesigning the call sites. The
+ * per-platform API details (Gmail vs Outlook) live in provider.ts.
  */
 
 /** Pipedream `nameSlug`s this app scans for invoice emails instead of an API pull. */
-export const EMAIL_SYNC_PLATFORMS = ["gmail"] as const;
+export const EMAIL_SYNC_PLATFORMS = ["gmail", "microsoft_outlook"] as const;
 
 /** Normalizes a Pipedream nameSlug for comparison (case/dash/underscore-insensitive). */
 function normalize(slug: string): string {

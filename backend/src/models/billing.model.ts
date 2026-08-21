@@ -21,8 +21,9 @@ export type BillingStatus = (typeof BILLING_STATUSES)[number];
 
 /** Where a billing record came from — manual entry, an automatic pull from a
  *  connected platform's own billing/usage API (see services/billing-sync), or
- *  a periodic scan of a connected Gmail inbox for invoice-like emails, used as
- *  a fallback for platforms with no billing-sync adapter (see services/email-sync). */
+ *  a periodic scan of a connected Gmail/Outlook inbox for invoice-like
+ *  emails, used as a fallback for platforms with no billing-sync adapter
+ *  (see services/email-sync). */
 export const BILLING_SOURCES = ["manual", "auto_sync", "email_sync"] as const;
 export type BillingSource = (typeof BILLING_SOURCES)[number];
 

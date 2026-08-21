@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
   Coins,
   Users,
+  Mail,
   type LucideIcon,
 } from "lucide-react";
 
@@ -28,11 +29,13 @@ import { BillingPlanTab } from "./tabs/billing-plan-tab";
 import { SupportSettingsTab } from "./tabs/support-tab";
 import { CreditsSettingsTab } from "./tabs/credits-tab";
 import { TeamSettingsTab } from "./tabs/team-tab";
+import { EmailSyncSettingsTab } from "./tabs/email-sync-tab";
 
 const TABS = [
   { key: "general", label: "General", icon: SlidersHorizontal, Component: GeneralSettingsTab },
   { key: "personal", label: "Personal", icon: User, Component: PersonalSettingsTab },
   { key: "team", label: "Team", icon: Users, Component: TeamSettingsTab },
+  { key: "email-sync", label: "Email Accounts", icon: Mail, Component: EmailSyncSettingsTab },
   { key: "security", label: "Security", icon: Shield, Component: SecuritySettingsTab },
   { key: "notifications", label: "Notifications", icon: Bell, Component: NotificationsSettingsTab },
   { key: "display", label: "Display", icon: Monitor, Component: DisplaySettingsTab },

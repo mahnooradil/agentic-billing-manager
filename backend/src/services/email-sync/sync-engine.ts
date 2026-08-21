@@ -1,13 +1,19 @@
 /**
- * Email-sync engine — scans ONE connected Gmail inbox for invoice-like messages
- * and upserts parsed fields into the Billing collection with `source:
- * "email_sync"`. A fallback channel behind services/billing-sync: only runs for
- * platforms with no billing-sync adapter coverage (see registry.ts). Idempotent
- * and best-effort, mirroring services/billing-sync/sync-engine.ts's safety
- * guarantees — never throws, one bad message never aborts the run.
+ * Email-sync engine — scans ONE connected inbox (Gmail or Outlook) for
+ * invoice-like messages and upserts parsed fields into the Billing
+ * collection with `source: "email_sync"`. A fallback channel behind
+ * services/billing-sync: only runs for platforms with no billing-sync
+ * adapter coverage (see registry.ts). Idempotent and best-effort, mirroring
+ * services/billing-sync/sync-engine.ts's safety guarantees — never throws,
+ * one bad message never aborts the run.
  *
- * Called from two places: right after a Gmail connection is created (one
- * immediate pull) and by the recurring scheduler (scheduler.ts).
+ * Provider-agnostic: everything specific to Gmail vs Outlook (search-query
+ * syntax, raw API shape, message normalization) lives behind provider.ts's
+ * EmailSyncProvider; this file only knows the loop (pagination, safety cap,
+ * watermark, dedupe/upsert).
+ *
+ * Called from two places: right after an email-sync connection is created
+ * (one immediate pull) and by the recurring scheduler (scheduler.ts).
  */
 import { Billing } from "@/models/billing.model";
 import {
@@ -15,13 +21,15 @@ import {
   type PlatformConnectionDocument,
 } from "@/models/platform-connection.model";
 import { emitBusinessDataChanged } from "@/services/events/event-bus";
-import { isEmailSyncPlatform } from "@/services/email-sync/registry";
-import { listCandidateMessageIds, getMessage } from "@/services/email-sync/gmail-client";
-import { extractPlainText, parseInvoiceFields, parseSender } from "@/services/email-sync/parser";
+import {
+  getEmailSyncProvider,
+  type EmailSyncProvider,
+  type NormalizedEmailMessage,
+} from "@/services/email-sync/provider";
+import { parseInvoiceFields, parseSender } from "@/services/email-sync/parser";
 
 const MAX_MESSAGES_PER_RUN = 200;
 const PAGE_SIZE = 50;
-const FIRST_SYNC_LOOKBACK_DAYS = 90;
 const OVERLAP_DAYS = 1;
 
 interface EmailSyncState {
@@ -33,13 +41,15 @@ interface AccountMetadata {
 }
 
 /**
- * Syncs one Gmail connection. Silently does nothing if the platform isn't a
- * supported email-sync source or has no Pipedream account id yet. Never throws.
+ * Syncs one email-sync connection. Silently does nothing if the platform
+ * isn't a supported email-sync source or has no Pipedream account id yet.
+ * Never throws.
  */
 export async function syncConnectionEmail(
   connection: PlatformConnectionDocument
 ): Promise<void> {
-  if (!isEmailSyncPlatform(connection.platform)) return;
+  const provider = getEmailSyncProvider(connection.platform);
+  if (!provider) return;
 
   const meta = connection.metadata as AccountMetadata | undefined;
   const pipedreamAccountId = meta?.pipedreamAccountId;
@@ -52,16 +62,17 @@ export async function syncConnectionEmail(
         new Date(meta.emailSync.lastSyncedAt).getTime() - OVERLAP_DAYS * 86_400_000
       )
     : null;
-  const query = buildInvoiceSearchQuery(sinceDate);
+  const query = provider.buildSearchQuery(sinceDate);
 
   let processed = 0;
   let created = 0;
   let hitCap = false;
+  let stoppedEarly = false;
   let pageToken: string | undefined;
 
   try {
     do {
-      const page = await listCandidateMessageIds(
+      const page = await provider.listCandidateMessageIds(
         externalUserId,
         pipedreamAccountId,
         query,
@@ -75,23 +86,39 @@ export async function syncConnectionEmail(
         }
         processed++;
         try {
-          const wasCreated = await processOneMessage(
-            connection,
+          const message = await provider.getMessage(
             externalUserId,
             pipedreamAccountId,
             messageId
           );
+          if (!message) continue;
+
+          // Some providers (Outlook) can't narrow their search by date
+          // server-side — their results are newest-first, so walking past
+          // `sinceDate` means everything after this point was already synced.
+          if (
+            provider.sortedNewestFirstUnfiltered &&
+            sinceDate &&
+            message.receivedAt.getTime() < sinceDate.getTime()
+          ) {
+            stoppedEarly = true;
+            break;
+          }
+
+          const wasCreated = await processNormalizedMessage(connection, provider, message);
           if (wasCreated) created++;
         } catch {
           // One bad/unreachable message must never abort the whole run.
         }
       }
-      pageToken = hitCap ? undefined : page.nextPageToken;
+      pageToken = hitCap || stoppedEarly ? undefined : page.nextPageToken;
     } while (pageToken);
 
     // Only advance the watermark when the search window was fully drained —
     // if the safety cap was hit, leave it unchanged so the next run resumes
     // the same backlog instead of silently skipping whatever didn't fit.
+    // Stopping early because the results ran past `sinceDate` (Outlook) IS a
+    // fully-drained window, so it still advances the watermark.
     if (!hitCap) {
       await PlatformConnection.updateOne(
         { _id: connection._id },
@@ -111,26 +138,17 @@ export async function syncConnectionEmail(
   }
 }
 
-async function processOneMessage(
+async function processNormalizedMessage(
   connection: PlatformConnectionDocument,
-  externalUserId: string,
-  pipedreamAccountId: string,
-  messageId: string
+  provider: EmailSyncProvider,
+  message: NormalizedEmailMessage
 ): Promise<boolean> {
-  const message = await getMessage(externalUserId, pipedreamAccountId, messageId);
-  if (!message) return false;
-
-  const headers = message.payload?.headers ?? [];
-  const fromHeader = headers.find((h) => h.name.toLowerCase() === "from")?.value;
-  const receivedAt = message.internalDate ? new Date(Number(message.internalDate)) : new Date();
-
-  const text = extractPlainText(message);
-  const fields = parseInvoiceFields(text, receivedAt);
+  const fields = parseInvoiceFields(message.plainText, message.receivedAt);
   // Billing.amount and .currency are required — guessing either wrong is worse
   // than skipping this message, so both must be confidently parsed.
   if (fields.amount === null || fields.currency === null) return false;
 
-  const { displayName, domain } = parseSender(fromHeader);
+  const { displayName, domain } = parseSender(message.fromHeader ?? undefined);
   const vendorSlug =
     (domain ?? "unknown")
       .replace(/\.(com|net|org|io|co)$/i, "")
@@ -139,16 +157,17 @@ async function processOneMessage(
   const customerName =
     displayName ??
     (vendorSlug !== "unknown" ? vendorSlug[0].toUpperCase() + vendorSlug.slice(1) : "Email invoice");
-  const invoiceNumber = fields.invoiceNumber ?? `EMAIL-${messageId.slice(0, 10).toUpperCase()}`;
+  const invoiceNumber =
+    fields.invoiceNumber ?? `EMAIL-${message.id.slice(0, 10).toUpperCase()}`;
 
   // Prefer a semantic dedupe key (vendor + invoice number) over the raw message
   // id: an initial "your invoice" email and a later "payment received" receipt
   // for the SAME invoice then update ONE record's status instead of creating
   // two disconnected rows. Namespaced by vendor domain to avoid cross-vendor
-  // invoice-number collisions.
+  // invoice-number collisions, and by provider to avoid cross-provider ones.
   const externalId = fields.invoiceNumber
-    ? `gmail-inv-${vendorSlug}-${fields.invoiceNumber.replace(/[^A-Za-z0-9-]/g, "").toLowerCase()}`
-    : `gmail-msg-${messageId}`;
+    ? `${provider.dedupePrefix}-inv-${vendorSlug}-${fields.invoiceNumber.replace(/[^A-Za-z0-9-]/g, "").toLowerCase()}`
+    : `${provider.dedupePrefix}-msg-${message.id}`;
 
   const dedupeQuery = {
     organization: connection.organization,
@@ -172,35 +191,10 @@ async function processOneMessage(
         currency: fields.currency,
         billingDate: fields.billingDate,
         status: fields.status,
-        notes: "Parsed from a Gmail message (fallback email sync).",
+        notes: provider.notesText,
       },
     },
     { upsert: true, setDefaultsOnInsert: true, runValidators: true }
   );
   return !existedBefore;
-}
-
-function buildInvoiceSearchQuery(sinceDate: Date | null): string {
-  const keywords = [
-    "invoice",
-    "receipt",
-    '"payment receipt"',
-    '"payment confirmation"',
-    '"billing statement"',
-    '"your invoice"',
-    '"amount due"',
-    '"payment received"',
-    "statement",
-  ];
-  const noise = "-category:promotions -category:social -category:forums -in:spam -in:trash";
-  const window = sinceDate
-    ? `after:${formatGmailDate(sinceDate)}`
-    : `newer_than:${FIRST_SYNC_LOOKBACK_DAYS}d`;
-  return `(${keywords.join(" OR ")}) ${noise} ${window}`;
-}
-
-function formatGmailDate(d: Date): string {
-  return `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(
-    d.getUTCDate()
-  ).padStart(2, "0")}`;
 }

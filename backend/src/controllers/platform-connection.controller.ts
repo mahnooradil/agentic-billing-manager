@@ -281,11 +281,21 @@ export const connectViaPipedream = asyncHandler(async (req, res) => {
 
   const platform = body.platform;
 
+  // Most platforms get exactly one connection per organization (a business
+  // has one Stripe account) — those keep the shared "" accountIdentifier, so
+  // reconnecting always lands back on the SAME record. Email-sync platforms
+  // (Gmail, Outlook) legitimately have several independent inboxes, so their
+  // accountIdentifier is the real connected account identity instead —
+  // different accounts get different records; reconnecting the SAME account
+  // still updates its own record rather than creating a duplicate.
+  const accountIdentifier = isEmailSyncPlatform(platform) ? account.name ?? account.id : "";
+
   // Only a genuinely NEW connection counts against the limit — reconnecting/
   // re-verifying an existing one (the upsert below) must never be blocked.
   const alreadyConnected = await PlatformConnection.exists({
     organization: organization._id,
     platform,
+    accountIdentifier,
   });
   if (!alreadyConnected) {
     await assertPlatformConnectionLimit(organization._id, organization.planTier);
@@ -296,14 +306,14 @@ export const connectViaPipedream = asyncHandler(async (req, res) => {
     connectionType: "oauth",
     status: account.healthy ? "connected" : "error",
     displayName: body.displayName ?? platform,
+    accountIdentifier,
     lastVerifiedAt: new Date(),
     lastError: account.healthy ? undefined : "Account needs re-authentication.",
     metadata: { pipedreamAccountId: account.id, pipedreamApp: account.app },
   };
-  if (account.name) set.accountIdentifier = account.name;
 
   const connection = await PlatformConnection.findOneAndUpdate(
-    { organization: organization._id, platform },
+    { organization: organization._id, platform, accountIdentifier },
     {
       $set: set,
       $setOnInsert: { organization: organization._id, user: user._id, platform },

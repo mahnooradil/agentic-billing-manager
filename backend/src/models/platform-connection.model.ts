@@ -162,10 +162,19 @@ const platformConnectionSchema = new Schema<
       trim: true,
       maxlength: [100, "Display name must be at most 100 characters"],
     },
+    // Always populated (defaults to "") rather than left unset, so the
+    // {organization, platform, accountIdentifier} unique index below behaves
+    // consistently for every connection — platforms that only ever get ONE
+    // connection per org (Stripe, PayPal, manual/API-key providers) keep the
+    // shared "" value and stay one-per-org; platforms that legitimately have
+    // several independent accounts (Gmail, Outlook — see
+    // services/email-sync/registry.ts) get the real account identity here
+    // instead, so multiple inboxes can coexist (see platform-connection.controller.ts).
     accountIdentifier: {
       type: String,
       trim: true,
       maxlength: [200, "Account identifier must be at most 200 characters"],
+      default: "",
     },
     description: {
       type: String,
@@ -217,9 +226,16 @@ const platformConnectionSchema = new Schema<
   }
 );
 
-// One connection per platform per organization (adding a platform never needs
-// a redesign) — shared across every member, not duplicated per connector.
-platformConnectionSchema.index({ organization: 1, platform: 1 }, { unique: true });
+// One connection per (platform, accountIdentifier) per organization — shared
+// across every member, not duplicated per connector. For platforms with a
+// single account per org, `accountIdentifier` stays "" and this behaves like
+// the old {organization, platform} constraint. For multi-account platforms
+// (Gmail, Outlook), `accountIdentifier` holds the real connected email, so
+// several inboxes of the same platform can coexist for one organization.
+platformConnectionSchema.index(
+  { organization: 1, platform: 1, accountIdentifier: 1 },
+  { unique: true }
+);
 
 export const PlatformConnection = model<
   IPlatformConnection,

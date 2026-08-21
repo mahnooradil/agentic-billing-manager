@@ -1,6 +1,6 @@
 /**
  * Email-sync scheduler — the "all the time," not "just once at connect" half of
- * the Gmail fallback channel. Mirrors services/billing-sync/scheduler.ts's
+ * the Gmail/Outlook fallback channel. Mirrors services/billing-sync/scheduler.ts's
  * shape but runs more frequently (1h vs 6h) since email can arrive anytime.
  */
 import { PlatformConnection } from "@/models/platform-connection.model";
