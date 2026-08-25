@@ -10,11 +10,14 @@ import { FormAlert } from "@/components/common/form-alert";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { cn } from "@/lib/utils";
 import { useAlertState } from "@/hooks/use-alert-state";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { ApiError } from "@/services/api/client";
 import { getMyPlan, updateMyPlan } from "@/services/plan/plan.service";
 import type { PlanData, PlanDefinition } from "@/services/types/plan";
 
 type ViewStatus = "loading" | "error" | "ready";
+
+const CACHE_KEY = "plan";
 
 function usageLabel(used: number, max: number | null): string {
   return max === null ? `${used} used — unlimited` : `${used} of ${max} used`;
@@ -25,12 +28,20 @@ function usagePercent(used: number, max: number | null): number {
   return Math.min(100, Math.round((used / max) * 100));
 }
 
+/** Readable label for a plan's credit cycle length — 30/365 are the only
+ *  values the backend currently issues, but any other day count still
+ *  degrades gracefully instead of showing a mismatched unit. */
+function creditsCycleLabel(cycleDays: number): string {
+  return cycleDays === 30 ? "month" : cycleDays === 365 ? "year" : `${cycleDays} days`;
+}
+
 /** The user's OWN plan for using this app — current tier, real usage against
  *  its limits, and every tier available to switch to. No payment processor is
  *  wired up yet, so switching tiers here is free and immediate. */
 export function BillingPlanTab() {
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
-  const [data, setData] = React.useState<PlanData | null>(null);
+  const cached = readPageCache<PlanData>(CACHE_KEY);
+  const [status, setStatus] = React.useState<ViewStatus>(cached ? "ready" : "loading");
+  const [data, setData] = React.useState<PlanData | null>(cached);
   const [loadError, setLoadError] = React.useState("");
   const [switchingTo, setSwitchingTo] = React.useState<string | null>(null);
   const [alert, setAlert] = useAlertState();
@@ -42,6 +53,7 @@ export function BillingPlanTab() {
       try {
         const response = await getMyPlan();
         if (ignore) return;
+        writePageCache(CACHE_KEY, response.data);
         setData(response.data);
         setStatus("ready");
       } catch (error) {
@@ -112,6 +124,13 @@ export function BillingPlanTab() {
                 )}
               </p>
             </div>
+            <div className="text-right">
+              <p className="text-sm text-muted-foreground">AI credits</p>
+              <p className="tabular-nums font-medium text-foreground">
+                {data.plan.credits.allowance.toLocaleString()}/
+                {creditsCycleLabel(data.plan.credits.cycleDays)}
+              </p>
+            </div>
           </div>
 
           <div className="space-y-4">
@@ -168,6 +187,10 @@ export function BillingPlanTab() {
                     {plan.priceMonthly > 0 ? (
                       <span className="text-sm font-normal text-muted-foreground">/mo</span>
                     ) : null}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {plan.credits.allowance.toLocaleString()} AI credits/
+                    {creditsCycleLabel(plan.credits.cycleDays)}
                   </p>
                 </div>
                 <ul className="flex-1 space-y-1.5 text-sm text-muted-foreground">

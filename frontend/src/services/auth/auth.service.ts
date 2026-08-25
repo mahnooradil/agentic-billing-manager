@@ -16,6 +16,11 @@ import type {
   AuthSession,
   AuthUser,
 } from "@/services/types/auth";
+import type {
+  MyOrganizationsData,
+  SwitchOrganizationPayload,
+  SwitchOrganizationData,
+} from "@/services/types/organization";
 
 /** POST /auth/register/request-otp */
 export function requestRegisterOtp(
@@ -87,4 +92,17 @@ export function getSessions(): Promise<ApiSuccess<{ sessions: AuthSession[] }>> 
 /** DELETE /auth/sessions/:id — revokes one session (signs that device out). */
 export function revokeSession(id: string): Promise<ApiSuccess<null>> {
   return api.delete<ApiSuccess<null>>(`/auth/sessions/${id}`);
+}
+
+/** GET /auth/organizations — every organization the caller belongs to. */
+export function getMyOrganizations(): Promise<ApiSuccess<MyOrganizationsData>> {
+  return api.get<ApiSuccess<MyOrganizationsData>>("/auth/organizations");
+}
+
+/** POST /auth/switch-organization — makes another of the caller's own
+ *  organizations the active one. */
+export function switchOrganization(
+  payload: SwitchOrganizationPayload
+): Promise<ApiSuccess<SwitchOrganizationData>> {
+  return api.post<ApiSuccess<SwitchOrganizationData>>("/auth/switch-organization", payload);
 }

@@ -15,9 +15,12 @@ import { ApiError } from "@/services/api/client";
 import { formatNumber } from "@/lib/format";
 import { getAnalyticsOverview } from "@/services/analytics/analytics.service";
 import { useAuth } from "@/hooks/use-auth";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import type { AnalyticsOverview } from "@/services/types/analytics";
 
 type ViewStatus = "loading" | "error" | "ready";
+
+const CACHE_KEY = "overview:6m";
 
 /** Time-of-day greeting — computed at render time, no state/effect needed. */
 function getGreeting(): string {
@@ -37,9 +40,10 @@ export function OverviewView() {
   const { user } = useAuth();
   const firstName = user?.fullName?.trim().split(/\s+/)[0];
 
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
+  const cached = readPageCache<AnalyticsOverview>(CACHE_KEY);
+  const [status, setStatus] = React.useState<ViewStatus>(cached ? "ready" : "loading");
   const [analytics, setAnalytics] = React.useState<AnalyticsOverview | null>(
-    null
+    cached
   );
   const [loadError, setLoadError] = React.useState("");
 
@@ -52,6 +56,7 @@ export function OverviewView() {
       try {
         const overview = await getAnalyticsOverview("6m");
         if (ignore) return;
+        writePageCache(CACHE_KEY, overview.data.analytics);
         setAnalytics(overview.data.analytics);
         setStatus("ready");
       } catch (error) {

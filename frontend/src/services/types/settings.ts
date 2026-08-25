@@ -45,6 +45,9 @@ export interface NotificationSettings {
   recommendationAlerts: boolean;
   usageAlerts: boolean;
   highSpendThreshold: number;
+  /** A Slack "Incoming Webhook" URL — when set, billing alerts also post to
+   *  that Slack channel. Empty/absent means Slack alerts are off. */
+  slackWebhookUrl?: string;
 }
 
 export interface AppearanceSettings {

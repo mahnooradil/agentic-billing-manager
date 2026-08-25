@@ -1,25 +1,26 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
-  BotMessageSquare,
-  Loader2,
+  ArrowUp,
+  Lightbulb,
+  MessageCircle,
   Mic,
   Plug,
-  Send,
+  Sparkles,
   Square,
   Volume2,
   VolumeX,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { AiRecommendations } from "@/components/ai/ai-recommendations";
+import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/common/empty-state";
 import { FormAlert } from "@/components/common/form-alert";
-import { PageWrapper } from "@/components/common/page-wrapper";
+import { LoadingSpinner } from "@/components/common/loading-spinner";
+import { MarkdownMessage } from "@/components/agent/markdown-message";
+import { AiRecommendations } from "@/components/ai/ai-recommendations";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/services/api/client";
 import { sendAgentMessage } from "@/services/agent/agent-chat.service";
@@ -37,16 +38,70 @@ const SUGGESTED_PROMPTS = [
   "What platforms can you connect for me?",
 ];
 
+const TABS = [
+  { key: "chat", label: "Chat", icon: MessageCircle },
+  { key: "recommendations", label: "Recommendations", icon: Lightbulb },
+] as const;
+type TabKey = (typeof TABS)[number]["key"];
+const TAB_KEYS: readonly string[] = TABS.map((t) => t.key);
+
+/** Three-dot "thinking" pulse — quieter than a spinner + label, closer to
+ *  the reply-is-coming indicator on Claude.ai/ChatGPT. */
+function ThinkingDots() {
+  return (
+    <span className="flex items-center gap-1 py-1" aria-label="Thinking">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="size-1.5 animate-bounce rounded-full bg-muted-foreground/60"
+          style={{ animationDelay: `${i * 120}ms` }}
+        />
+      ))}
+    </span>
+  );
+}
+
 /**
- * Billing Agent — a real Claude Managed Agent (not the plain AI Assistant
- * chat). It can read live billing/platform data via tools and explain how to
- * connect new platforms. Conversation memory lives server-side in the
- * agent's own session; the client only ever sends the latest message and
- * keeps a local transcript (separate storage from the AI Assistant) purely
- * for display continuity across refreshes.
+ * Billing Agent page — two tabs sharing one header: "Chat" (a real Claude
+ * Managed Agent; conversation memory lives server-side in the agent's own
+ * session, the client only ever sends the latest message) and
+ * "Recommendations" (the autonomous AI recommendations panel — generated in
+ * the background, not part of the chat conversation). Moved here from the
+ * Overview dashboard, which is chart-first and didn't fit a text-heavy
+ * recommendations list well.
+ *
+ * The active tab lives in the URL (`?tab=`), same convention as the
+ * Settings page, so a refresh/bookmark keeps you on the same tab. Wrapped
+ * in Suspense because the inner component reads `useSearchParams()`.
  */
 export function AgentView() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex h-[calc(100svh-3.5rem)] items-center justify-center">
+          <LoadingSpinner label="Loading…" />
+        </div>
+      }
+    >
+      <AgentViewInner />
+    </React.Suspense>
+  );
+}
+
+function AgentViewInner() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabKey = (TAB_KEYS.includes(tabParam ?? "") ? tabParam : "chat") as TabKey;
+
+  const handleTabChange = (key: TabKey) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", key);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
   const { messages } = React.useSyncExternalStore(
     agentChatStore.subscribe,
     agentChatStore.getSnapshot,
@@ -56,6 +111,7 @@ export function AgentView() {
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Credit balance — refetched after every turn (consumption is only known
   // server-side, after the turn completes) via a reload-key bump rather than
@@ -115,6 +171,13 @@ export function AgentView() {
     void sendText(input);
   };
 
+  const handleTextareaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void sendText(input);
+    }
+  };
+
   // ── Voice input: mic → live transcript into the input field. ──
   const {
     supported: micSupported,
@@ -171,179 +234,213 @@ export function AgentView() {
   };
 
   const isEmpty = messages.length === 0;
+  const isChatTab = activeTab === "chat";
 
   return (
-    <PageWrapper>
-      {/* Hero */}
-      <div className="rounded-2xl bg-brand-gradient p-6 text-primary-foreground sm:p-8">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="flex size-9 items-center justify-center rounded-xl bg-white/15 backdrop-blur-sm">
-                <BotMessageSquare className="size-5" />
-              </span>
-              <p className="text-xs font-semibold tracking-[0.18em] text-white/70 uppercase">
-                Billing Advisor Agent
+    <div className="flex h-[calc(100svh-3.5rem)] flex-col bg-background">
+      {/* Plain header — no banner, just what a chat page needs. */}
+      <div className="flex flex-col gap-3 px-4 py-3 sm:px-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Sparkles className="size-4" />
+            </span>
+            <div>
+              <h1 className="font-heading text-base font-semibold">Billing Advisor</h1>
+              <p className="text-xs text-muted-foreground">
+                Reads your real billing data — never guesses.
               </p>
-              <span className="flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[0.65rem] font-medium">
-                <span className="size-1.5 rounded-full bg-emerald-300" />
-                Active
-              </span>
+            </div>
+          </div>
+          {isChatTab ? (
+            <div className="flex shrink-0 items-center gap-3">
               {credits !== null ? (
                 <span
                   className={cn(
-                    "flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.65rem] font-medium",
-                    outOfCredits ? "bg-red-500/30" : "bg-white/15"
+                    "text-xs font-medium",
+                    outOfCredits ? "text-destructive" : "text-muted-foreground"
                   )}
                 >
                   {Math.max(0, credits)} credit{credits === 1 ? "" : "s"} left
                 </span>
               ) : null}
+              {ttsSupported ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={toggleVoiceReplies}
+                  aria-pressed={voiceReplies}
+                  title={
+                    voiceReplies
+                      ? speaking
+                        ? "Speaking…"
+                        : "Voice replies on — click to mute"
+                      : "Read replies aloud"
+                  }
+                >
+                  {voiceReplies ? (
+                    <Volume2 className={cn(speaking && "animate-pulse")} />
+                  ) : (
+                    <VolumeX />
+                  )}
+                </Button>
+              ) : null}
             </div>
-            <h1 className="font-heading text-2xl font-semibold text-balance sm:text-3xl">
-              Meet your Billing Agent
-            </h1>
-            <p className="max-w-lg text-sm text-white/80 italic">
-              &ldquo;I don&apos;t guess your numbers — I go look them up.&rdquo;
-            </p>
-          </div>
+          ) : null}
+        </div>
 
-          <div className="flex shrink-0 items-center gap-2">
-            {ttsSupported ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={toggleVoiceReplies}
-                aria-pressed={voiceReplies}
-                className="border-white/30 bg-white/10 text-primary-foreground hover:bg-white/20 hover:text-primary-foreground"
-                title={
-                  voiceReplies
-                    ? "Voice replies on — click to mute"
-                    : "Read replies aloud"
-                }
-              >
-                {voiceReplies ? <Volume2 /> : <VolumeX />}
-                {speaking ? "Speaking…" : voiceReplies ? "Voice on" : "Voice off"}
-              </Button>
-            ) : null}
-          </div>
+        <div className="flex items-center gap-1">
+          {TABS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => handleTabChange(key)}
+              aria-current={activeTab === key ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+                activeTab === key
+                  ? "bg-secondary text-secondary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Icon className="size-3.5" />
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      <Card className="flex flex-1 flex-col p-0">
-        <div
-          ref={scrollRef}
-          className="flex max-h-[60vh] min-h-80 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6"
-        >
-          {isEmpty && !sending ? (
-            <div className="m-auto flex flex-col items-center gap-4">
-              <EmptyState
-                icon={BotMessageSquare}
-                title="Ask your Billing Agent anything"
-                description="It can read your real billing and platform data, and explain how to connect new platforms — try one of these to see it in action."
-              />
-              <div className="flex flex-wrap justify-center gap-2">
-                {SUGGESTED_PROMPTS.map((prompt) => (
-                  <Button
-                    key={prompt}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={outOfCredits}
-                    onClick={() => void sendText(prompt)}
-                  >
-                    {prompt}
-                  </Button>
-                ))}
+      {isChatTab ? (
+        <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-4 sm:p-6">
+            {isEmpty && !sending ? (
+              <div className="m-auto flex flex-col items-center gap-4">
+                <EmptyState
+                  icon={Sparkles}
+                  title="Ask your Billing Agent anything"
+                  description="It can read your real billing and platform data, and explain how to connect new platforms — try one of these to see it in action."
+                />
+                <div className="flex flex-wrap justify-center gap-2">
+                  {SUGGESTED_PROMPTS.map((prompt) => (
+                    <Button
+                      key={prompt}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={outOfCredits}
+                      onClick={() => void sendText(prompt)}
+                    >
+                      {prompt}
+                    </Button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ) : (
-            <>
-              {messages.map((message, index) => (
-                <div
-                  key={`${index}-${message.role}`}
-                  className={cn(
-                    "flex flex-col gap-2",
-                    message.role === "user" ? "items-end" : "items-start"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "max-w-[80%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap",
-                      message.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-foreground"
-                    )}
-                  >
-                    {message.content}
+            ) : (
+              <>
+                {messages.map((message, index) =>
+                  message.role === "user" ? (
+                    <div key={`${index}-user`} className="flex justify-end">
+                      <div className="max-w-[85%] rounded-2xl bg-secondary px-4 py-2.5 text-sm text-secondary-foreground">
+                        {message.content}
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={`${index}-assistant`} className="flex gap-3">
+                      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                        <Sparkles className="size-3.5" />
+                      </span>
+                      <div className="min-w-0 flex-1 space-y-3">
+                        <MarkdownMessage content={message.content} className="text-foreground" />
+                        {message.action ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => handleConnectAction(message.action!)}
+                          >
+                            <Plug />
+                            Connect {message.action.displayName} now
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  )
+                )}
+                {sending ? (
+                  <div className="flex gap-3">
+                    <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <Sparkles className="size-3.5" />
+                    </span>
+                    <ThinkingDots />
                   </div>
-                  {message.action ? (
+                ) : null}
+              </>
+            )}
+          </div>
+
+          <div className="bg-background p-4">
+            <div className="mx-auto w-full max-w-2xl">
+              {error ? <FormAlert variant="error" message={error} className="mb-3" /> : null}
+              {outOfCredits ? (
+                <FormAlert
+                  variant="error"
+                  message="You've used all your credits. Add more credits to keep chatting with the Billing Advisor."
+                  className="mb-3"
+                />
+              ) : null}
+              <form
+                onSubmit={handleSubmit}
+                className="flex items-end gap-2 rounded-2xl border bg-background p-2 pl-3 shadow-sm focus-within:ring-2 focus-within:ring-ring/50"
+              >
+                <Textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={handleTextareaKeyDown}
+                  placeholder={listening ? "Listening…" : "Ask your agent…"}
+                  disabled={sending || outOfCredits}
+                  aria-label="Message"
+                  rows={1}
+                  className="max-h-40 min-h-9 resize-none border-none bg-transparent p-0 shadow-none focus-visible:ring-0"
+                />
+                <div className="flex shrink-0 items-center gap-1">
+                  {micSupported ? (
                     <Button
                       type="button"
-                      size="sm"
-                      onClick={() => handleConnectAction(message.action!)}
+                      variant={listening ? "destructive" : "ghost"}
+                      size="icon"
+                      onClick={handleMicClick}
+                      disabled={sending || outOfCredits}
+                      aria-pressed={listening}
+                      aria-label={listening ? "Stop voice input" : "Start voice input"}
+                      title={listening ? "Stop voice input" : "Speak your message"}
                     >
-                      <Plug />
-                      Connect {message.action.displayName} now
+                      {listening ? <Square className="animate-pulse" /> : <Mic />}
                     </Button>
                   ) : null}
+                  <Button
+                    type="submit"
+                    size="icon"
+                    disabled={sending || outOfCredits || !input.trim()}
+                    aria-label="Send message"
+                  >
+                    <ArrowUp />
+                  </Button>
                 </div>
-              ))}
-              {sending ? (
-                <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" />
-                    Thinking…
-                  </div>
-                </div>
-              ) : null}
-            </>
-          )}
+              </form>
+              <p className="mt-2 text-center text-xs text-muted-foreground">
+                Enter to send, Shift+Enter for a new line.
+              </p>
+            </div>
+          </div>
         </div>
-
-        <div className="border-t p-4">
-          {error ? (
-            <FormAlert variant="error" message={error} className="mb-3" />
-          ) : null}
-          {outOfCredits ? (
-            <FormAlert
-              variant="error"
-              message="You've used all your credits. Add more credits to keep chatting with the Billing Advisor."
-              className="mb-3"
-            />
-          ) : null}
-          <form onSubmit={handleSubmit} className="flex items-center gap-2">
-            <Input
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder={listening ? "Listening…" : "Ask your agent…"}
-              disabled={sending || outOfCredits}
-              aria-label="Message"
-            />
-            {micSupported ? (
-              <Button
-                type="button"
-                variant={listening ? "destructive" : "outline"}
-                size="icon"
-                onClick={handleMicClick}
-                disabled={sending || outOfCredits}
-                aria-pressed={listening}
-                aria-label={listening ? "Stop voice input" : "Start voice input"}
-                title={listening ? "Stop voice input" : "Speak your message"}
-              >
-                {listening ? <Square className="animate-pulse" /> : <Mic />}
-              </Button>
-            ) : null}
-            <Button type="submit" disabled={sending || outOfCredits || !input.trim()}>
-              {sending ? <Loader2 className="animate-spin" /> : <Send />}
-              Send
-            </Button>
-          </form>
+      ) : (
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
+            <AiRecommendations />
+          </div>
         </div>
-      </Card>
-
-      <AiRecommendations />
-    </PageWrapper>
+      )}
+    </div>
   );
 }

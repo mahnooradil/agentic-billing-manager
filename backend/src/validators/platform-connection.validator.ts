@@ -18,6 +18,10 @@ const metadataSchema = z.record(z.string(), z.unknown());
 /** Optional website: empty string or a valid URL. */
 const optionalUrl = z.union([z.literal(""), z.string().trim().url().max(300)]);
 
+/** Sender email addresses/domains an email-sync connection should scan for
+ *  invoices — capped so the resulting search query stays reasonable. */
+const trackedSendersSchema = z.array(z.string().trim().min(3).max(200)).max(25);
+
 export const createPlatformConnectionSchema = z.object({
   // A built-in key (e.g. "Stripe") or a custom platform name.
   platform: z.string().trim().min(2).max(60),
@@ -39,6 +43,7 @@ export const updatePlatformConnectionSchema = z
     displayName: z.string().trim().min(1).max(100),
     accountIdentifier: z.string().trim().max(200),
     metadata: metadataSchema,
+    trackedSenders: trackedSendersSchema,
   })
   .partial();
 

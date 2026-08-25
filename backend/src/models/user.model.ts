@@ -6,8 +6,12 @@
  *
  * - `email` is unique.
  * - `timestamps` adds `createdAt` / `updatedAt` automatically.
+ * - The credit-based AI usage tracker (`creditsBalance`, `lastCreditResetAt`)
+ *   lives on `Organization`, NOT here — whoever is actively using AI
+ *   features draws from the CURRENT workspace's pool (the one its owner
+ *   actually pays for), not a balance tied to this individual account.
  */
-import { Schema, model, type HydratedDocument, type Model } from "mongoose";
+import { Schema, model, type HydratedDocument, type Model, type Types } from "mongoose";
 
 /** Shape of the persisted user fields. */
 export interface IUser {
@@ -17,16 +21,11 @@ export interface IUser {
   /** Bumped by "sign out of all other devices" — invalidates every JWT signed
    *  with an older version, since verifying one compares it to this value. */
   tokenVersion: number;
-  /** Credit-based usage tracker balance (see config/credits.ts,
-   *  services/credits/). Starts at 0 here — the signup grant is applied
-   *  explicitly via `grantCredits` (auth.controller.ts) so it's a real ledger
-   *  entry, not an unexplained default. Can dip slightly below zero — see
-   *  CreditTransaction's `balanceAfter` field for why. No payment processor
-   *  wired up yet. Deliberately PER-USER even inside an organization — each
-   *  member's own Billing Advisor Agent usage, not a shared org pool. Plan
-   *  tier (and its limits) moved to Organization — it gates the org's SHARED
-   *  Platform/Billing data, not any one member's usage. */
-  creditsBalance: number;
+  /** Which of this user's (possibly several) Organizations is "current" —
+   *  every business-data request is scoped to this one org, never more than
+   *  one at a time (see auth.middleware.ts). `undefined` for a user who has
+   *  never needed to switch (their only/first membership is used instead). */
+  activeOrganizationId?: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -59,9 +58,9 @@ const userSchema = new Schema<IUser, UserModel>(
       type: Number,
       default: 0,
     },
-    creditsBalance: {
-      type: Number,
-      default: 0,
+    activeOrganizationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organization",
     },
   },
   {

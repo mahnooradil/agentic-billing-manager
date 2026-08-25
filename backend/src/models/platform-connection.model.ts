@@ -93,6 +93,12 @@ export interface IPlatformConnection {
   description?: string;
   /** Optional website URL (mainly for custom platforms). */
   website?: string;
+  /** Email-sync connections (Gmail/Outlook) only: sender email addresses or
+   *  domains to scan for invoices, instead of the whole inbox — set via the
+   *  Email Accounts settings tab. Empty/unset means "scan the whole inbox
+   *  with generic invoice/receipt keywords" (the original, broader behavior),
+   *  kept as a fallback for connections made before this existed. */
+  trackedSenders?: string[];
   /** Free-form, PII-free metadata for future phases. */
   metadata: Record<string, unknown>;
   /** ENCRYPTED credential (API key / OAuth tokens). Never returned to clients. */
@@ -185,6 +191,10 @@ const platformConnectionSchema = new Schema<
       type: String,
       trim: true,
       maxlength: [300, "Website must be at most 300 characters"],
+    },
+    trackedSenders: {
+      type: [String],
+      default: undefined,
     },
     metadata: {
       type: Schema.Types.Mixed,

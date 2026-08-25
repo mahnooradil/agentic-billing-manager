@@ -31,6 +31,9 @@ export interface PlatformConnection {
   accountIdentifier: string | null;
   description: string | null;
   website: string | null;
+  /** Email-sync only: sender emails/domains scanned for invoices. Empty
+   *  means the whole inbox is scanned. */
+  trackedSenders: string[];
   metadata: Record<string, unknown>;
   hasCredential: boolean;
   /** When the connection was last verified against the provider (null if never). */
@@ -94,6 +97,7 @@ export interface UpdatePlatformConnectionPayload {
   displayName?: string;
   accountIdentifier?: string;
   metadata?: Record<string, unknown>;
+  trackedSenders?: string[];
 }
 
 export interface PlatformConnectionsData {

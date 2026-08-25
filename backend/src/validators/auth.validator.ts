@@ -58,9 +58,18 @@ export const verifyEmailChangeSchema = z.object({
     .regex(/^\d{6}$/, "Enter the 6-digit code"),
 });
 
+/** Switches which of the caller's own organizations is active. */
+export const switchOrganizationSchema = z.object({
+  organizationId: z
+    .string()
+    .trim()
+    .regex(/^[0-9a-fA-F]{24}$/, "A valid organization is required"),
+});
+
 export type RequestRegisterOtpInput = z.infer<typeof requestRegisterOtpSchema>;
 export type RequestLoginOtpInput = z.infer<typeof requestLoginOtpSchema>;
 export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type RequestEmailChangeInput = z.infer<typeof requestEmailChangeSchema>;
 export type VerifyEmailChangeInput = z.infer<typeof verifyEmailChangeSchema>;
+export type SwitchOrganizationInput = z.infer<typeof switchOrganizationSchema>;

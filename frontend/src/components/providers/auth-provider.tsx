@@ -7,6 +7,7 @@ import { AuthContext, type AuthContextValue } from "@/context/auth-context";
 import { authStore } from "@/services/auth/auth-store";
 import { setUnauthorizedHandler } from "@/services/api/unauthorized-handler";
 import { agentChatStore } from "@/services/agent/agent-chat-store";
+import { invalidatePageCache } from "@/lib/page-data-cache";
 import { getUserSettings } from "@/services/settings/settings.service";
 import { LANDING_PAGE_PATHS } from "@/services/types/settings";
 import type { AuthUser } from "@/services/types/auth";
@@ -32,6 +33,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // key — otherwise a same-tab account switch could still show the
       // previous user's in-memory transcript for a moment before any storage read.
       agentChatStore.reset();
+      // Same reasoning for the dashboard page-data cache — a same-tab account
+      // switch must never show the previous account's cached Billing/Platform data.
+      invalidatePageCache();
 
       // An explicit redirect (e.g. back to an invite page) always wins —
       // otherwise fall back to the user's preferred landing page, or the
@@ -55,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = React.useCallback(() => {
     authStore.clearSession();
     agentChatStore.reset();
+    invalidatePageCache();
     router.replace("/login");
   }, [router]);
 
@@ -63,6 +68,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUnauthorizedHandler(logout);
     return () => setUnauthorizedHandler(null);
   }, [logout]);
+
+  const onWorkspaceSwitched = React.useCallback(() => {
+    // Same reasoning as login's same-tab account switch: every cached
+    // Billing/Platform/etc. view and the agent chat transcript belonged to
+    // the PREVIOUS workspace — none of it may leak into the new one.
+    agentChatStore.reset();
+    invalidatePageCache();
+    router.replace("/dashboard/overview");
+  }, [router]);
 
   const value = React.useMemo<AuthContextValue>(
     () => ({
@@ -73,8 +87,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading: snapshot.status === "loading",
       login,
       logout,
+      onWorkspaceSwitched,
     }),
-    [snapshot, login, logout]
+    [snapshot, login, logout, onWorkspaceSwitched]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -14,7 +14,8 @@ import { stripHtml } from "@/services/email-sync/parser";
 // Graph's $search clause syntax: `"<property>:<text>"`, joined with OR/AND
 // (operators outside the quotes, uppercase). Multi-word phrases are just the
 // clause's text — KQL tokenizes them rather than requiring an exact phrase
-// match, which is fine for this heuristic fallback parser.
+// match. This keyword set is only used as a fallback when no senders are
+// tracked yet; the AI extractor is what actually decides billing-relevance.
 const SEARCH_CLAUSES = [
   '"body:invoice"',
   '"body:receipt"',
@@ -29,7 +30,13 @@ const SEARCH_CLAUSES = [
   '"body:statement"',
 ];
 
-function buildSearchQuery(): string {
+function buildSearchQuery(_sinceDate: Date | null, trackedSenders: string[]): string {
+  // Senders configured: scope to just those, no keyword filter — see
+  // gmail-provider.ts's identical reasoning (low volume from trusted
+  // senders, AI extraction itself decides promo vs. real billing content).
+  if (trackedSenders.length > 0) {
+    return `(${trackedSenders.map((s) => `"from:${s}"`).join(" OR ")})`;
+  }
   return `(${SEARCH_CLAUSES.join(" OR ")})`;
 }
 
@@ -57,6 +64,7 @@ export const OUTLOOK_PROVIDER: EmailSyncProvider = {
     return {
       id: message.id,
       receivedAt: message.receivedDateTime ? new Date(message.receivedDateTime) : new Date(),
+      subject: message.subject ?? null,
       plainText,
       fromHeader,
     };

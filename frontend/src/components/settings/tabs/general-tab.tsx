@@ -12,13 +12,23 @@ import { ErrorState } from "@/components/common/error-state";
 import { FormAlert } from "@/components/common/form-alert";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { useAlertState } from "@/hooks/use-alert-state";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { ApiError } from "@/services/api/client";
 import {
   getUserSettings,
   updateUserSettings,
 } from "@/services/settings/settings.service";
 import { preferencesStore } from "@/services/preferences/preferences-store";
-import { DATE_FORMATS, LANDING_PAGES, toUserSettings } from "@/services/types/settings";
+import {
+  DATE_FORMATS,
+  LANDING_PAGES,
+  toUserSettings,
+  type UserSettingsResource,
+} from "@/services/types/settings";
+
+/** Shared with notifications-tab.tsx — both read the exact same /settings
+ *  resource, so one cache entry serves either tab, whichever loads first. */
+const SETTINGS_CACHE_KEY = "user-settings";
 import { TextField, SelectField } from "@/components/settings/settings-fields";
 
 const DATE_FORMAT_LABELS: Record<(typeof DATE_FORMATS)[number], string> = {
@@ -75,7 +85,9 @@ type ViewStatus = "loading" | "error" | "ready";
 
 /** Regional formatting used across the app for money and dates. */
 export function GeneralSettingsTab() {
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
+  const cachedRaw = readPageCache<UserSettingsResource>(SETTINGS_CACHE_KEY);
+  const cachedGroups = cachedRaw ? toUserSettings(cachedRaw) : null;
+  const [status, setStatus] = React.useState<ViewStatus>(cachedGroups ? "ready" : "loading");
   const [loadError, setLoadError] = React.useState("");
   const [alert, setAlert] = useAlertState();
   const [reloadKey, setReloadKey] = React.useState(0);
@@ -86,7 +98,10 @@ export function GeneralSettingsTab() {
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
-  } = useForm<GeneralFormValues>({ resolver: zodResolver(generalFormSchema) });
+  } = useForm<GeneralFormValues>({
+    resolver: zodResolver(generalFormSchema),
+    defaultValues: cachedGroups?.general,
+  });
 
   React.useEffect(() => {
     let ignore = false;
@@ -94,6 +109,7 @@ export function GeneralSettingsTab() {
       try {
         const response = await getUserSettings();
         if (ignore) return;
+        writePageCache(SETTINGS_CACHE_KEY, response.data.settings);
         const groups = toUserSettings(response.data.settings);
         preferencesStore.setSettings(groups);
         reset(groups.general);

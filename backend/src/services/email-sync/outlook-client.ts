@@ -13,6 +13,7 @@ const GRAPH_API_BASE = "https://graph.microsoft.com/v1.0/me";
 export interface OutlookMessage {
   id: string;
   receivedDateTime?: string;
+  subject?: string;
   body?: { contentType?: string; content?: string };
   from?: { emailAddress?: { name?: string; address?: string } };
 }

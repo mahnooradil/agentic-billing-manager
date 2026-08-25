@@ -20,6 +20,9 @@ export interface PublicPlatformConnection {
   accountIdentifier: string | null;
   description: string | null;
   website: string | null;
+  /** Email-sync only: sender emails/domains scanned for invoices. Empty means
+   *  the whole inbox is scanned (see the model's own docstring). */
+  trackedSenders: string[];
   metadata: Record<string, unknown>;
   /** True once an (encrypted) credential has been stored. */
   hasCredential: boolean;
@@ -46,6 +49,7 @@ export function toPublicPlatformConnection(
     accountIdentifier: doc.accountIdentifier ?? null,
     description: doc.description ?? null,
     website: doc.website ?? null,
+    trackedSenders: doc.trackedSenders ?? [],
     metadata: (doc.metadata as Record<string, unknown>) ?? {},
     hasCredential: Boolean(doc.credentialLast4),
     lastVerifiedAt: doc.lastVerifiedAt ?? null,

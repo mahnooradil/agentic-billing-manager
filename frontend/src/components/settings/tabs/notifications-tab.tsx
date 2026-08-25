@@ -12,13 +12,20 @@ import { ErrorState } from "@/components/common/error-state";
 import { FormAlert } from "@/components/common/form-alert";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { useAlertState } from "@/hooks/use-alert-state";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { ApiError } from "@/services/api/client";
 import {
   getUserSettings,
   updateUserSettings,
 } from "@/services/settings/settings.service";
-import { toUserSettings } from "@/services/types/settings";
+import { toUserSettings, type UserSettingsResource } from "@/services/types/settings";
 import { TextField, ToggleField } from "@/components/settings/settings-fields";
+
+/** Shared with general-tab.tsx — both read the exact same /settings resource,
+ *  so one cache entry serves either tab, whichever loads first. */
+const SETTINGS_CACHE_KEY = "user-settings";
+
+const SLACK_WEBHOOK_REGEX = /^https:\/\/hooks\.slack\.com\/services\/.+$/;
 
 const notificationsFormSchema = z.object({
   enabled: z.boolean(),
@@ -30,6 +37,13 @@ const notificationsFormSchema = z.object({
     .int()
     .min(1)
     .max(100),
+  slackWebhookUrl: z
+    .string()
+    .trim()
+    .refine(
+      (value) => value === "" || SLACK_WEBHOOK_REGEX.test(value),
+      "Must be a Slack Incoming Webhook URL (https://hooks.slack.com/services/...)"
+    ),
 });
 type NotificationsFormValues = z.infer<typeof notificationsFormSchema>;
 
@@ -37,7 +51,9 @@ type ViewStatus = "loading" | "error" | "ready";
 
 /** Which automated alerts the user receives. */
 export function NotificationsSettingsTab() {
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
+  const cachedRaw = readPageCache<UserSettingsResource>(SETTINGS_CACHE_KEY);
+  const cachedGroups = cachedRaw ? toUserSettings(cachedRaw) : null;
+  const [status, setStatus] = React.useState<ViewStatus>(cachedGroups ? "ready" : "loading");
   const [loadError, setLoadError] = React.useState("");
   const [alert, setAlert] = useAlertState();
   const [reloadKey, setReloadKey] = React.useState(0);
@@ -50,6 +66,9 @@ export function NotificationsSettingsTab() {
     formState: { errors, isSubmitting },
   } = useForm<NotificationsFormValues>({
     resolver: zodResolver(notificationsFormSchema),
+    defaultValues: cachedGroups
+      ? { ...cachedGroups.notifications, slackWebhookUrl: cachedGroups.notifications.slackWebhookUrl ?? "" }
+      : undefined,
   });
 
   React.useEffect(() => {
@@ -58,8 +77,11 @@ export function NotificationsSettingsTab() {
       try {
         const response = await getUserSettings();
         if (ignore) return;
+        writePageCache(SETTINGS_CACHE_KEY, response.data.settings);
         const groups = toUserSettings(response.data.settings);
-        reset(groups.notifications);
+        // `slackWebhookUrl` is optional on the wire (unset until first
+        // configured) but the form field needs a real string to control.
+        reset({ ...groups.notifications, slackWebhookUrl: groups.notifications.slackWebhookUrl ?? "" });
         setStatus("ready");
       } catch (error) {
         if (ignore) return;
@@ -152,6 +174,14 @@ export function NotificationsSettingsTab() {
               {...register("highSpendThreshold", { valueAsNumber: true })}
             />
           </div>
+          <TextField
+            id="notif-slack-webhook"
+            label="Slack webhook URL (optional)"
+            helper="Create one in Slack (Apps → Incoming Webhooks) and paste it here to also post billing alerts to a Slack channel."
+            placeholder="https://hooks.slack.com/services/..."
+            error={errors.slackWebhookUrl?.message}
+            {...register("slackWebhookUrl")}
+          />
         </CardContent>
       </Card>
       <div className="flex justify-end">

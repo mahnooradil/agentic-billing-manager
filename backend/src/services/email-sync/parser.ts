@@ -1,15 +1,17 @@
 /**
- * Plain-text invoice field extraction — Node builtins only, no HTML/PDF parsing
- * library. Prefers the message's own `text/plain` MIME part; many real-world
- * invoice emails are HTML-only (no plain-text alternative), so falls back to a
- * lightweight tag-strip of the `text/html` part; falls back again to the
- * (already plain-text) `snippet` field if neither exists. This is a heuristic
- * v1 parser for a fallback channel, not a general-purpose invoice OCR —
- * labeled patterns ("Total:", "Invoice #") are tried before bare/ambiguous
- * ones to minimize false positives from promotional emails that happen to
- * mention a dollar figure.
+ * Email body extraction + sender parsing — Node builtins only, no HTML/PDF
+ * parsing library. Prefers the message's own `text/plain` MIME part; many
+ * real-world invoice emails are HTML-only (no plain-text alternative), so
+ * falls back to a lightweight tag-strip of the `text/html` part; falls back
+ * again to the (already plain-text) `snippet` field if neither exists.
+ *
+ * The actual invoice FIELD extraction (amount, currency, status, dates) used
+ * to live here as a regex parser — replaced by ai-invoice-extractor.ts after
+ * a live test showed it silently mis-marking paid invoices as "Pending" and
+ * skipping many real invoices whose wording didn't match its fixed patterns.
+ * This file now only turns a raw message into scannable text + sender info,
+ * which the AI extractor still needs regardless of how billing fields get read.
  */
-import type { BillingStatus } from "@/models/billing.model";
 import type { GmailMessage, GmailMessagePart } from "@/services/email-sync/gmail-client";
 
 function walkForMimeType(part: GmailMessagePart | undefined, mimeType: string): string | null {
@@ -56,101 +58,6 @@ export function extractPlainText(message: GmailMessage): string {
   const html = walkForMimeType(message.payload, "text/html");
   if (html) return stripHtml(html);
   return message.snippet ?? "";
-}
-
-const CURRENCY_SYMBOL_MAP: Record<string, string> = {
-  $: "USD",
-  "€": "EUR",
-  "£": "GBP",
-  "₹": "INR",
-  "¥": "JPY",
-};
-const KNOWN_CODES = [
-  "USD", "EUR", "GBP", "CAD", "AUD", "INR", "PKR", "OMR", "AED", "SAR",
-  "JPY", "CHF", "SGD", "NZD",
-];
-const CURRENCY_TOKEN = "USD|EUR|GBP|CAD|AUD|INR|PKR|OMR|AED|SAR|JPY|CHF|SGD|NZD|\\$|€|£|₹|¥";
-
-// Cents are optional ONLY when a "Total:"/"Amount Due:" label precedes the
-// number — that context already confirms it's a real amount, so a whole-
-// dollar figure like "$50" (no ".00") is safe to accept there. The BARE
-// pattern below stays conservative (cents required) since it's the last-
-// resort weak signal that must not fire on a promo email's "$50 off" mention.
-const AMOUNT_LABELED_RE = new RegExp(
-  `(?:total|amount\\s*due|grand\\s*total|balance\\s*due|amount\\s*paid|payment)\\s*[:\\-]?\\s*(${CURRENCY_TOKEN})?\\s*([\\d,]+(?:\\.\\d{2})?)`,
-  "i"
-);
-const AMOUNT_BARE_RE = new RegExp(`(${CURRENCY_TOKEN})\\s?([\\d,]+\\.\\d{2})`);
-
-// Global so callers can skip a false-positive match (e.g. "receipt from Acme"
-// grabbing "from" as the token) and keep looking for the next label occurrence.
-// Only full words ("invoice"/"receipt") are used as labels — a short "inv"
-// alternative was tried and dropped: it collided with "INV" appearing INSIDE
-// the invoice number itself (e.g. "INV-5001"), splitting off the prefix.
-const INVOICE_NUMBER_LABEL_RE =
-  /(?:invoice|receipt)\s*(?:#|no\.?|number|num)?\s*[:-]?\s*([A-Za-z0-9][A-Za-z0-9_/-]{2,20})/gi;
-
-/** A real invoice/receipt number always contains at least one digit — plain
- *  words like "from" or "for" can match the loose token pattern above, so scan
- *  every label occurrence and take the first candidate that actually has one. */
-function extractInvoiceNumber(text: string): string | null {
-  for (const match of text.matchAll(INVOICE_NUMBER_LABEL_RE)) {
-    const candidate = match[1];
-    if (/\d/.test(candidate)) return candidate;
-  }
-  return null;
-}
-
-const ISO_DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b/;
-const SLASH_DATE_RE = /\b(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})\b/;
-const MONTH_NAME_DATE_RE =
-  /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}\b/i;
-
-const PAID_RE =
-  /\b(paid in full|payment received|thank you for your payment|receipt for your payment)\b/i;
-const OVERDUE_RE = /\b(overdue|past due|payment failed|payment declined)\b/i;
-
-export interface ExtractedFields {
-  amount: number | null;
-  currency: string | null;
-  invoiceNumber: string | null;
-  billingDate: Date;
-  status: BillingStatus;
-}
-
-/** Extracts invoice fields from plain text. `receivedAt` is the fallback billing
- *  date when no date can be parsed from the body. */
-export function parseInvoiceFields(text: string, receivedAt: Date): ExtractedFields {
-  const amountMatch = AMOUNT_LABELED_RE.exec(text) ?? AMOUNT_BARE_RE.exec(text);
-  const amount = amountMatch ? Number(amountMatch[2].replace(/,/g, "")) : null;
-  const rawCurrency = amountMatch?.[1] ?? null;
-  const currency = rawCurrency
-    ? CURRENCY_SYMBOL_MAP[rawCurrency] ??
-      (KNOWN_CODES.includes(rawCurrency.toUpperCase()) ? rawCurrency.toUpperCase() : null)
-    : null;
-
-  const invoiceNumber = extractInvoiceNumber(text);
-
-  const iso = ISO_DATE_RE.exec(text)?.[1];
-  const monthName = MONTH_NAME_DATE_RE.exec(text)?.[0];
-  const slash = SLASH_DATE_RE.exec(text)?.[1];
-  const parsedDate = iso
-    ? new Date(iso)
-    : monthName
-      ? new Date(monthName)
-      : slash
-        ? new Date(slash)
-        : null;
-  const billingDate =
-    parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate : receivedAt;
-
-  const status: BillingStatus = PAID_RE.test(text)
-    ? "Paid"
-    : OVERDUE_RE.test(text)
-      ? "Overdue"
-      : "Pending";
-
-  return { amount, currency, invoiceNumber, billingDate, status };
 }
 
 /** Best-effort vendor display name + domain from a `From` header, used for

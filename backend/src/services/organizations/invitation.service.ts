@@ -7,10 +7,11 @@
  *    `POST /api/invitations/:token/accept` endpoint, which uses
  *    `acceptInvitationForExistingUser` below.
  *
- * v1 safety rule (see acceptInvitationForExistingUser): an existing user can
- * only switch organizations if their current one is empty (no other members,
- * no business data) — merging or discarding real data is explicitly out of
- * scope for this phase, not silently guessed at.
+ * A user can belong to multiple organizations — accepting an invite ADDS a
+ * membership in the new org alongside whatever else the user already
+ * belongs to (their personal workspace included, data and all) rather than
+ * replacing it. The newly joined org becomes their active one, but nothing
+ * about their other membership(s) is touched.
  */
 import { randomBytes } from "node:crypto";
 import type { Types } from "mongoose";
@@ -23,12 +24,10 @@ import {
 } from "@/models/invitation.model";
 import { Membership, type MembershipDocument, type MembershipRole } from "@/models/membership.model";
 import { Organization, type OrganizationDocument } from "@/models/organization.model";
-import { Platform } from "@/models/platform.model";
-import { Billing } from "@/models/billing.model";
-import { PlatformConnection } from "@/models/platform-connection.model";
 import { Notification } from "@/models/notification.model";
 import { emitNotificationCreated } from "@/services/events/notification.events";
 import { User } from "@/models/user.model";
+import { ensureOwnerHasPersonalWorkspace } from "@/services/organizations/organization-bootstrap.service";
 
 const INVITATION_TTL_DAYS = 7;
 
@@ -63,6 +62,31 @@ async function notifyMemberJoined(
 
 function generateToken(): string {
   return randomBytes(32).toString("hex");
+}
+
+/**
+ * After someone new joins an organization, makes sure that org's OWNER
+ * still has a private workspace of their own — inviting someone into your
+ * own workspace turns it into a shared one, and without this the inviter
+ * (not just the person joining) could be left with no personal workspace at
+ * all. Safe to call on every join: `ensureOwnerHasPersonalWorkspace` itself
+ * no-ops once the owner already has one. Best-effort — never blocks the join.
+ */
+async function ensureInviterKeepsPersonalWorkspace(
+  organizationId: Types.ObjectId
+): Promise<void> {
+  try {
+    const ownerMembership = await Membership.findOne({
+      organization: organizationId,
+      role: "owner",
+    });
+    if (!ownerMembership) return;
+    const owner = await User.findById(ownerMembership.user);
+    if (!owner) return;
+    await ensureOwnerHasPersonalWorkspace(owner._id, owner.fullName, organizationId);
+  } catch {
+    // Best-effort — see docstring.
+  }
 }
 
 /** Creates a pending invitation. Caller (the controller) sends the email. */
@@ -124,29 +148,17 @@ export async function consumeInvitationForNewSignup(
   invitation.status = "accepted";
   await invitation.save();
   await notifyMemberJoined(organization._id, userId, invitation.role);
+  await ensureInviterKeepsPersonalWorkspace(organization._id);
 
   return { organization, membership };
 }
 
-/** True when an organization has no other members and no business data at
- *  all — the only case a user is allowed to leave it for another (v1 rule:
- *  never merge or discard real data). */
-async function isOrganizationEmptyAndSoloOwned(
-  organizationId: Types.ObjectId,
-  soleOwnerUserId: Types.ObjectId
-): Promise<boolean> {
-  const [otherMembers, platforms, billing, connections] = await Promise.all([
-    Membership.countDocuments({ organization: organizationId, user: { $ne: soleOwnerUserId } }),
-    Platform.countDocuments({ organization: organizationId }),
-    Billing.countDocuments({ organization: organizationId }),
-    PlatformConnection.countDocuments({ organization: organizationId }),
-  ]);
-  return otherMembers === 0 && platforms === 0 && billing === 0 && connections === 0;
-}
-
 /**
  * POST /invitations/:token/accept for an ALREADY-authenticated user. Throws
- * a clear AppError for every rejection path — never silently no-ops.
+ * a clear AppError for every rejection path — never silently no-ops. Adds a
+ * new Membership alongside whatever the user already belongs to (their
+ * personal workspace's data is never touched), and switches their active
+ * organization to the one they just joined.
  */
 export async function acceptInvitationForExistingUser(
   token: string,
@@ -166,24 +178,12 @@ export async function acceptInvitationForExistingUser(
     throw new AppError("This invitation was sent to a different email address.", 403);
   }
 
-  const currentMembership = await Membership.findOne({ user: userId });
-  if (currentMembership) {
-    if (currentMembership.organization.equals(invitation.organization)) {
-      throw new AppError("You're already a member of this organization.", 409);
-    }
-    const canLeave = await isOrganizationEmptyAndSoloOwned(
-      currentMembership.organization,
-      userId
-    );
-    if (!canLeave) {
-      throw new AppError(
-        "You already belong to a workspace with data in it. Switching organizations isn't supported yet — remove your data or contact support first.",
-        409
-      );
-    }
-    // Safe to discard: verified empty AND this user is its only member.
-    await Organization.deleteOne({ _id: currentMembership.organization });
-    await currentMembership.deleteOne();
+  const alreadyMember = await Membership.findOne({
+    user: userId,
+    organization: invitation.organization,
+  });
+  if (alreadyMember) {
+    throw new AppError("You're already a member of this organization.", 409);
   }
 
   const organization = await Organization.findById(invitation.organization);
@@ -199,6 +199,11 @@ export async function acceptInvitationForExistingUser(
   invitation.status = "accepted";
   await invitation.save();
   await notifyMemberJoined(organization._id, userId, invitation.role);
+  await ensureInviterKeepsPersonalWorkspace(organization._id);
+
+  // Land the user in the workspace they just joined — their other
+  // membership(s), if any, are unaffected and still switchable back to.
+  await User.updateOne({ _id: userId }, { $set: { activeOrganizationId: organization._id } });
 
   return { organization, role: invitation.role };
 }

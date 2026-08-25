@@ -53,10 +53,26 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
     throw new AppError("Invalid or expired token", 401);
   }
 
+  // Session lookup and Membership lookup are independent of each other (both
+  // only need user._id) — run them concurrently instead of one-after-another.
+  // This halves the round trips this middleware adds to EVERY authenticated
+  // request, which matters most when the app server and MongoDB Atlas aren't
+  // in the same region (each round trip pays that network latency).
+  //
+  // A user can hold MULTIPLE memberships (their own workspace, plus any org
+  // they were invited into) — `activeOrganizationId` says which one is
+  // "current" for this request. Scoped by BOTH user and organization, so
+  // this can never resolve to (let alone leak into) another user's org.
+  const [session, membership] = await Promise.all([
+    payload.jti ? Session.findOne({ user: user._id, jti: payload.jti }) : null,
+    user.activeOrganizationId
+      ? Membership.findOne({ user: user._id, organization: user.activeOrganizationId })
+      : Membership.findOne({ user: user._id }).sort({ createdAt: 1 }),
+  ]);
+
   // Tokens issued before session tracking existed carry no `jti` — skip the
   // per-device check for those rather than locking everyone out.
   if (payload.jti) {
-    const session = await Session.findOne({ user: user._id, jti: payload.jti });
     if (!session || session.revokedAt) {
       throw new AppError("Invalid or expired token", 401);
     }
@@ -71,24 +87,40 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
     req.sessionJti = payload.jti;
   }
 
-  // Every authenticated route needs the user's organization to scope business
-  // data — v1 assumes exactly one Membership per user (see Membership model).
-  // A user can legitimately end up with none (removed from an org, an
-  // orphaned pre-backfill account, mid-signup race) — self-heal with a fresh
-  // personal organization rather than locking them out entirely, which would
-  // otherwise 401 every request forever with no way back in.
-  let membership = await Membership.findOne({ user: user._id });
-  let organization = membership
-    ? await Organization.findById(membership.organization)
+  // Every authenticated route needs ONE organization to scope business data
+  // to for this request — even though a user may belong to several. A user
+  // can legitimately end up with no resolvable membership here (a stale
+  // `activeOrganizationId` after being removed from that org, an orphaned
+  // pre-backfill account, mid-signup race) — fall back to ANY membership
+  // they actually still have before ever bootstrapping a brand-new personal
+  // org, so switching back is never silently lost.
+  let resolvedMembership = membership;
+  let organization = resolvedMembership
+    ? await Organization.findById(resolvedMembership.organization)
     : null;
-  if (!membership || !organization) {
+
+  if ((!resolvedMembership || !organization) && user.activeOrganizationId) {
+    resolvedMembership = await Membership.findOne({ user: user._id }).sort({ createdAt: 1 });
+    organization = resolvedMembership
+      ? await Organization.findById(resolvedMembership.organization)
+      : null;
+  }
+
+  if (!resolvedMembership || !organization) {
     const bootstrapped = await createPersonalOrganization(user._id, user.fullName);
-    membership = bootstrapped.membership;
+    resolvedMembership = bootstrapped.membership;
     organization = bootstrapped.organization;
   }
 
+  // Persist a healed/first-resolved choice so the next request goes straight
+  // to the org-scoped query above instead of repeating this fallback.
+  if (!user.activeOrganizationId?.equals(resolvedMembership.organization)) {
+    user.activeOrganizationId = resolvedMembership.organization;
+    await user.save();
+  }
+
   req.user = user;
-  req.membership = membership;
+  req.membership = resolvedMembership;
   req.organization = organization;
   next();
 });

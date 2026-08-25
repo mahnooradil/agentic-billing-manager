@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
 import { cn } from "@/lib/utils";
 import { lastEmailSyncedAt, timeAgo } from "@/lib/email-sync-platforms";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { useAlertState } from "@/hooks/use-alert-state";
 import { usePipedreamConnect } from "@/hooks/use-pipedream-connect";
 import { ApiError } from "@/services/api/client";
@@ -39,22 +40,31 @@ type ViewStatus = "loading" | "error" | "ready";
 /** Highest limit the catalog endpoint accepts today. */
 const CATALOG_LIMIT = 100;
 
+interface PlatformsCachePayload {
+  configured: boolean;
+  apps: CatalogApp[];
+  connections: PlatformConnection[];
+  platforms: Platform[];
+}
+
 /** Curated, hand-picked slugs for the "Popular platforms" shortcut — verified
- *  against the live Pipedream catalog's exact `nameSlug` values. Not derived
- *  from any usage data; just the platforms most people look for first. */
+ *  against the live Pipedream catalog's exact `nameSlug` values. Restricted
+ *  to platforms with a real billing-sync adapter (see backend/src/services/
+ *  billing-sync/registry.ts) since the catalog itself is now filtered the
+ *  same way — anything else here would just be a dead end. */
 const POPULAR_SLUGS = [
   "stripe",
-  "slack_v2",
+  "paypal",
   "github",
-  "google",
-  "notion",
-  "shopify",
-  "zoom",
-  "dropbox",
-  "hubspot",
-  "quickbooks",
-  "mailchimp",
-  "aws",
+  "digital_ocean",
+  "vercel_token_auth",
+  "cloudflare_api_key",
+  "heroku",
+  "mongodb",
+  "openai",
+  "anthropic",
+  "sendgrid",
+  "twilio",
 ];
 
 /** Reads `metadata.emailSync.lastSyncedAt` off a connection, if present —
@@ -175,13 +185,17 @@ function PlatformsViewInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
-  const [apps, setApps] = React.useState<CatalogApp[]>([]);
-  const [configured, setConfigured] = React.useState(true);
-  const [connections, setConnections] = React.useState<PlatformConnection[]>([]);
-  const [platforms, setPlatforms] = React.useState<Platform[]>([]);
-  const [loadError, setLoadError] = React.useState("");
   const [query, setQuery] = React.useState("");
+  const cacheKey = `platforms:${query}`;
+  const cached = readPageCache<PlatformsCachePayload>(cacheKey);
+  const [status, setStatus] = React.useState<ViewStatus>(cached ? "ready" : "loading");
+  const [apps, setApps] = React.useState<CatalogApp[]>(cached?.apps ?? []);
+  const [configured, setConfigured] = React.useState(cached?.configured ?? true);
+  const [connections, setConnections] = React.useState<PlatformConnection[]>(
+    cached?.connections ?? []
+  );
+  const [platforms, setPlatforms] = React.useState<Platform[]>(cached?.platforms ?? []);
+  const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
 
   const [actionError, setActionError] = React.useState<string | null>(null);
@@ -259,7 +273,11 @@ function PlatformsViewInner() {
     let ignore = false;
     const timer = setTimeout(
       async () => {
-        setStatus("loading");
+        // Only show the full-page spinner when there's nothing cached to
+        // display yet — a mount with fresh cached data (or a search re-run)
+        // instead keeps showing what's already on screen while this quietly
+        // refreshes it, so re-opening the page never flashes back to loading.
+        if (!readPageCache<PlatformsCachePayload>(cacheKey)) setStatus("loading");
         try {
           const [catalogRes, connectionsRes, platformsRes] = await Promise.all([
             getPipedreamCatalog(query, CATALOG_LIMIT),
@@ -267,6 +285,12 @@ function PlatformsViewInner() {
             listPlatforms(),
           ]);
           if (ignore) return;
+          writePageCache(cacheKey, {
+            configured: catalogRes.data.configured,
+            apps: catalogRes.data.apps,
+            connections: connectionsRes.data.connections,
+            platforms: platformsRes.data.platforms,
+          });
           setConfigured(catalogRes.data.configured);
           setApps(catalogRes.data.apps);
           setConnections(connectionsRes.data.connections);
@@ -286,7 +310,7 @@ function PlatformsViewInner() {
       ignore = true;
       clearTimeout(timer);
     };
-  }, [query, reloadKey]);
+  }, [query, reloadKey, cacheKey]);
 
   const retry = () => {
     setStatus("loading");
@@ -398,7 +422,11 @@ function PlatformsViewInner() {
         title="Integrations"
         description="Connect the platforms you're billed on — every invoice and subscription stays in sync, automatically."
         actions={
-          <Button variant="outline" size="sm" onClick={() => setQuery("Gmail")}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push("/dashboard/settings?tab=email-sync")}
+          >
             <Mail />
             Connect email for invoice sync
           </Button>
@@ -413,34 +441,23 @@ function PlatformsViewInner() {
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search platforms — Stripe, Slack, Google, Notion…"
+          placeholder="Search platforms — Stripe, GitHub, PayPal, DigitalOcean…"
           className="pl-8"
           aria-label="Search platforms"
         />
       </div>
-      {query.toLowerCase() === "gmail" || query.toLowerCase() === "outlook" ? (
-        <p className="text-sm text-muted-foreground">
-          No direct billing sync for a platform? Connect{" "}
-          <button
-            type="button"
-            onClick={() => setQuery("Gmail")}
-            className="font-medium text-foreground underline underline-offset-2"
-          >
-            Gmail
-          </button>{" "}
-          or{" "}
-          <button
-            type="button"
-            onClick={() => setQuery("Outlook")}
-            className="font-medium text-foreground underline underline-offset-2"
-          >
-            Microsoft Outlook Email
-          </button>{" "}
-          below (not the generic &quot;Google&quot;/&quot;Microsoft&quot; app)
-          and we&apos;ll scan for invoice emails automatically — a fallback
-          behind direct sync, not a replacement for it.
-        </p>
-      ) : null}
+      <p className="text-sm text-muted-foreground">
+        Only platforms with real, automatic billing sync are shown here — no dead-end
+        connections. No direct sync for a platform yet?{" "}
+        <button
+          type="button"
+          onClick={() => router.push("/dashboard/settings?tab=email-sync")}
+          className="font-medium text-foreground underline underline-offset-2"
+        >
+          Connect Gmail or Outlook
+        </button>{" "}
+        instead and we&apos;ll scan it for invoice emails.
+      </p>
 
       {status === "loading" && apps.length === 0 ? (
         <div className="flex flex-1 items-center justify-center py-16">

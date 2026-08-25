@@ -17,6 +17,28 @@ import { PLAN_TIERS, type PlanTier } from "@/config/plans";
 export interface IOrganization {
   name: string;
   planTier: PlanTier;
+  /** Credit-based AI usage tracker (see config/credits.ts, services/credits/)
+   *  — deliberately scoped to the ORGANIZATION, not any one member: whoever
+   *  is currently active in this workspace draws from the SAME pool,
+   *  matching who actually pays for the plan (the org, not an individual
+   *  member). A user's own personal workspace has its own pool too — same
+   *  field, just an organization of one. Can dip slightly below zero — see
+   *  CreditTransaction's `balanceAfter` field for why. No payment processor
+   *  wired up yet. */
+  creditsBalance: number;
+  /** When this organization's plan-cycle credit allowance was last applied
+   *  (see services/credits/credit-reset-scheduler.ts). `undefined` for an
+   *  org that hasn't had its first cycle reset yet — treated as due
+   *  immediately. */
+  lastCreditResetAt?: Date;
+  /** True only for a personal workspace auto-created as a fallback (see
+   *  `ensureOwnerHasPersonalWorkspace`) so its owner isn't left without one
+   *  after inviting someone into their original workspace. Never set for a
+   *  signup-created or otherwise deliberately-created workspace. The ONLY
+   *  thing this flag enables: `cleanupRedundantFallbackWorkspace` may
+   *  auto-delete it later if it's still empty once no longer needed —
+   *  never touches a workspace without this flag. */
+  isFallbackPersonal?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -37,6 +59,17 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       type: String,
       enum: PLAN_TIERS,
       default: "Free",
+    },
+    creditsBalance: {
+      type: Number,
+      default: 0,
+    },
+    lastCreditResetAt: {
+      type: Date,
+    },
+    isFallbackPersonal: {
+      type: Boolean,
+      default: false,
     },
   },
   {

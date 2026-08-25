@@ -29,6 +29,7 @@ export interface PublicBilling {
   amount: number;
   currency: string;
   billingDate: Date;
+  dueDate?: Date;
   status: BillingStatus;
   notes?: string;
   createdAt: Date;
@@ -45,7 +46,13 @@ export function toPublicBilling(billing: BillingDocument): PublicBilling {
     : connection
       ? {
           id: connection._id.toString(),
-          name: connection.displayName,
+          // `vendorName` (set by email-sync's AI extraction — see
+          // sync-engine.ts) is the ACTUAL vendor this bill is from (Netflix,
+          // Spotify, ...) when it differs from the connection itself, e.g.
+          // one Gmail inbox covering many vendors. Falls back to the
+          // connection's own name for auto_sync (one connection = one
+          // vendor there, so they're already the same).
+          name: billing.vendorName ?? connection.displayName,
           slug: connection.platform,
         }
       : { id: "", name: "Unknown platform", slug: "" };
@@ -59,6 +66,7 @@ export function toPublicBilling(billing: BillingDocument): PublicBilling {
     amount: billing.amount,
     currency: billing.currency,
     billingDate: billing.billingDate,
+    dueDate: billing.dueDate,
     status: billing.status,
     notes: billing.notes,
     createdAt: billing.createdAt,

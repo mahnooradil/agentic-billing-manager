@@ -19,6 +19,13 @@ export interface PlanDefinition {
   currency: string;
   limits: PlanLimits;
   features: string[];
+  /** Credit allowance for this plan — composed by the backend from the
+   *  separate credits system (config/credits.ts), not part of the plan's
+   *  own limits. */
+  credits: {
+    allowance: number;
+    cycleDays: number;
+  };
 }
 
 export interface PlanUsage {

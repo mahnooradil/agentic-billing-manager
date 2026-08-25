@@ -1,10 +1,12 @@
 /**
- * Membership model — links a User to the ONE Organization they belong to.
- *
- * v1 simplification: a user belongs to exactly one organization at a time
- * (enforced by the `unique: true` on `user` below) — no org-switching, no
- * multi-org membership yet. `authenticate` (auth.middleware.ts) looks this up
- * for every request and attaches `req.organization`/`req.membership`.
+ * Membership model — links a User to an Organization they belong to. A user
+ * may hold multiple Memberships (their own personal workspace as owner, plus
+ * any org they were invited into) — the compound unique index below only
+ * prevents a duplicate membership to the SAME organization, not a second
+ * organization altogether. Which one is "current" for a request is a
+ * separate concept — see `User.activeOrganizationId` and
+ * `auth.middleware.ts`, which resolves and attaches
+ * `req.organization`/`req.membership` for exactly that one org each request.
  */
 import {
   Schema,
@@ -37,7 +39,8 @@ const membershipSchema = new Schema<IMembership, MembershipModel>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: [true, "User is required"],
-      unique: true, // v1: one organization per user
+      // No standalone index — the compound unique index below (user first)
+      // already serves "find this user's memberships" queries.
     },
     organization: {
       type: Schema.Types.ObjectId,
@@ -64,6 +67,11 @@ const membershipSchema = new Schema<IMembership, MembershipModel>(
     },
   }
 );
+
+// One membership per (user, organization) pair — prevents a duplicate join,
+// while still allowing the SAME user to hold separate memberships across
+// multiple organizations.
+membershipSchema.index({ user: 1, organization: 1 }, { unique: true });
 
 export const Membership = model<IMembership, MembershipModel>(
   "Membership",

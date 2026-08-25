@@ -40,6 +40,16 @@ export interface IBilling {
   platform?: Types.ObjectId;
   /** The connected platform this record was synced from (auto_sync/email_sync). */
   platformConnection?: Types.ObjectId;
+  /** The actual vendor this bill is FROM, when it differs from the
+   *  connection itself — e.g. one Gmail inbox's connection covers Netflix,
+   *  Spotify, GitHub, etc., each needing its own display name distinct from
+   *  "Gmail". Populated only by email-sync's AI extraction (see
+   *  ai-invoice-extractor.ts's `customerName` field, which despite its name
+   *  reports the VENDOR, not the recipient). Unused for a manual record or
+   *  an auto_sync one, where the platform ref/connection already IS the
+   *  vendor and needs no override — see billing.serializer.ts's
+   *  `toPublicBilling` for where this actually gets shown as "platform". */
+  vendorName?: string;
   source: BillingSource;
   /** The source's own invoice/period/message identifier — the upsert key that
    *  keeps a re-sync from creating duplicates (auto_sync/email_sync only). */
@@ -49,6 +59,10 @@ export interface IBilling {
   amount: number;
   currency: string;
   billingDate: Date;
+  /** When payment is due — only ever populated for auto_sync/email_sync
+   *  records whose source actually states one (e.g. a Gmail/Outlook invoice
+   *  parsed by the AI extractor). Powers the "due in N days" alert. */
+  dueDate?: Date;
   status: BillingStatus;
   notes?: string;
   createdAt: Date;
@@ -94,6 +108,11 @@ const billingSchema = new Schema<IBilling, BillingModel>(
       trim: true,
       maxlength: [200, "External id must be at most 200 characters"],
     },
+    vendorName: {
+      type: String,
+      trim: true,
+      maxlength: [100, "Vendor name must be at most 100 characters"],
+    },
     customerName: {
       type: String,
       required: [true, "Customer name is required"],
@@ -126,6 +145,9 @@ const billingSchema = new Schema<IBilling, BillingModel>(
       required: [true, "Billing date is required"],
       // Indexed to support analytics range filters and monthly-trend grouping.
       index: true,
+    },
+    dueDate: {
+      type: Date,
     },
     status: {
       type: String,

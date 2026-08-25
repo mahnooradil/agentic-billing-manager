@@ -45,6 +45,7 @@ import {
   formatMonth as fmtMonth,
 } from "@/lib/format";
 import { usePreferences } from "@/services/preferences/preferences-store";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { ApiError } from "@/services/api/client";
 import {
   getAnalyticsOverview,
@@ -104,9 +105,14 @@ export function AnalyticsView() {
   const formatMonth = (month: string) => fmtMonth(month);
 
   const [range, setRange] = React.useState<AnalyticsRange>("all");
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
-  const [data, setData] = React.useState<AnalyticsOverview | null>(null);
-  const [advanced, setAdvanced] = React.useState<AdvancedAnalytics | null>(null);
+  const coreCacheKey = `analytics:core:${range}`;
+  const advancedCacheKey = `analytics:advanced:${range}`;
+  const cachedCore = readPageCache<AnalyticsOverview>(coreCacheKey);
+  const [status, setStatus] = React.useState<ViewStatus>(cachedCore ? "ready" : "loading");
+  const [data, setData] = React.useState<AnalyticsOverview | null>(cachedCore);
+  const [advanced, setAdvanced] = React.useState<AdvancedAnalytics | null>(
+    readPageCache<AdvancedAnalytics>(advancedCacheKey)
+  );
   const [loadError, setLoadError] = React.useState("");
 
   // Bumping reloadKey re-runs the fetch effect (used by the retry button).
@@ -118,6 +124,7 @@ export function AnalyticsView() {
       try {
         const response = await getAnalyticsOverview(range);
         if (ignore) return;
+        writePageCache(coreCacheKey, response.data.analytics);
         setData(response.data.analytics);
         setStatus("ready");
       } catch (error) {
@@ -133,7 +140,7 @@ export function AnalyticsView() {
     return () => {
       ignore = true;
     };
-  }, [range, reloadKey]);
+  }, [range, reloadKey, coreCacheKey]);
 
   // Advanced billing intelligence (F6) — loads independently; if it fails the
   // core analytics above still render (its sections just don't appear).
@@ -142,7 +149,10 @@ export function AnalyticsView() {
     (async () => {
       try {
         const response = await getAdvancedAnalytics(range);
-        if (!ignore) setAdvanced(response.data.analytics);
+        if (!ignore) {
+          writePageCache(advancedCacheKey, response.data.analytics);
+          setAdvanced(response.data.analytics);
+        }
       } catch {
         if (!ignore) setAdvanced(null);
       }
@@ -150,7 +160,7 @@ export function AnalyticsView() {
     return () => {
       ignore = true;
     };
-  }, [range, reloadKey]);
+  }, [range, reloadKey, advancedCacheKey]);
 
   const retry = () => {
     setStatus("loading");

@@ -113,6 +113,7 @@ export async function resetAgentSession(userId: Types.ObjectId | string): Promis
  */
 export async function runAgentPrompt(
   userId: Types.ObjectId | string,
+  organizationId: Types.ObjectId | string,
   prompt: string
 ): Promise<string> {
   const anthropic = getClient();
@@ -122,6 +123,8 @@ export async function runAgentPrompt(
     title: `Recommendation refresh — user ${userId.toString()}`,
   });
 
+  let inputTokens = 0;
+  let outputTokens = 0;
   try {
     const stream = await anthropic.beta.sessions.events.stream(session.id);
     await anthropic.beta.sessions.events.send(session.id, {
@@ -147,6 +150,12 @@ export async function runAgentPrompt(
             },
           ],
         });
+      } else if (event.type === "span.model_request_end") {
+        // Same accounting as a chat turn (see sendAgentMessage below) — a
+        // background generation call costs real tokens too, and skipping
+        // this tracking would leave it invisible on the workspace's ledger.
+        inputTokens += event.model_usage.input_tokens;
+        outputTokens += event.model_usage.output_tokens;
       } else if (event.type === "session.status_terminated") {
         break;
       } else if (event.type === "session.status_idle") {
@@ -161,6 +170,14 @@ export async function runAgentPrompt(
     }
     return reply;
   } finally {
+    // Deduct AFTER the turn (actual cost is only known once it's done),
+    // even if the loop above threw — the API call already happened either way.
+    void consumeCredits(
+      organizationId,
+      tokensToCredits(inputTokens, outputTokens),
+      "recommendation_generation",
+      userId
+    );
     await anthropic.beta.sessions.archive(session.id).catch(() => {
       // Best-effort cleanup — a stray unarchived session is not fatal.
     });
@@ -176,6 +193,7 @@ export async function runAgentPrompt(
  */
 export async function sendAgentMessage(
   userId: Types.ObjectId | string,
+  organizationId: Types.ObjectId | string,
   text: string
 ): Promise<AgentReply> {
   const anthropic = getClient();
@@ -263,9 +281,10 @@ export async function sendAgentMessage(
   // Deduct AFTER the turn — actual cost is only known once it's done. Never
   // blocks the reply on a ledger failure (see consumeCredits' own guarantee).
   void consumeCredits(
-    userId,
+    organizationId,
     tokensToCredits(inputTokens, outputTokens),
-    "agent_message"
+    "agent_message",
+    userId
   );
 
   if (!reply.trim()) {

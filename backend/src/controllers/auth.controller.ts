@@ -11,6 +11,7 @@ import { AppError } from "@/utils/appError";
 import { sendSuccess } from "@/utils/apiResponse";
 import { generateToken } from "@/utils/jwt";
 import { toPublicUser } from "@/utils/user.serializer";
+import { toPublicOrganization } from "@/utils/organization.serializer";
 import { User, type UserDocument } from "@/models/user.model";
 import { Otp, OTP_TTL_MINUTES, OTP_MAX_ATTEMPTS } from "@/models/otp.model";
 import { UserSettings } from "@/models/user-settings.model";
@@ -38,6 +39,7 @@ import type {
   UpdateProfileInput,
   RequestEmailChangeInput,
   VerifyEmailChangeInput,
+  SwitchOrganizationInput,
 } from "@/validators/auth.validator";
 
 /** Minimum time between two codes for the same email (avoids spamming Resend). */
@@ -180,16 +182,17 @@ export const verifyOtp = asyncHandler(async (req, res) => {
     user = await User.create({ fullName: fullNameFromOtp ?? email, email });
     isNewUser = true;
 
-    // Signup credit grant — a real ledger entry (services/credits/), not a
-    // bare schema default, so the balance is explainable from day one.
-    const balance = await grantCredits(user._id, STARTING_CREDITS, "signup_grant");
-    if (balance !== null) user.creditsBalance = balance;
-
     // A live invitation for this email joins that organization (with the
     // invited role) instead of bootstrapping a fresh personal one.
     const joined = await consumeInvitationForNewSignup(user._id, email);
     if (!joined) {
-      await createPersonalOrganization(user._id, user.fullName);
+      // Signup credit grant — a real ledger entry (services/credits/), not a
+      // bare schema default, so the balance is explainable from day one.
+      // Only for a BRAND NEW personal workspace — an org joined via
+      // invitation already has its own credit history/allowance, so there's
+      // nothing to "start" here.
+      const { organization } = await createPersonalOrganization(user._id, user.fullName);
+      await grantCredits(organization._id, STARTING_CREDITS, "signup_grant", "grant", user._id);
     }
   }
 
@@ -211,6 +214,76 @@ export const getMe = asyncHandler(async (req, res) => {
 
   sendSuccess(res, 200, "Authenticated user retrieved", {
     user: toPublicUser(user),
+  });
+});
+
+/** GET /api/auth/organizations — every organization this user belongs to,
+ *  their role in each, and which one is currently active (see
+ *  `req.organization`, resolved from the same `activeOrganizationId` by
+ *  `authenticate`). */
+export const listMyOrganizations = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) throw new AppError("Authentication required", 401);
+
+  const memberships = await Membership.find({ user: user._id }).sort({ createdAt: 1 });
+  const organizations = await Organization.find({
+    _id: { $in: memberships.map((m) => m.organization) },
+  });
+  const orgById = new Map(organizations.map((o) => [o._id.toString(), o]));
+
+  sendSuccess(res, 200, "Organizations retrieved", {
+    organizations: memberships
+      .map((m) => {
+        const organization = orgById.get(m.organization.toString());
+        if (!organization) return null;
+        return {
+          ...toPublicOrganization(organization, m.role),
+          isActive: Boolean(user.activeOrganizationId?.equals(organization._id)),
+        };
+      })
+      .filter((o): o is NonNullable<typeof o> => o !== null),
+  });
+});
+
+/**
+ * POST /api/auth/switch-organization — changes which of the caller's own
+ * organizations is active for every request from here on. Only ever
+ * switches to an organization the caller actually has a Membership in —
+ * never trusts a bare id, so this can't be used to hop into someone else's
+ * workspace no matter what id is sent.
+ */
+export const switchOrganization = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) throw new AppError("Authentication required", 401);
+
+  const { organizationId } = req.body as SwitchOrganizationInput;
+  const membership = await Membership.findOne({
+    user: user._id,
+    organization: organizationId,
+  });
+  if (!membership) {
+    throw new AppError("You're not a member of that organization.", 403);
+  }
+
+  const organization = await Organization.findById(membership.organization);
+  if (!organization) {
+    throw new AppError("This organization no longer exists.", 404);
+  }
+
+  // The Billing Advisor Agent's session is per-USER, not per-organization —
+  // without this, its conversation memory would carry on across the switch
+  // and could blend one workspace's data into a reply given in another.
+  // Archiving it here means the very next chat message starts a clean
+  // session already scoped to the newly active organization.
+  await resetAgentSession(user._id).catch(() => {
+    // Best-effort — a stale/unreachable agent session must not block the switch.
+  });
+
+  user.activeOrganizationId = membership.organization;
+  await user.save();
+
+  sendSuccess(res, 200, "Switched organization", {
+    organization: toPublicOrganization(organization, membership.role),
   });
 });
 
@@ -266,12 +339,14 @@ export const updateProfile = asyncHandler(async (req, res) => {
  * DELETE /api/auth/account — permanently deletes the authenticated user and
  * every piece of data scoped to them. Irreversible; there is no soft-delete.
  *
- * Organization-aware: an Owner who is the ONLY member also takes the whole
- * organization's shared data with them (nothing left to orphan). An Owner
- * with other members is blocked — transferring ownership or removing
- * everyone else first is a deliberate, explicit step, never implicit.
- * Anyone else (admin/member) just leaves — the organization's shared data
- * stays intact for the remaining members.
+ * Organization-aware, and now checked across EVERY organization this user
+ * belongs to (a user can hold several memberships): for each one where
+ * they're Owner, being the ONLY member also takes that org's whole shared
+ * data with them (nothing left to orphan); an Owner with other members in
+ * ANY of their orgs blocks the whole deletion — transferring ownership or
+ * removing everyone else first is a deliberate, explicit step, never
+ * implicit. For every org where they're just admin/member, they simply
+ * leave — that organization's shared data stays intact for the rest.
  */
 export const deleteAccount = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -279,18 +354,20 @@ export const deleteAccount = asyncHandler(async (req, res) => {
     throw new AppError("Authentication required", 401);
   }
 
-  const membership = await Membership.findOne({ user: user._id });
-  if (membership?.role === "owner") {
-    const otherMembers = await Membership.countDocuments({
-      organization: membership.organization,
-      user: { $ne: user._id },
-    });
-    if (otherMembers > 0) {
-      throw new AppError(
-        "You're the owner of an organization with other members. Transfer ownership or remove every other member before deleting your account.",
-        409
-      );
-    }
+  const memberships = await Membership.find({ user: user._id });
+
+  const ownedOrgs = memberships.filter((m) => m.role === "owner");
+  const otherMemberCounts = await Promise.all(
+    ownedOrgs.map((m) =>
+      Membership.countDocuments({ organization: m.organization, user: { $ne: user._id } })
+    )
+  );
+  const blockedOrg = ownedOrgs.find((_m, i) => otherMemberCounts[i] > 0);
+  if (blockedOrg) {
+    throw new AppError(
+      "You're the owner of an organization with other members. Transfer ownership or remove every other member before deleting your account.",
+      409
+    );
   }
 
   // Archives the Managed Agents session server-side before the local
@@ -299,26 +376,26 @@ export const deleteAccount = asyncHandler(async (req, res) => {
     // Best-effort — a stale/unreachable agent session must not block deletion.
   });
 
-  const orgWideDeletes =
-    membership?.role === "owner"
-      ? [
-          Billing.deleteMany({ organization: membership.organization }),
-          Platform.deleteMany({ organization: membership.organization }),
-          PlatformConnection.deleteMany({ organization: membership.organization }),
-          Recommendation.deleteMany({ organization: membership.organization }),
-          Notification.deleteMany({ organization: membership.organization }),
-          Organization.deleteOne({ _id: membership.organization }),
-        ]
-      : [];
+  // Solo-owned orgs (verified above — no other members) take their whole
+  // shared data set with them; every membership (solo-owned org or not)
+  // is removed either way.
+  const orgWideDeletes = ownedOrgs.flatMap((m) => [
+    Billing.deleteMany({ organization: m.organization }),
+    Platform.deleteMany({ organization: m.organization }),
+    PlatformConnection.deleteMany({ organization: m.organization }),
+    Recommendation.deleteMany({ organization: m.organization }),
+    Notification.deleteMany({ organization: m.organization }),
+    CreditTransaction.deleteMany({ organization: m.organization }),
+    Organization.deleteOne({ _id: m.organization }),
+  ]);
 
   await Promise.all([
     ...orgWideDeletes,
-    ...(membership ? [membership.deleteOne()] : []),
+    Membership.deleteMany({ user: user._id }),
     UserSettings.deleteMany({ user: user._id }),
     AgentSession.deleteMany({ user: user._id }),
     Session.deleteMany({ user: user._id }),
     SupportRequest.deleteMany({ user: user._id }),
-    CreditTransaction.deleteMany({ user: user._id }),
     Otp.deleteMany({ email: user.email }),
   ]);
 

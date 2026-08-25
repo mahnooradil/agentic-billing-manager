@@ -104,19 +104,60 @@ export async function computeAnalyticsOverview(
     const platformPipeline: PipelineStage[] = [
       { $match: currencyMatch },
       {
-        $group: { _id: "$platform", total: { $sum: "$amount" }, count: { $sum: 1 } },
+        // A record has exactly one of `platform` (manual) or
+        // `platformConnection` (auto_sync/email_sync). Grouping by the ref
+        // ALONE would merge every vendor behind one email/OAuth connection
+        // (e.g. Netflix, Spotify, and GitHub all via the same Gmail inbox)
+        // into a single bucket — `vendorName` (set by email-sync's AI
+        // extraction) breaks those back apart; auto_sync/manual records
+        // have no `vendorName`, so they group exactly as before.
+        $group: {
+          _id: { ref: { $ifNull: ["$platform", "$platformConnection"] }, vendor: "$vendorName" },
+          total: { $sum: "$amount" },
+          count: { $sum: 1 },
+        },
       },
       { $sort: { total: -1 } },
       { $limit: TOP_PLATFORMS_LIMIT },
       {
         $lookup: {
           from: "platforms",
-          localField: "_id",
+          localField: "_id.ref",
           foreignField: "_id",
-          as: "platform",
+          as: "platformDoc",
         },
       },
-      { $unwind: { path: "$platform", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "platformconnections",
+          localField: "_id.ref",
+          foreignField: "_id",
+          as: "connectionDoc",
+        },
+      },
+      {
+        // Exactly one of these two arrays has a match (the other is
+        // empty) — a manual Platform's own name/slug, or a synced
+        // connection's name/slug, overridden by the specific vendor name
+        // when one was captured (see the group stage's comment).
+        $addFields: {
+          platform: {
+            $cond: [
+              { $gt: [{ $size: "$platformDoc" }, 0] },
+              {
+                name: { $arrayElemAt: ["$platformDoc.name", 0] },
+                slug: { $arrayElemAt: ["$platformDoc.slug", 0] },
+              },
+              {
+                name: {
+                  $ifNull: ["$_id.vendor", { $arrayElemAt: ["$connectionDoc.displayName", 0] }],
+                },
+                slug: { $arrayElemAt: ["$connectionDoc.platform", 0] },
+              },
+            ],
+          },
+        },
+      },
       {
         $project: {
           total: 1,

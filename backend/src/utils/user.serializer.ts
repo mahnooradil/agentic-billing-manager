@@ -12,7 +12,6 @@ export function toPublicUser(user: UserDocument): PublicUser {
     fullName: user.fullName,
     email: user.email,
     profilePicture: user.profilePicture,
-    creditsBalance: user.creditsBalance,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

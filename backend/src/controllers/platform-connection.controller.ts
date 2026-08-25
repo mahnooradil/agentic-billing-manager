@@ -18,6 +18,7 @@ import { encryptSecret, decryptSecret } from "@/utils/crypto";
 import { toPublicPlatformConnection } from "@/utils/platform-connection.serializer";
 import { getAdapter } from "@/services/integrations/registry";
 import { syncConnectionBilling } from "@/services/billing-sync/sync-engine";
+import { hasBillingSyncAdapter } from "@/services/billing-sync/registry";
 import { syncConnectionEmail } from "@/services/email-sync/sync-engine";
 import { isEmailSyncPlatform } from "@/services/email-sync/registry";
 import { assertPlatformConnectionLimit } from "@/utils/plan-limits";
@@ -241,7 +242,13 @@ export const getPipedreamCatalog = asyncHandler(async (req, res) => {
   const limit =
     typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
   const apps = await searchApps(q, Number.isFinite(limit) ? limit : undefined);
-  sendSuccess(res, 200, "Catalog retrieved", { configured: true, apps });
+  // Only surface platforms this app can actually auto-sync billing data
+  // from — connecting anything else here would just be a dead end (no
+  // adapter ever pulls its data), so it shouldn't be offered as an option.
+  // Gmail/Outlook (the email-sync fallback) live on their own Settings tab,
+  // not this catalog.
+  const syncable = apps.filter((app) => hasBillingSyncAdapter(app.nameSlug));
+  sendSuccess(res, 200, "Catalog retrieved", { configured: true, apps: syncable });
 });
 
 /** POST /api/platform-connections/connect-token — mint a Pipedream Connect token
@@ -324,11 +331,11 @@ export const connectViaPipedream = asyncHandler(async (req, res) => {
   // Fire-and-forget: an immediate first pull for any platform with a billing-
   // sync adapter, so the user doesn't wait up to the recurring job's interval
   // to see their first data. A failure here never blocks the connect response.
+  // Email-sync platforms are deliberately NOT synced here — see
+  // `updatePlatformConnection`'s own comment for why the first pull waits for
+  // that request instead.
   if (account.healthy) {
     void syncConnectionBilling(connection);
-    if (isEmailSyncPlatform(platform)) {
-      void syncConnectionEmail(connection);
-    }
   }
 
   sendSuccess(res, 200, "Platform connected", {
@@ -349,6 +356,7 @@ export const updatePlatformConnection = asyncHandler(async (req, res) => {
   if (body.accountIdentifier !== undefined)
     update.accountIdentifier = body.accountIdentifier;
   if (body.metadata !== undefined) update.metadata = body.metadata;
+  if (body.trackedSenders !== undefined) update.trackedSenders = body.trackedSenders;
 
   const connection = await PlatformConnection.findOneAndUpdate(
     { _id: id, organization: organization._id },
@@ -356,6 +364,20 @@ export const updatePlatformConnection = asyncHandler(async (req, res) => {
     { new: true, runValidators: true }
   );
   if (!connection) throw new AppError("Platform connection not found", 404);
+
+  // The FIRST real sync for an email-sync platform fires HERE, not at
+  // connect-time — connecting always precedes the "which senders?" dialog by
+  // a few seconds, so a sync fired immediately on connect would race that
+  // choice and scan the whole inbox by the empty-senders fallback regardless
+  // of what the user was about to pick. Firing only once per connection
+  // (`metadata.emailSync` not yet set) means later sender edits don't
+  // re-trigger a full pull — the recurring scheduler picks those up.
+  if (body.trackedSenders !== undefined && isEmailSyncPlatform(connection.platform)) {
+    const meta = connection.metadata as { emailSync?: unknown } | undefined;
+    if (!meta?.emailSync) {
+      void syncConnectionEmail(connection);
+    }
+  }
 
   sendSuccess(res, 200, "Platform connection updated", {
     connection: toPublicPlatformConnection(connection),

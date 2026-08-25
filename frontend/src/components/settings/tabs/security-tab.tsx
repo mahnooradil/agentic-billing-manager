@@ -16,6 +16,7 @@ import { TextField } from "@/components/settings/settings-fields";
 import { useAlertState } from "@/hooks/use-alert-state";
 import { describeUserAgent } from "@/lib/user-agent";
 import { formatRelativeTime, formatDateTime } from "@/lib/format";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { usePreferences } from "@/services/preferences/preferences-store";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiError } from "@/services/api/client";
@@ -35,6 +36,8 @@ import type { AuthSession } from "@/services/types/auth";
 
 type EmailStep = "idle" | "otp";
 type SessionsStatus = "loading" | "error" | "ready";
+
+const SESSIONS_CACHE_KEY = "auth-sessions";
 
 /** Authentication & access: change the sign-in email, review and revoke
  *  individual login sessions, or sign out of every other device at once. */
@@ -105,8 +108,11 @@ export function SecuritySettingsTab() {
   };
 
   // ── Active sessions ──
-  const [sessionsStatus, setSessionsStatus] = React.useState<SessionsStatus>("loading");
-  const [sessions, setSessions] = React.useState<AuthSession[]>([]);
+  const cachedSessions = readPageCache<AuthSession[]>(SESSIONS_CACHE_KEY);
+  const [sessionsStatus, setSessionsStatus] = React.useState<SessionsStatus>(
+    cachedSessions ? "ready" : "loading"
+  );
+  const [sessions, setSessions] = React.useState<AuthSession[]>(cachedSessions ?? []);
   const [sessionsError, setSessionsError] = React.useState("");
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
   const [reloadKey, setReloadKey] = React.useState(0);
@@ -117,6 +123,7 @@ export function SecuritySettingsTab() {
       try {
         const response = await getSessions();
         if (ignore) return;
+        writePageCache(SESSIONS_CACHE_KEY, response.data.sessions);
         setSessions(response.data.sessions);
         setSessionsStatus("ready");
       } catch (error) {
@@ -136,7 +143,11 @@ export function SecuritySettingsTab() {
     setRevokingId(id);
     try {
       await revokeSession(id);
-      setSessions((prev) => prev.filter((s) => s.id !== id));
+      setSessions((prev) => {
+        const next = prev.filter((s) => s.id !== id);
+        writePageCache(SESSIONS_CACHE_KEY, next);
+        return next;
+      });
     } catch {
       // Reconciled on next reload.
     } finally {

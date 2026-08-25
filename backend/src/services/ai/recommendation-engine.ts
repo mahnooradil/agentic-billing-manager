@@ -175,7 +175,7 @@ export async function runRefresh(
     options.generateFn ??
     (async () => {
       const prompt = buildRecommendationsPrompt(overview, "all");
-      const reply = await runAgentPrompt(userId, prompt);
+      const reply = await runAgentPrompt(userId, organizationIdStr, prompt);
       return parseRecommendations(reply);
     });
 

@@ -19,6 +19,9 @@ export interface BillingRecord {
   amount: number;
   currency: string;
   billingDate: string;
+  /** Only ever populated for auto_sync/email_sync records whose source
+   *  actually states one — a manual record generally has none. */
+  dueDate?: string;
   status: BillingStatus;
   notes?: string;
   createdAt: string;

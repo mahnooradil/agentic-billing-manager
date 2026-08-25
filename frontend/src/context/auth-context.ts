@@ -17,6 +17,10 @@ export interface AuthContextValue {
   login: (token: string, user: AuthUser, redirectTo?: string) => void;
   /** Clear the session and navigate to login. */
   logout: () => void;
+  /** Call AFTER the switch-organization request itself succeeds — clears
+   *  every cached business-data view (and the agent chat transcript) so
+   *  nothing from the previous workspace lingers, then lands on Overview. */
+  onWorkspaceSwitched: () => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

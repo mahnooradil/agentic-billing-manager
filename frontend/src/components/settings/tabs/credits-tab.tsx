@@ -11,12 +11,19 @@ import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { SectionHeader } from "@/components/common/section-header";
 import { cn } from "@/lib/utils";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { usePreferences } from "@/services/preferences/preferences-store";
 import { ApiError } from "@/services/api/client";
 import { getMyCredits } from "@/services/credits/credits.service";
 import type { CreditsData } from "@/services/types/credits";
 
 type ViewStatus = "loading" | "error" | "ready";
+
+const CACHE_KEY = "credits";
+interface CreditsCachePayload {
+  data: CreditsData;
+  fetchedAt: number;
+}
 
 /** Human-readable label for a ledger entry's machine-readable `reason`. */
 function reasonLabel(reason: string): string {
@@ -26,6 +33,12 @@ function reasonLabel(reason: string): string {
       return "Welcome bonus";
     case "agent_message":
       return "Billing Advisor Agent message";
+    case "email_invoice_extraction":
+      return "Email invoice check";
+    case "recommendation_generation":
+      return "Recommendation refresh";
+    case "plan_credit_cycle_reset":
+      return "Plan credit cycle reset";
     default:
       return reason;
   }
@@ -36,12 +49,13 @@ function reasonLabel(reason: string): string {
  *  wired up yet (see plan-limits' own note on that); this tab is read-only. */
 export function CreditsSettingsTab() {
   const { general } = usePreferences();
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
-  const [data, setData] = React.useState<CreditsData | null>(null);
+  const cached = readPageCache<CreditsCachePayload>(CACHE_KEY);
+  const [status, setStatus] = React.useState<ViewStatus>(cached ? "ready" : "loading");
+  const [data, setData] = React.useState<CreditsData | null>(cached?.data ?? null);
   // Captured once per fetch (in the effect, not during render) — the "pace"
   // calculation below needs a fixed "now" and must stay a pure function of
   // props/state during render (react-hooks/purity forbids `Date.now()` there).
-  const [fetchedAt, setFetchedAt] = React.useState<number | null>(null);
+  const [fetchedAt, setFetchedAt] = React.useState<number | null>(cached?.fetchedAt ?? null);
   const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
 
@@ -51,8 +65,10 @@ export function CreditsSettingsTab() {
       try {
         const response = await getMyCredits();
         if (ignore) return;
+        const fetchedAtNow = Date.now();
+        writePageCache(CACHE_KEY, { data: response.data, fetchedAt: fetchedAtNow });
         setData(response.data);
-        setFetchedAt(Date.now());
+        setFetchedAt(fetchedAtNow);
         setStatus("ready");
       } catch (error) {
         if (ignore) return;
@@ -101,12 +117,18 @@ export function CreditsSettingsTab() {
     : 0;
   const avgPerDay = totalUsed > 0 && daysOfHistory > 0 ? totalUsed / daysOfHistory : null;
 
+  // Readable label for the plan's cycle length — 30/365 are the only values
+  // the backend currently issues, but any other day count still degrades
+  // gracefully instead of showing a mismatched unit.
+  const cycleLabel =
+    data.cycleDays === 30 ? "month" : data.cycleDays === 365 ? "year" : `${data.cycleDays} days`;
+
   return (
     <div className="space-y-8">
       <section className="space-y-4">
         <SectionHeader
           title="Credit balance"
-          description={`Used by the Billing Advisor Agent — each message costs credits based on its real Claude token usage. 1 credit ≈ ${data.tokensPerCredit.toLocaleString()} tokens (input + output combined).`}
+          description={`Your plan gives you ${data.allowance.toLocaleString()} credits per ${cycleLabel}. Used by the Billing Advisor Agent — each message costs credits based on its real Claude token usage. 1 credit ≈ ${data.tokensPerCredit.toLocaleString()} tokens (input + output combined).`}
           actions={
             <Button variant="outline" disabled title="Buying credits isn't available yet">
               <ShoppingCart />
@@ -129,6 +151,12 @@ export function CreditsSettingsTab() {
               </p>
             </div>
             <div className="flex gap-8 text-sm">
+              <div>
+                <p className="text-muted-foreground">Plan allowance</p>
+                <p className="tabular-nums font-medium text-foreground">
+                  {data.allowance.toLocaleString()}/{cycleLabel}
+                </p>
+              </div>
               <div>
                 <p className="text-muted-foreground">Total granted</p>
                 <p className="tabular-nums font-medium text-foreground">

@@ -12,6 +12,8 @@ import {
   verifyEmailChangeOtp,
   listSessions,
   revokeSession,
+  listMyOrganizations,
+  switchOrganization,
 } from "@/controllers/auth.controller";
 import { authenticate } from "@/middlewares/auth.middleware";
 import { validate } from "@/middlewares/validate";
@@ -22,6 +24,7 @@ import {
   updateProfileSchema,
   requestEmailChangeSchema,
   verifyEmailChangeSchema,
+  switchOrganizationSchema,
 } from "@/validators/auth.validator";
 
 const router = Router();
@@ -58,5 +61,12 @@ router.post(
 );
 router.get("/sessions", authenticate, listSessions);
 router.delete("/sessions/:id", authenticate, revokeSession);
+router.get("/organizations", authenticate, listMyOrganizations);
+router.post(
+  "/switch-organization",
+  authenticate,
+  validate(switchOrganizationSchema),
+  switchOrganization
+);
 
 export default router;

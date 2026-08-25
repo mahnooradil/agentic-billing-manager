@@ -196,6 +196,98 @@ export async function sendOrganizationInviteEmail(input: {
   });
 }
 
+/**
+ * Alerts the user by email that a tracked invoice is due soon/overdue — the
+ * same signal already shown in-app (Notifications), sent to the inbox too
+ * since an in-app badge is easy to miss until the user opens the app.
+ *
+ * Same branded table-based layout as `sendOrganizationInviteEmail` (every
+ * style inlined — email clients strip <style> blocks and ignore flex/grid),
+ * with an accent color that shifts red for "due today/tomorrow" vs amber
+ * for the earlier heads-up, so the urgency is visible at a glance.
+ */
+export async function sendDueDateReminderEmail(input: {
+  to: string;
+  platformName: string | null;
+  customerName: string;
+  amount: number;
+  currency: string;
+  dueDate: Date;
+  dueLabel: string;
+  isUrgent: boolean;
+}): Promise<void> {
+  const baseUrl = env.corsOrigin.split(",")[0]?.trim() ?? "";
+  const billingUrl = `${baseUrl}/dashboard/billing`;
+  const platformName = input.platformName ? escapeHtml(input.platformName) : null;
+  const monogram = escapeHtml((input.platformName ?? "?").charAt(0).toUpperCase());
+  const customerName = escapeHtml(input.customerName);
+  const amount = `${escapeHtml(input.currency)} ${input.amount.toFixed(2)}`;
+  const dueDateLabel = input.dueDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const accent = input.isUrgent
+    ? { bg: "#fef2f2", text: "#b91c1c" }
+    : { bg: "#fffbeb", text: "#92400e" };
+  const headline = platformName ? `${platformName} payment due ${input.dueLabel}` : `Payment due ${input.dueLabel}`;
+  const subtitle = `${customerName}'s invoice`;
+
+  await sendEmail({
+    to: input.to,
+    subject: `${amount} — ${headline}`,
+    textBody: `${platformName ? `${platformName} — ` : ""}${customerName}'s ${amount} invoice is due ${input.dueLabel} (${dueDateLabel}).\n\nOpen your Billing page to review or mark it paid: ${billingUrl}`,
+    htmlBody: `
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f3f4f6;padding:40px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#4f6fea 0%,#3d4fc4 100%);background-color:#4f6fea;padding:24px 32px;">
+            <span style="color:#ffffff;font-size:14px;font-weight:600;letter-spacing:0.02em;">Billing Manager</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+              <tr>
+                <td style="width:48px;height:48px;min-width:48px;border-radius:12px;background-color:#eef1fd;text-align:center;vertical-align:middle;font-size:20px;font-weight:700;color:#4f6fea;">
+                  ${monogram}
+                </td>
+                <td style="width:12px;">&nbsp;</td>
+                <td style="vertical-align:middle;">
+                  <p style="margin:0;font-size:17px;font-weight:600;color:#111827;">${platformName ?? "Invoice"}</p>
+                  <p style="margin:2px 0 0;font-size:13px;color:#6b7280;">${subtitle}</p>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 8px;font-size:32px;font-weight:700;color:#111827;letter-spacing:-0.01em;">${amount}</p>
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="border-radius:999px;background-color:${accent.bg};padding:5px 12px;font-size:13px;font-weight:600;color:${accent.text};">Due ${escapeHtml(input.dueLabel)} &middot; ${dueDateLabel}</td>
+              </tr>
+            </table>
+
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;">
+              <tr>
+                <td style="border-radius:10px;background-color:#4f6fea;">
+                  <a href="${billingUrl}" style="display:inline-block;padding:12px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:10px;">Review on the Billing page</a>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:24px 0 0;font-size:13px;line-height:1.5;color:#9ca3af;">
+              You're getting this because billing alerts are enabled in your notification settings.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`.trim(),
+  });
+}
+
 /** Confirms receipt to the REQUESTER (not the support inbox) — so submitting
  *  a request doesn't feel like it vanished into a form with no acknowledgment. */
 export async function sendSupportRequestConfirmationEmail(input: {

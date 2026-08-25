@@ -9,10 +9,29 @@
 import { asyncHandler } from "@/utils/asyncHandler";
 import { AppError } from "@/utils/appError";
 import { sendSuccess } from "@/utils/apiResponse";
-import { PLANS, getPlan } from "@/config/plans";
+import { PLANS, getPlan, type PlanDefinition } from "@/config/plans";
+import { CREDIT_ALLOWANCE_BY_PLAN, CREDIT_CYCLE_DAYS_BY_PLAN } from "@/config/credits";
 import { PlatformConnection } from "@/models/platform-connection.model";
 import { Billing } from "@/models/billing.model";
+import { EMAIL_SYNC_PLATFORMS } from "@/services/email-sync/registry";
 import type { UpdatePlanInput } from "@/validators/plan.validator";
+
+/**
+ * Attaches the plan's credit allowance/cycle for display purposes only —
+ * composed here, not stored on `PlanDefinition` itself (see
+ * config/plans.ts's docstring: credits are a separate system from plan
+ * limits, config/credits.ts owns these numbers and knows nothing about this
+ * file, this controller is just where the two get shown together).
+ */
+function withCredits(plan: PlanDefinition) {
+  return {
+    ...plan,
+    credits: {
+      allowance: CREDIT_ALLOWANCE_BY_PLAN[plan.tier],
+      cycleDays: CREDIT_CYCLE_DAYS_BY_PLAN[plan.tier],
+    },
+  };
+}
 
 /** GET /api/plan — the organization's plan, its limits, and real usage counts. */
 export const getMyPlan = asyncHandler(async (req, res) => {
@@ -20,13 +39,19 @@ export const getMyPlan = asyncHandler(async (req, res) => {
   if (!organization) throw new AppError("Authentication required", 401);
 
   const [platformConnections, billingRecords] = await Promise.all([
-    PlatformConnection.countDocuments({ organization: organization._id, status: "connected" }),
+    // Gmail/Outlook email-sync connections don't count against this limit —
+    // see plan-limits.ts's assertPlatformConnectionLimit for why.
+    PlatformConnection.countDocuments({
+      organization: organization._id,
+      status: "connected",
+      platform: { $nin: [...EMAIL_SYNC_PLATFORMS] },
+    }),
     Billing.countDocuments({ organization: organization._id }),
   ]);
 
   sendSuccess(res, 200, "Plan retrieved", {
-    plan: getPlan(organization.planTier),
-    plans: Object.values(PLANS),
+    plan: withCredits(getPlan(organization.planTier)),
+    plans: Object.values(PLANS).map(withCredits),
     usage: { platformConnections, billingRecords },
   });
 });
@@ -46,6 +71,6 @@ export const updateMyPlan = asyncHandler(async (req, res) => {
   await organization.save();
 
   sendSuccess(res, 200, "Plan updated", {
-    plan: getPlan(organization.planTier),
+    plan: withCredits(getPlan(organization.planTier)),
   });
 });

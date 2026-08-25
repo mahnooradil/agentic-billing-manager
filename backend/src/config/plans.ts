@@ -5,6 +5,10 @@
  * than faking a checkout flow that doesn't exist. Wiring a real payment
  * processor (Stripe et al.) to actually collect money is a separate, later
  * phase — this is the data model + limits it will plug into.
+ *
+ * Deliberately does NOT include the AI credits allowance — credits are a
+ * separate system (see config/credits.ts) that tracks real AI usage cost,
+ * independent of which plan tier gates platform/billing-record limits.
  */
 export const PLAN_TIERS = ["Free", "Pro", "Business"] as const;
 export type PlanTier = (typeof PLAN_TIERS)[number];

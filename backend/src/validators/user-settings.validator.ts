@@ -29,6 +29,11 @@ const generalSchema = z
   })
   .partial();
 
+/** Slack's own "Incoming Webhook" URL format — restricted to this exact
+ *  host so the server never ends up POSTing to an arbitrary/internal URL
+ *  a user could otherwise supply here. An empty string clears it. */
+const SLACK_WEBHOOK_REGEX = /^https:\/\/hooks\.slack\.com\/services\/.+$/;
+
 const notificationsSchema = z
   .object({
     enabled: z.boolean(),
@@ -36,6 +41,14 @@ const notificationsSchema = z
     recommendationAlerts: z.boolean(),
     usageAlerts: z.boolean(),
     highSpendThreshold: z.number().int().min(1).max(100),
+    slackWebhookUrl: z
+      .string()
+      .trim()
+      .max(500)
+      .refine(
+        (value) => value === "" || SLACK_WEBHOOK_REGEX.test(value),
+        "Must be a Slack Incoming Webhook URL (https://hooks.slack.com/services/...)"
+      ),
   })
   .partial();
 

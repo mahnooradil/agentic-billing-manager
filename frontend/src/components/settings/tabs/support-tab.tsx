@@ -25,6 +25,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { TextField, SelectField } from "@/components/settings/settings-fields";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, formatDateTime } from "@/lib/format";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { usePreferences } from "@/services/preferences/preferences-store";
 import { useAuth } from "@/hooks/use-auth";
 import { useAlertState } from "@/hooks/use-alert-state";
@@ -66,6 +67,12 @@ type SupportFormValues = z.infer<typeof supportFormSchema>;
 
 type ViewStatus = "loading" | "error" | "ready";
 
+const CACHE_KEY = "support";
+interface SupportCachePayload {
+  requests: SupportRequest[];
+  isPriority: boolean;
+}
+
 const STATUS_STYLES: Record<SupportRequest["status"], { pill: string; dot: string }> = {
   open: { pill: "bg-amber-500/10 text-amber-700 dark:text-amber-400", dot: "bg-amber-500" },
   resolved: {
@@ -87,10 +94,11 @@ export function SupportSettingsTab() {
   const { general } = usePreferences();
   // Plan tier moved to the organization (shared across members) — fetched
   // here rather than read off the user, same as Billing & Plan's own tab.
-  const [isPriority, setIsPriority] = React.useState(false);
+  const cached = readPageCache<SupportCachePayload>(CACHE_KEY);
+  const [isPriority, setIsPriority] = React.useState(cached?.isPriority ?? false);
 
-  const [requests, setRequests] = React.useState<SupportRequest[]>([]);
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
+  const [requests, setRequests] = React.useState<SupportRequest[]>(cached?.requests ?? []);
+  const [status, setStatus] = React.useState<ViewStatus>(cached ? "ready" : "loading");
   const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
   const [alert, setAlert] = useAlertState();
@@ -112,8 +120,10 @@ export function SupportSettingsTab() {
       try {
         const [requestsRes, planRes] = await Promise.all([getSupportRequests(), getMyPlan()]);
         if (ignore) return;
+        const isPriorityNow = planRes.data.plan.tier !== "Free";
+        writePageCache(CACHE_KEY, { requests: requestsRes.data.requests, isPriority: isPriorityNow });
         setRequests(requestsRes.data.requests);
-        setIsPriority(planRes.data.plan.tier !== "Free");
+        setIsPriority(isPriorityNow);
         setStatus("ready");
       } catch (error) {
         if (ignore) return;

@@ -32,6 +32,7 @@ import { formatDateTime } from "@/lib/format";
 import { usePreferences } from "@/services/preferences/preferences-store";
 import { useAuth } from "@/hooks/use-auth";
 import { useAlertState } from "@/hooks/use-alert-state";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { ApiError } from "@/services/api/client";
 import {
   getMyOrganization,
@@ -44,6 +45,15 @@ import type { Member, MembershipRole, Organization } from "@/services/types/orga
 import { InviteMemberDialog } from "./team/invite-member-dialog";
 
 type ViewStatus = "loading" | "error" | "ready";
+
+const CACHE_KEY = "team";
+type PendingInvitations = Awaited<ReturnType<typeof getMembers>>["data"]["pendingInvitations"];
+interface TeamCachePayload {
+  organization: Organization;
+  members: Member[];
+  pendingInvitations: PendingInvitations;
+  fetchedAt: number;
+}
 
 const ROLE_ICON: Record<MembershipRole, typeof Crown> = {
   owner: Crown,
@@ -78,18 +88,21 @@ export function TeamSettingsTab() {
   const { user } = useAuth();
   const { general } = usePreferences();
 
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
-  const [organization, setOrganization] = React.useState<Organization | null>(null);
-  const [members, setMembers] = React.useState<Member[]>([]);
-  const [pendingInvitations, setPendingInvitations] = React.useState<
-    Awaited<ReturnType<typeof getMembers>>["data"]["pendingInvitations"]
-  >([]);
+  const cached = readPageCache<TeamCachePayload>(CACHE_KEY);
+  const [status, setStatus] = React.useState<ViewStatus>(cached ? "ready" : "loading");
+  const [organization, setOrganization] = React.useState<Organization | null>(
+    cached?.organization ?? null
+  );
+  const [members, setMembers] = React.useState<Member[]>(cached?.members ?? []);
+  const [pendingInvitations, setPendingInvitations] = React.useState<PendingInvitations>(
+    cached?.pendingInvitations ?? []
+  );
   const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
   const [alert, setAlert] = useAlertState();
   // Captured once per fetch (not read via Date.now() during render — see
   // formatExpiresIn's docstring).
-  const [fetchedAt, setFetchedAt] = React.useState<number | null>(null);
+  const [fetchedAt, setFetchedAt] = React.useState<number | null>(cached?.fetchedAt ?? null);
 
   const [inviteOpen, setInviteOpen] = React.useState(false);
   const [removeTarget, setRemoveTarget] = React.useState<Member | null>(null);
@@ -103,10 +116,17 @@ export function TeamSettingsTab() {
       try {
         const [orgRes, membersRes] = await Promise.all([getMyOrganization(), getMembers()]);
         if (ignore) return;
+        const fetchedAtNow = Date.now();
+        writePageCache(CACHE_KEY, {
+          organization: orgRes.data.organization,
+          members: membersRes.data.members,
+          pendingInvitations: membersRes.data.pendingInvitations,
+          fetchedAt: fetchedAtNow,
+        });
         setOrganization(orgRes.data.organization);
         setMembers(membersRes.data.members);
         setPendingInvitations(membersRes.data.pendingInvitations);
-        setFetchedAt(Date.now());
+        setFetchedAt(fetchedAtNow);
         setStatus("ready");
       } catch (error) {
         if (ignore) return;
@@ -162,7 +182,13 @@ export function TeamSettingsTab() {
     setRevokingId(invitationId);
     try {
       await revokeInvitation(invitationId);
-      setPendingInvitations((prev) => prev.filter((i) => i.id !== invitationId));
+      setPendingInvitations((prev) => {
+        const next = prev.filter((i) => i.id !== invitationId);
+        if (organization && fetchedAt !== null) {
+          writePageCache(CACHE_KEY, { organization, members, pendingInvitations: next, fetchedAt });
+        }
+        return next;
+      });
     } catch (error) {
       setAlert({
         type: "error",
@@ -255,7 +281,7 @@ export function TeamSettingsTab() {
                       )}
                     >
                       <RoleIcon className="size-3" />
-                      {member.role === "owner" ? "Owner" : "Admin"}
+                      {member.role === "owner" ? "Owner" : member.role === "admin" ? "Admin" : "Member"}
                     </span>
                   )}
 

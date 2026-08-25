@@ -8,7 +8,6 @@ export interface AuthUser {
   fullName: string;
   email: string;
   profilePicture?: string;
-  creditsBalance: number;
   createdAt: string;
   updatedAt: string;
 }

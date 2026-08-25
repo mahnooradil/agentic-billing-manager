@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Loader2, Mail, Trash2 } from "lucide-react";
+import { Filter, Loader2, Mail, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { FormAlert } from "@/components/common/form-alert";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { SectionHeader } from "@/components/common/section-header";
 import { DisconnectDialog } from "@/components/connections/disconnect-dialog";
+import { TrackedSendersDialog } from "./email-sync/tracked-senders-dialog";
 import { cn } from "@/lib/utils";
 import {
   EMAIL_SYNC_APPS,
@@ -21,11 +22,14 @@ import {
 } from "@/lib/email-sync-platforms";
 import { useAlertState } from "@/hooks/use-alert-state";
 import { usePipedreamConnect } from "@/hooks/use-pipedream-connect";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { ApiError } from "@/services/api/client";
 import { listPlatformConnections, connectViaPipedream } from "@/services/connections/platform-connections.service";
 import type { PlatformConnection } from "@/services/types/platform-connections";
 
 type ViewStatus = "loading" | "error" | "ready";
+
+const CACHE_KEY = "email-sync-connections";
 
 /**
  * Email accounts connected for invoice-sync (the Gmail/Outlook fallback
@@ -36,15 +40,29 @@ type ViewStatus = "loading" | "error" | "ready";
  * by its real account identity, not a one-per-provider slot.
  */
 export function EmailSyncSettingsTab() {
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
-  const [connections, setConnections] = React.useState<PlatformConnection[]>([]);
+  const cached = readPageCache<PlatformConnection[]>(CACHE_KEY);
+  const [status, setStatus] = React.useState<ViewStatus>(cached ? "ready" : "loading");
+  const [connections, setConnections] = React.useState<PlatformConnection[]>(cached ?? []);
   const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
   const [alert, setAlert] = useAlertState();
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [disconnectTarget, setDisconnectTarget] = React.useState<PlatformConnection | null>(null);
+  const [senderDialogTarget, setSenderDialogTarget] = React.useState<PlatformConnection | null>(
+    null
+  );
 
   const reload = () => setReloadKey((key) => key + 1);
+
+  /** Updates one connection in place (list state + cache) — used after saving
+   *  tracked senders, so the row reflects the change without a full refetch. */
+  const applyConnectionUpdate = (updated: PlatformConnection) => {
+    setConnections((prev) => {
+      const next = prev.map((c) => (c.id === updated.id ? updated : c));
+      writePageCache(CACHE_KEY, next);
+      return next;
+    });
+  };
 
   React.useEffect(() => {
     let ignore = false;
@@ -52,7 +70,9 @@ export function EmailSyncSettingsTab() {
       try {
         const res = await listPlatformConnections();
         if (ignore) return;
-        setConnections(res.data.connections.filter((c) => isEmailSyncPlatform(c.platform)));
+        const filtered = res.data.connections.filter((c) => isEmailSyncPlatform(c.platform));
+        writePageCache(CACHE_KEY, filtered);
+        setConnections(filtered);
         setStatus("ready");
       } catch (error) {
         if (ignore) return;
@@ -76,6 +96,9 @@ export function EmailSyncSettingsTab() {
       });
       setAlert({ type: "success", message: res.message ?? `${app.name} connected.` });
       reload();
+      // Prompt right away for which senders to watch — the whole point of
+      // asking is to avoid a silent whole-inbox scan by default.
+      setSenderDialogTarget(res.data.connection);
     },
     (message) => setActionError(message)
   );
@@ -158,6 +181,11 @@ export function EmailSyncSettingsTab() {
                           : "Connected — first invoice scan pending"
                         : connection.lastError ?? "Needs re-authentication"}
                     </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {connection.trackedSenders.length > 0
+                        ? `Watching: ${connection.trackedSenders.join(", ")}`
+                        : "Scanning whole inbox"}
+                    </p>
                   </div>
                   <span
                     className={cn(
@@ -165,6 +193,14 @@ export function EmailSyncSettingsTab() {
                       connection.status === "connected" ? "bg-emerald-500" : "bg-red-500"
                     )}
                   />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Manage senders for ${emailSyncProviderLabel(connection.platform)}`}
+                    onClick={() => setSenderDialogTarget(connection)}
+                  >
+                    <Filter />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -191,6 +227,16 @@ export function EmailSyncSettingsTab() {
           setAlert({ type: "success", message });
           setDisconnectTarget(null);
           reload();
+        }}
+      />
+
+      <TrackedSendersDialog
+        open={senderDialogTarget !== null}
+        onOpenChange={(open) => !open && setSenderDialogTarget(null)}
+        connection={senderDialogTarget}
+        onSaved={(updated, message) => {
+          applyConnectionUpdate(updated);
+          setAlert({ type: "success", message });
         }}
       />
     </div>

@@ -29,9 +29,15 @@ export interface RawStatusRow {
   count: number;
 }
 
-/** Raw `$group` + `$lookup` row: spend for one platform (primary currency). */
+/** Raw `$group` + `$lookup` row: spend for one platform (primary currency).
+ *  `_id.ref` is the manual Platform's or synced connection's ObjectId;
+ *  `_id.vendor` is only set for an email-synced record whose AI-detected
+ *  vendor differs from the connection itself (see analytics.engine.ts's
+ *  group stage) — together they're what make Netflix/Spotify/GitHub show
+ *  up as separate rows even though all three came through one Gmail
+ *  connection. */
 export interface RawPlatformRow {
-  _id: unknown; // platform ObjectId
+  _id: { ref: unknown; vendor: string | null };
   total: number;
   count: number;
   platform?: { name?: string; slug?: string } | null;
@@ -134,7 +140,12 @@ export function toPublicAnalyticsOverview(
   const primaryCurrency = input.primaryCurrency;
 
   const byPlatform: PlatformSpend[] = input.byPlatform.map((row) => ({
-    platformId: row._id ? String(row._id) : "",
+    // Several vendors (Netflix, Spotify, ...) can share one connection's
+    // ref — append the vendor so each still gets a UNIQUE id; frontend code
+    // uses this as a React list key, and a duplicate would silently drop rows.
+    platformId: row._id?.ref
+      ? `${row._id.ref}${row._id.vendor ? `-${row._id.vendor}` : ""}`
+      : "",
     name: row.platform?.name ?? "Unknown platform",
     slug: row.platform?.slug ?? "",
     currency: primaryCurrency ?? "",

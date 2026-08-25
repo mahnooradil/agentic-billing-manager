@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
 import { Pagination } from "@/components/common/pagination";
 import { useAlertState } from "@/hooks/use-alert-state";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { ApiError } from "@/services/api/client";
 import { getBillingStats, listBillingRecords } from "@/services/billing/billing.service";
 import { listPlatforms } from "@/services/platforms/platform.service";
@@ -29,16 +30,24 @@ type ViewStatus = "loading" | "error" | "ready";
 /** Billing records shown per page (client-side pagination). */
 const PAGE_SIZE = 10;
 
+const CACHE_KEY = "billing";
+interface BillingCachePayload {
+  records: BillingRecord[];
+  stats: BillingStats | null;
+  platforms: Platform[];
+}
+
 /**
  * Billing management screen: lists billing records and orchestrates the create/
  * edit/delete dialogs. Also loads the platform list so a record can be attached
  * to a platform. Refetches after every successful mutation.
  */
 export function BillingView() {
-  const [status, setStatus] = React.useState<ViewStatus>("loading");
-  const [records, setRecords] = React.useState<BillingRecord[]>([]);
-  const [platforms, setPlatforms] = React.useState<Platform[]>([]);
-  const [stats, setStats] = React.useState<BillingStats | null>(null);
+  const cached = readPageCache<BillingCachePayload>(CACHE_KEY);
+  const [status, setStatus] = React.useState<ViewStatus>(cached ? "ready" : "loading");
+  const [records, setRecords] = React.useState<BillingRecord[]>(cached?.records ?? []);
+  const [platforms, setPlatforms] = React.useState<Platform[]>(cached?.platforms ?? []);
+  const [stats, setStats] = React.useState<BillingStats | null>(cached?.stats ?? null);
   const [loadError, setLoadError] = React.useState("");
   const [alert, setAlert] = useAlertState();
 
@@ -77,6 +86,11 @@ export function BillingView() {
           listPlatforms(),
         ]);
         if (ignore) return;
+        writePageCache(CACHE_KEY, {
+          records: billingResponse.data.billingRecords,
+          stats: statsResponse.data.stats,
+          platforms: platformsResponse.data.platforms,
+        });
         setRecords(billingResponse.data.billingRecords);
         setStats(statsResponse.data.stats);
         setPlatforms(platformsResponse.data.platforms);

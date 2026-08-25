@@ -32,8 +32,11 @@ export const createOrganizationInvitation = asyncHandler(async (req, res) => {
 
   const existingMember = await User.findOne({ email });
   if (existingMember) {
-    const theirMembership = await Membership.findOne({ user: existingMember._id });
-    if (theirMembership?.organization.equals(organization._id)) {
+    const alreadyMember = await Membership.exists({
+      user: existingMember._id,
+      organization: organization._id,
+    });
+    if (alreadyMember) {
       throw new AppError("This person is already a member.", 409);
     }
   }

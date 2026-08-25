@@ -17,7 +17,13 @@
  * (email/slack/etc.) subscribe to.
  */
 import { computeAnalyticsOverview } from "@/services/analytics/analytics.engine";
+import { Billing, type BillingDocument } from "@/models/billing.model";
 import { Recommendation } from "@/models/recommendation.model";
+import { Platform } from "@/models/platform.model";
+import { PlatformConnection } from "@/models/platform-connection.model";
+import { User } from "@/models/user.model";
+import { sendDueDateReminderEmail } from "@/services/email/resend";
+import { sendSlackAlert } from "@/services/notifications/slack";
 import {
   Notification,
   type NotificationSeverity,
@@ -28,7 +34,7 @@ import {
   DEFAULT_USER_SETTINGS,
   type IUserSettings,
 } from "@/models/user-settings.model";
-import { eventBus } from "@/services/events/event-bus";
+import { eventBus, emitBusinessDataChanged } from "@/services/events/event-bus";
 import { emitNotificationCreated } from "@/services/events/notification.events";
 import { getOrganizationIdForUser } from "@/services/organizations/membership-lookup.service";
 import type { Types } from "mongoose";
@@ -259,6 +265,152 @@ export async function runRecommendationNotifications(
     title: "AI analysis completed",
     message: "Your recommendations were refreshed.",
   });
+}
+
+/** How far ahead of a due date to start warning. */
+const DUE_SOON_WINDOW_DAYS = 3;
+
+/** The vendor/platform name for a billing record — a manual record links a
+ *  `Platform` doc directly, an auto/email-synced one links a
+ *  `PlatformConnection` instead (see billing.model.ts's docstring on why
+ *  it's exactly one of the two). `vendorName` (set by email-sync's AI
+ *  extraction — see billing.serializer.ts's identical preference) takes
+ *  priority for a connection-based record: one Gmail connection can cover
+ *  many vendors (Netflix, Spotify, ...), so the connection's own name
+ *  ("Gmail") is a worse answer than the specific vendor when one was
+ *  captured. Falls back to null rather than guessing when nothing resolves
+ *  (shouldn't happen given the model's own pre-validate invariant, but never
+ *  worth a thrown error over). */
+async function resolvePlatformName(
+  record: Pick<BillingDocument, "platform" | "platformConnection" | "vendorName">
+): Promise<string | null> {
+  if (record.platform) {
+    const platform = await Platform.findById(record.platform).select("name");
+    return platform?.name ?? null;
+  }
+  if (record.platformConnection) {
+    if (record.vendorName) return record.vendorName;
+    const connection = await PlatformConnection.findById(record.platformConnection).select(
+      "displayName"
+    );
+    return connection?.displayName ?? null;
+  }
+  return null;
+}
+
+/**
+ * "Payment due soon" rule — unlike the rules above, this isn't triggered by a
+ * business-data change; a due date approaches purely because TIME passed, so
+ * it's driven by its own scheduler (due-date-scheduler.ts) instead of the
+ * event bus. Scans across every organization in one pass (there's no
+ * triggering user/org to scope to), checking each matched record's OWN
+ * creator's notification preferences — the same v1 simplification the rules
+ * above already use (prefs are per-user, not yet per-organization).
+ *
+ * Re-running this daily naturally ESCALATES the same notification's severity
+ * as the due date gets closer (upsertNotification refreshes severity on a
+ * dedup hit) rather than creating a new one each time.
+ */
+export async function runDueDateNotifications(): Promise<void> {
+  const now = new Date();
+  const threshold = new Date(now.getTime() + DUE_SOON_WINDOW_DAYS * 86_400_000);
+
+  const dueSoon = await Billing.find({
+    dueDate: { $exists: true, $gte: now, $lte: threshold },
+    status: { $ne: "Paid" },
+  }).select(
+    "organization user customerName amount currency dueDate platform platformConnection vendorName"
+  );
+
+  for (const record of dueSoon) {
+    try {
+      const prefs = await getNotificationPrefs(record.user.toString());
+      if (!prefs.enabled || !prefs.billingAlerts) continue;
+
+      const daysUntilDue = Math.max(
+        0,
+        Math.ceil((record.dueDate!.getTime() - now.getTime()) / 86_400_000)
+      );
+      const dueLabel =
+        daysUntilDue === 0 ? "today" : daysUntilDue === 1 ? "tomorrow" : `in ${daysUntilDue} days`;
+      const severity: NotificationSeverity = daysUntilDue <= 1 ? "critical" : "warning";
+      const platformName = await resolvePlatformName(record);
+      const message = platformName
+        ? `${platformName} — ${record.customerName}'s ${record.amount} ${record.currency} invoice is due ${dueLabel}.`
+        : `${record.customerName}'s ${record.amount} ${record.currency} invoice is due ${dueLabel}.`;
+
+      const { created } = await upsertNotification(record.organization.toString(), {
+        signature: `billing:due-soon:${record._id.toString()}`,
+        category: "billing",
+        severity,
+        title: "Payment due soon",
+        message,
+      });
+
+      // Email/Slack only on the FIRST time this invoice enters the warning
+      // window (a fresh insert, not a daily dedup refresh) — one heads-up,
+      // not a repeat every time the scheduler re-runs while it's still unpaid.
+      if (created) {
+        const user = await User.findById(record.user).select("email");
+        if (user) {
+          await sendDueDateReminderEmail({
+            to: user.email,
+            platformName,
+            customerName: record.customerName,
+            amount: record.amount,
+            currency: record.currency,
+            dueDate: record.dueDate!,
+            dueLabel,
+            isUrgent: severity === "critical",
+          }).catch((e) => logError("due-date email", e));
+        }
+
+        if (prefs.slackWebhookUrl) {
+          await sendSlackAlert(
+            prefs.slackWebhookUrl,
+            `:warning: *Payment due ${dueLabel}* — ${message}`
+          ).catch((e) => logError("due-date slack", e));
+        }
+      }
+    } catch (e) {
+      logError("due-date rule (one record)", e);
+    }
+  }
+}
+
+/**
+ * Auto-flips a "Pending" record to "Overdue" once its due date has passed.
+ * Nothing else in the app does this: billing-sync/email-sync only ever set
+ * status from what the source itself reports, and a manually-dated record
+ * would otherwise sit at "Pending" forever after its due date with nothing
+ * ever correcting it. Runs alongside `runDueDateNotifications` (same
+ * scheduler, since both react to time passing rather than a data change).
+ *
+ * Re-emits `business.data.changed` per affected user so the existing
+ * overdue-count notification rule (`runBusinessNotifications`) picks up the
+ * new total on its own, instead of duplicating that logic here.
+ */
+export async function autoMarkOverdue(): Promise<void> {
+  const now = new Date();
+  const toFlip = await Billing.find({
+    dueDate: { $exists: true, $lt: now },
+    status: "Pending",
+  }).select("_id user");
+
+  if (toFlip.length === 0) return;
+
+  await Billing.updateMany(
+    { _id: { $in: toFlip.map((r) => r._id) } },
+    { $set: { status: "Overdue" } }
+  );
+
+  const notifiedUsers = new Set<string>();
+  for (const record of toFlip) {
+    const userId = record.user.toString();
+    if (notifiedUsers.has(userId)) continue;
+    notifiedUsers.add(userId);
+    emitBusinessDataChanged({ source: "billing", action: "update", triggeredBy: userId });
+  }
 }
 
 function logError(context: string, error: unknown): void {

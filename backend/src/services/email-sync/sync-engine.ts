@@ -10,12 +10,14 @@
  * Provider-agnostic: everything specific to Gmail vs Outlook (search-query
  * syntax, raw API shape, message normalization) lives behind provider.ts's
  * EmailSyncProvider; this file only knows the loop (pagination, safety cap,
- * watermark, dedupe/upsert).
+ * watermark, dedupe/upsert) plus the AI extraction step every candidate
+ * message goes through.
  *
  * Called from two places: right after an email-sync connection is created
  * (one immediate pull) and by the recurring scheduler (scheduler.ts).
  */
 import { Billing } from "@/models/billing.model";
+import { Organization } from "@/models/organization.model";
 import {
   PlatformConnection,
   type PlatformConnectionDocument,
@@ -26,7 +28,13 @@ import {
   type EmailSyncProvider,
   type NormalizedEmailMessage,
 } from "@/services/email-sync/provider";
-import { parseInvoiceFields, parseSender } from "@/services/email-sync/parser";
+import { parseSender } from "@/services/email-sync/parser";
+import {
+  extractInvoiceFields,
+  isAiExtractionConfigured,
+} from "@/services/email-sync/ai-invoice-extractor";
+import { consumeCredits } from "@/services/credits/credit-ledger.service";
+import { tokensToCredits } from "@/config/credits";
 
 const MAX_MESSAGES_PER_RUN = 200;
 const PAGE_SIZE = 50;
@@ -42,18 +50,33 @@ interface AccountMetadata {
 
 /**
  * Syncs one email-sync connection. Silently does nothing if the platform
- * isn't a supported email-sync source or has no Pipedream account id yet.
- * Never throws.
+ * isn't a supported email-sync source, has no Pipedream account id yet, the
+ * AI extractor isn't configured, or the connection's WORKSPACE has no
+ * credits left (same "pre-check blocks the next usage" rule the Billing
+ * Advisor Agent uses — see utils/credits.ts; credits belong to the
+ * organization, not the connecting member — see Organization model's
+ * docstring). Never throws.
  */
 export async function syncConnectionEmail(
   connection: PlatformConnectionDocument
 ): Promise<void> {
   const provider = getEmailSyncProvider(connection.platform);
   if (!provider) return;
+  if (!isAiExtractionConfigured()) return;
 
   const meta = connection.metadata as AccountMetadata | undefined;
   const pipedreamAccountId = meta?.pipedreamAccountId;
   if (!pipedreamAccountId) return;
+
+  // Reading each candidate email through the AI extractor costs the
+  // workspace credits, exactly like a Billing Advisor Agent turn — so this
+  // run never starts if it's already out (the next Agent message in this
+  // workspace would be blocked the same way; the next successful sync just
+  // resumes once it has credits again).
+  const organization = await Organization.findById(connection.organization).select(
+    "creditsBalance name"
+  );
+  if (!organization || organization.creditsBalance <= 0) return;
 
   const externalUserId = connection.user.toString();
   const runStartedAt = new Date();
@@ -62,13 +85,31 @@ export async function syncConnectionEmail(
         new Date(meta.emailSync.lastSyncedAt).getTime() - OVERLAP_DAYS * 86_400_000
       )
     : null;
-  const query = provider.buildSearchQuery(sinceDate);
+  const query = provider.buildSearchQuery(sinceDate, connection.trackedSenders ?? []);
 
   let processed = 0;
   let created = 0;
   let hitCap = false;
   let stoppedEarly = false;
+  let outOfCredits = false;
+  // Tracked locally (not re-read from the DB) so a run stops the moment its
+  // OWN deductions exhaust the balance, instead of only being caught by the
+  // next run's pre-check after already processing an entire backlog page.
+  let remainingCredits = organization.creditsBalance;
   let pageToken: string | undefined;
+  // Extraction happens in whatever order the provider's search returns
+  // messages — NOT guaranteed to be chronological (Gmail explicitly isn't).
+  // Writing to Billing immediately would let an older message (e.g. the
+  // original "your invoice" email) overwrite a newer one (e.g. "payment
+  // received") for the same invoice if it happens to be processed second.
+  // So every extraction is staged here and only committed after this whole
+  // fetch pass, sorted oldest-to-newest, so the chronologically last email
+  // for a given invoice always wins the final DB write.
+  const pendingUpdates: Array<{
+    dedupeQuery: Record<string, unknown>;
+    setFields: Record<string, unknown>;
+    receivedAt: Date;
+  }> = [];
 
   try {
     do {
@@ -82,6 +123,10 @@ export async function syncConnectionEmail(
       for (const messageId of page.messageIds) {
         if (processed >= MAX_MESSAGES_PER_RUN) {
           hitCap = true;
+          break;
+        }
+        if (remainingCredits <= 0) {
+          outOfCredits = true;
           break;
         }
         processed++;
@@ -105,21 +150,47 @@ export async function syncConnectionEmail(
             break;
           }
 
-          const wasCreated = await processNormalizedMessage(connection, provider, message);
-          if (wasCreated) created++;
+          const extracted = await extractCandidateFields(
+            connection,
+            provider,
+            message,
+            organization.name
+          );
+          remainingCredits -= extracted.creditsUsed;
+          if (extracted.fields) {
+            pendingUpdates.push({
+              dedupeQuery: extracted.fields.dedupeQuery,
+              setFields: extracted.fields.setFields,
+              receivedAt: message.receivedAt,
+            });
+          }
         } catch {
           // One bad/unreachable message must never abort the whole run.
         }
       }
-      pageToken = hitCap || stoppedEarly ? undefined : page.nextPageToken;
+      pageToken = hitCap || stoppedEarly || outOfCredits ? undefined : page.nextPageToken;
     } while (pageToken);
 
+    // Commit oldest-first: within one run, a later email for the same
+    // invoice (e.g. a payment confirmation) is written last and wins.
+    pendingUpdates.sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime());
+    for (const update of pendingUpdates) {
+      const existedBefore = await Billing.exists(update.dedupeQuery);
+      await Billing.findOneAndUpdate(
+        update.dedupeQuery,
+        { $set: update.setFields },
+        { upsert: true, setDefaultsOnInsert: true, runValidators: true }
+      );
+      if (!existedBefore) created++;
+    }
+
     // Only advance the watermark when the search window was fully drained —
-    // if the safety cap was hit, leave it unchanged so the next run resumes
-    // the same backlog instead of silently skipping whatever didn't fit.
-    // Stopping early because the results ran past `sinceDate` (Outlook) IS a
-    // fully-drained window, so it still advances the watermark.
-    if (!hitCap) {
+    // if the safety cap was hit (or credits ran out mid-run), leave it
+    // unchanged so the next run resumes the same backlog instead of silently
+    // skipping whatever didn't fit. Stopping early because the results ran
+    // past `sinceDate` (Outlook) IS a fully-drained window, so it still
+    // advances the watermark.
+    if (!hitCap && !outOfCredits) {
       await PlatformConnection.updateOne(
         { _id: connection._id },
         { $set: { "metadata.emailSync": { lastSyncedAt: runStartedAt.toISOString() } } }
@@ -138,15 +209,54 @@ export async function syncConnectionEmail(
   }
 }
 
-async function processNormalizedMessage(
+/** Parses an AI-returned `YYYY-MM-DD` string; null/invalid → undefined
+ *  (never a guessed date, since a wrong due/billing date is worse than none). */
+function parseAiDate(value: string | null): Date | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return isNaN(date.getTime()) ? undefined : date;
+}
+
+/** Extracts one candidate message's billing fields and prices the AI call
+ *  against the workspace's credits, but does NOT touch the Billing
+ *  collection — the caller commits the write, in chronological order across
+ *  the whole run (see the `pendingUpdates` sort in `syncConnectionEmail`),
+ *  so a later status (e.g. a payment confirmation) is never clobbered by an
+ *  earlier one processed out of order. */
+async function extractCandidateFields(
   connection: PlatformConnectionDocument,
   provider: EmailSyncProvider,
-  message: NormalizedEmailMessage
-): Promise<boolean> {
-  const fields = parseInvoiceFields(message.plainText, message.receivedAt);
-  // Billing.amount and .currency are required — guessing either wrong is worse
-  // than skipping this message, so both must be confidently parsed.
-  if (fields.amount === null || fields.currency === null) return false;
+  message: NormalizedEmailMessage,
+  organizationName: string
+): Promise<{
+  fields: { dedupeQuery: Record<string, unknown>; setFields: Record<string, unknown> } | null;
+  creditsUsed: number;
+}> {
+  const extraction = await extractInvoiceFields({
+    subject: message.subject,
+    fromHeader: message.fromHeader,
+    bodyText: message.plainText,
+  });
+
+  // The API call itself costs tokens whether or not this turns out to be a
+  // real invoice — deduct the same way a Billing Advisor Agent turn does,
+  // regardless of the outcome below. Computed once so the caller can also
+  // track the run's remaining balance without re-deriving it.
+  const creditsUsed = tokensToCredits(extraction.inputTokens, extraction.outputTokens);
+  void consumeCredits(
+    connection.organization,
+    creditsUsed,
+    "email_invoice_extraction",
+    connection.user
+  );
+
+  const fields = extraction.fields;
+  // Not a real billing email (a promo that matched the search keywords), or
+  // amount/currency couldn't be confidently read — guessing either wrong is
+  // worse than skipping this message, so both must be present.
+  if (!fields.isBillingEmail || fields.amount === null || fields.currency === null) {
+    return { fields: null, creditsUsed };
+  }
 
   const { displayName, domain } = parseSender(message.fromHeader ?? undefined);
   const vendorSlug =
@@ -154,11 +264,19 @@ async function processNormalizedMessage(
       .replace(/\.(com|net|org|io|co)$/i, "")
       .replace(/[^a-z0-9]/gi, "")
       .toLowerCase() || "unknown";
-  const customerName =
+  // The AI reads the email's own branding, so its vendor name is generally
+  // more accurate than a domain-derived guess — prefer it when present. This
+  // is who the bill is FROM (Netflix, Spotify, ...) — shown as "platform"
+  // (see billing.serializer.ts), never confused with `customerName` below,
+  // which is who the bill is TO (this workspace, not the vendor).
+  const vendorName =
+    fields.customerName ??
     displayName ??
     (vendorSlug !== "unknown" ? vendorSlug[0].toUpperCase() + vendorSlug.slice(1) : "Email invoice");
   const invoiceNumber =
     fields.invoiceNumber ?? `EMAIL-${message.id.slice(0, 10).toUpperCase()}`;
+  const billingDate = parseAiDate(fields.billingDate) ?? message.receivedAt;
+  const dueDate = parseAiDate(fields.dueDate);
 
   // Prefer a semantic dedupe key (vendor + invoice number) over the raw message
   // id: an initial "your invoice" email and a later "payment received" receipt
@@ -174,27 +292,27 @@ async function processNormalizedMessage(
     platformConnection: connection._id,
     externalId,
   };
-  const existedBefore = await Billing.exists(dedupeQuery);
 
-  await Billing.findOneAndUpdate(
-    dedupeQuery,
-    {
-      $set: {
+  return {
+    fields: {
+      dedupeQuery,
+      setFields: {
         organization: connection.organization,
         user: connection.user,
         platformConnection: connection._id,
         source: "email_sync",
         externalId,
-        customerName,
+        vendorName,
+        customerName: organizationName,
         invoiceNumber,
         amount: fields.amount,
         currency: fields.currency,
-        billingDate: fields.billingDate,
-        status: fields.status,
+        billingDate,
+        ...(dueDate ? { dueDate } : {}),
+        status: fields.status ?? "Pending",
         notes: provider.notesText,
       },
     },
-    { upsert: true, setDefaultsOnInsert: true, runValidators: true }
-  );
-  return !existedBefore;
+    creditsUsed,
+  };
 }

@@ -17,14 +17,15 @@ import type { AgentChatInput } from "@/validators/agent-chat.validator";
 /** POST /api/agent/chat */
 export const agentChat = asyncHandler(async (req, res) => {
   const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!user || !organization) {
     throw new AppError("Authentication required", 401);
   }
 
-  assertCreditBalance(user);
+  assertCreditBalance(organization);
 
   const { message } = req.body as AgentChatInput;
-  const { reply, action } = await sendAgentMessage(user._id, message);
+  const { reply, action } = await sendAgentMessage(user._id, organization._id, message);
 
   sendSuccess(res, 200, "Agent response generated", {
     message: { role: "assistant", content: reply, ...(action ? { action } : {}) },

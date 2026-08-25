@@ -38,6 +38,7 @@ export function BillingTable({ records, onEdit, onDelete }: BillingTableProps) {
             <TableHead>Invoice</TableHead>
             <TableHead className="text-right">Amount</TableHead>
             <TableHead>Date</TableHead>
+            <TableHead>Due</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -66,6 +67,9 @@ export function BillingTable({ records, onEdit, onDelete }: BillingTableProps) {
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {formatDate(record.billingDate, general)}
+              </TableCell>
+              <TableCell className="text-muted-foreground">
+                {record.dueDate ? formatDate(record.dueDate, general) : "—"}
               </TableCell>
               <TableCell>
                 <BillingStatusBadge status={record.status} />

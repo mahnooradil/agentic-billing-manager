@@ -14,6 +14,7 @@ import { toPublicInvitation } from "@/utils/invitation.serializer";
 import { Membership } from "@/models/membership.model";
 import { Invitation } from "@/models/invitation.model";
 import { User } from "@/models/user.model";
+import { cleanupRedundantFallbackWorkspace } from "@/services/organizations/organization-bootstrap.service";
 import type {
   UpdateOrganizationInput,
   UpdateMembershipRoleInput,
@@ -132,5 +133,23 @@ export const removeMember = asyncHandler(async (req, res) => {
   }
 
   await target.deleteOne();
+
+  // If this removal leaves the organization solo-owned again, a fallback
+  // personal workspace created for the owner (see
+  // `ensureOwnerHasPersonalWorkspace`) may no longer be needed — clean it
+  // up if it's still empty. Best-effort; never blocks the response.
+  const remaining = await Membership.countDocuments({ organization: organization._id });
+  if (remaining === 1) {
+    const ownerMembership = await Membership.findOne({
+      organization: organization._id,
+      role: "owner",
+    });
+    if (ownerMembership) {
+      await cleanupRedundantFallbackWorkspace(ownerMembership.user).catch(() => {
+        // Best-effort — see docstring.
+      });
+    }
+  }
+
   sendSuccess(res, 200, "Member removed", { id: target._id.toString() });
 });

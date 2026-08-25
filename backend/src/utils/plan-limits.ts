@@ -12,8 +12,14 @@ import { AppError } from "@/utils/appError";
 import { getPlan, type PlanTier } from "@/config/plans";
 import { PlatformConnection } from "@/models/platform-connection.model";
 import { Billing } from "@/models/billing.model";
+import { EMAIL_SYNC_PLATFORMS } from "@/services/email-sync/registry";
 
-/** Throws a 403 if adding one more CONNECTED platform would exceed the plan. */
+/** Throws a 403 if adding one more CONNECTED platform would exceed the plan.
+ *  Gmail/Outlook email-sync connections are excluded — they're a fallback
+ *  data source behind direct billing sync, not a "platform" in the sense
+ *  this limit is meant to gate, and a user may reasonably want several of
+ *  them (see PlatformConnection's multi-account support) without that
+ *  crowding out their real platform integrations. */
 export async function assertPlatformConnectionLimit(
   organizationId: Types.ObjectId,
   planTier: PlanTier
@@ -25,6 +31,7 @@ export async function assertPlatformConnectionLimit(
   const count = await PlatformConnection.countDocuments({
     organization: organizationId,
     status: "connected",
+    platform: { $nin: [...EMAIL_SYNC_PLATFORMS] },
   });
   if (count >= limit) {
     throw new AppError(

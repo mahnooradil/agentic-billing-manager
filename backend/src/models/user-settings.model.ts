@@ -66,6 +66,13 @@ export interface IUserSettings {
     recommendationAlerts: boolean;
     usageAlerts: boolean;
     highSpendThreshold: number;
+    /** A Slack "Incoming Webhook" URL (created in Slack, not via any OAuth
+     *  flow here) — when set, billing alerts also post to that Slack
+     *  channel, alongside the existing in-app/email ones. Restricted to
+     *  `https://hooks.slack.com/...` at the validator level (see
+     *  user-settings.validator.ts) so this can never be pointed at an
+     *  arbitrary/internal URL — the server calls this address directly. */
+    slackWebhookUrl?: string;
   };
   appearance: {
     theme: Theme;
@@ -149,6 +156,11 @@ const notificationsSchema = new Schema<IUserSettings["notifications"]>(
       min: 1,
       max: 100,
       default: d.notifications.highSpendThreshold,
+    },
+    slackWebhookUrl: {
+      type: String,
+      trim: true,
+      maxlength: 500,
     },
   },
   { _id: false }

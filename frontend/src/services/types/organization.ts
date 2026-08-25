@@ -69,3 +69,22 @@ export interface InvitationPreview {
   inviterName: string;
   hasExistingAccount: boolean;
 }
+
+/** One organization the caller belongs to, as returned by
+ *  `GET /auth/organizations` (see auth.service.ts) — a user can belong to
+ *  more than one now, so this list is how the workspace switcher populates. */
+export interface MyOrganization extends Organization {
+  isActive: boolean;
+}
+
+export interface MyOrganizationsData {
+  organizations: MyOrganization[];
+}
+
+export interface SwitchOrganizationPayload {
+  organizationId: string;
+}
+
+export interface SwitchOrganizationData {
+  organization: Organization;
+}

@@ -14,12 +14,13 @@ export interface EmailCandidatePage {
   nextPageToken?: string;
 }
 
-/** One email message reduced to exactly what parser.ts needs, regardless of
- *  the provider's own wire shape (Gmail's base64 MIME tree vs Outlook's
- *  plain JSON body). */
+/** One email message reduced to exactly what the AI extractor + parser.ts's
+ *  `parseSender` need, regardless of the provider's own wire shape (Gmail's
+ *  base64 MIME tree vs Outlook's plain JSON body). */
 export interface NormalizedEmailMessage {
   id: string;
   receivedAt: Date;
+  subject: string | null;
   plainText: string;
   /** "Display Name <email@domain>" format — matches parser.parseSender's input. */
   fromHeader: string | null;
@@ -36,7 +37,11 @@ export interface EmailSyncProvider {
    *  a server-side date filter (Outlook's `$search` can't combine with a
    *  `$filter` on receivedDateTime; Gmail's `q=` already narrows by date). */
   sortedNewestFirstUnfiltered: boolean;
-  buildSearchQuery(sinceDate: Date | null): string;
+  /** `trackedSenders` (from PlatformConnection) scopes the search to those
+   *  senders only — a privacy + accuracy win over scanning the whole inbox
+   *  with generic keywords. Empty means "no senders configured yet," so the
+   *  provider falls back to its original keyword-based query. */
+  buildSearchQuery(sinceDate: Date | null, trackedSenders: string[]): string;
   listCandidateMessageIds(
     externalUserId: string,
     pipedreamAccountId: string,
