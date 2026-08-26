@@ -65,6 +65,14 @@ export interface IBilling {
   dueDate?: Date;
   status: BillingStatus;
   notes?: string;
+  /** Set whenever a human edits this record directly (Billing page's edit
+   *  form, or the Billing Advisor Agent's confirm button) — see
+   *  billing.controller.ts's `updateBillingRecord`. A later email-sync pass
+   *  that re-reads an OLDER email (one dated before this timestamp) must not
+   *  overwrite the human's correction with stale information; see
+   *  services/email-sync/sync-engine.ts's commit step, which checks this
+   *  against each candidate email's own date before writing. */
+  manuallyEditedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -164,6 +172,9 @@ const billingSchema = new Schema<IBilling, BillingModel>(
       trim: true,
       maxlength: [1000, "Notes must be at most 1000 characters"],
       default: undefined,
+    },
+    manuallyEditedAt: {
+      type: Date,
     },
   },
   {

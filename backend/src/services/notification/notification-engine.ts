@@ -42,8 +42,10 @@ import type { Types } from "mongoose";
 /** Bound on how many recommendations a single run turns into notifications. */
 const REC_SCAN_LIMIT = 50;
 
-/** Resolves the caller's notification preferences, defaulted like the Settings API. */
-async function getNotificationPrefs(
+/** Resolves the caller's notification preferences, defaulted like the Settings API.
+ *  Exported so other services (e.g. email-sync) can gate their own one-off
+ *  alerts on the same preferences instead of re-reading UserSettings themselves. */
+export async function getNotificationPrefs(
   userId: string
 ): Promise<IUserSettings["notifications"]> {
   const doc = await UserSettings.findOne({ user: userId });
@@ -216,6 +218,54 @@ export async function runBusinessNotifications(
   }
 }
 
+/** How recently a recommendation must have changed to count as part of THIS
+ *  refresh's notification batch — generous enough to cover the reconcile
+ *  pass's own runtime, tight enough to never pull in old, already-notified
+ *  activity from an earlier refresh. */
+const RECOMMENDATION_BATCH_WINDOW_MS = 2 * 60_000;
+
+/** Deterministic signature for a batch notification — the same set of
+ *  recommendation ids always dedupes to the same row (via `upsertNotification`)
+ *  instead of creating a duplicate if this ever runs twice for one event. */
+function batchSignature(prefix: string, ids: Types.ObjectId[]): string {
+  return `${prefix}:${ids.map((id) => id.toString()).sort().join(",")}`;
+}
+
+/** Notifies about a set of recommendations that changed together in one
+ *  refresh — a single item gets its own specific row; several at once (e.g.
+ *  one invoice payment resolving multiple flags together) are collapsed into
+ *  ONE summary notification instead of flooding the panel with a row each. */
+async function notifyRecommendationBatch(
+  organizationId: string,
+  items: Array<{ _id: Types.ObjectId; title: string; signature: string; severity: string }>,
+  copy: { signaturePrefix: string; singleTitle: string; batchTitle: (count: number) => string }
+): Promise<void> {
+  if (items.length === 0) return;
+
+  if (items.length === 1) {
+    const rec = items[0];
+    await upsertNotification(organizationId, {
+      signature: `${copy.signaturePrefix}:${rec.signature}`,
+      category: "recommendation",
+      severity: severityFromRecommendation(rec.severity),
+      title: copy.singleTitle,
+      message: rec.title,
+      recommendationId: rec._id,
+    });
+    return;
+  }
+
+  const preview = items.slice(0, 3).map((r) => r.title).join("; ");
+  const extra = items.length > 3 ? `; +${items.length - 3} more` : "";
+  await upsertNotification(organizationId, {
+    signature: batchSignature(`${copy.signaturePrefix}-batch`, items.map((r) => r._id)),
+    category: "recommendation",
+    severity: severityFromRecommendation(items[0].severity),
+    title: copy.batchTitle(items.length),
+    message: `${preview}${extra}`,
+  });
+}
+
 /** Rules driven by a recommendations refresh (reads the Recommendation
  *  collection). `organizationId` comes straight from the triggering event —
  *  no extra lookup needed there; `userId` is still used for preferences. */
@@ -226,37 +276,34 @@ export async function runRecommendationNotifications(
   const prefs = await getNotificationPrefs(userId);
   if (!prefs.enabled || !prefs.recommendationAlerts) return;
 
-  const active = await Recommendation.find({
+  const since = new Date(Date.now() - RECOMMENDATION_BATCH_WINDOW_MS);
+
+  const newActive = await Recommendation.find({
     organization: organizationId,
     status: "active",
-  }).limit(REC_SCAN_LIMIT);
-  for (const rec of active) {
-    await upsertNotification(organizationId, {
-      signature: `rec:new:${rec.signature}`,
-      category: "recommendation",
-      severity: severityFromRecommendation(rec.severity),
-      title: "New recommendation available",
-      message: rec.title,
-      recommendationId: rec._id,
-    });
-  }
+    updatedAt: { $gte: since },
+  })
+    .sort({ updatedAt: -1 })
+    .limit(REC_SCAN_LIMIT);
+  await notifyRecommendationBatch(organizationId, newActive, {
+    signaturePrefix: "rec:new",
+    singleTitle: "New recommendation available",
+    batchTitle: (n) => `${n} new recommendations`,
+  });
 
   const resolved = await Recommendation.find({
     organization: organizationId,
     status: "completed",
+    resolvedBy: "ai",
+    updatedAt: { $gte: since },
   })
     .sort({ updatedAt: -1 })
     .limit(REC_SCAN_LIMIT);
-  for (const rec of resolved) {
-    await upsertNotification(organizationId, {
-      signature: `rec:resolved:${rec.signature}`,
-      category: "recommendation",
-      severity: "info",
-      title: "Recommendation resolved",
-      message: rec.title,
-      recommendationId: rec._id,
-    });
-  }
+  await notifyRecommendationBatch(organizationId, resolved, {
+    signaturePrefix: "rec:resolved",
+    singleTitle: "Recommendation resolved",
+    batchTitle: (n) => `${n} recommendations resolved`,
+  });
 
   await upsertNotification(organizationId, {
     signature: "system:ai-analysis",

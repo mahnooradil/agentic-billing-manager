@@ -11,9 +11,25 @@
 import { asyncHandler } from "@/utils/asyncHandler";
 import { AppError } from "@/utils/appError";
 import { sendSuccess } from "@/utils/apiResponse";
-import { computeAnalyticsOverview } from "@/services/analytics/analytics.engine";
+import {
+  computeAnalyticsOverview,
+  type CustomRangeBounds,
+} from "@/services/analytics/analytics.engine";
 import { computeAdvancedAnalytics } from "@/services/analytics/advanced-analytics";
 import { analyticsQuerySchema } from "@/validators/analytics.validator";
+
+/** Parses `from`/`to` into real Dates, silently dropping either side that
+ *  isn't a valid date rather than erroring — a custom range with one or both
+ *  edges missing/invalid degrades to an open-ended range, never a 400, since
+ *  this is a read-only dashboard query. */
+function parseCustomBounds(from?: string, to?: string): CustomRangeBounds {
+  const fromDate = from ? new Date(from) : undefined;
+  const toDate = to ? new Date(to) : undefined;
+  return {
+    from: fromDate && !isNaN(fromDate.getTime()) ? fromDate : undefined,
+    to: toDate && !isNaN(toDate.getTime()) ? toDate : undefined,
+  };
+}
 
 /** GET /api/analytics/overview — composite analytics for the dashboard. */
 export const getAnalyticsOverview = asyncHandler(async (req, res) => {
@@ -23,8 +39,9 @@ export const getAnalyticsOverview = asyncHandler(async (req, res) => {
   }
 
   // Read-only query param; unknown values are clamped to "all" by the schema.
-  const { range } = analyticsQuerySchema.parse(req.query);
-  const analytics = await computeAnalyticsOverview(organization._id.toString(), range);
+  const { range, from, to } = analyticsQuerySchema.parse(req.query);
+  const custom = range === "custom" ? parseCustomBounds(from, to) : undefined;
+  const analytics = await computeAnalyticsOverview(organization._id.toString(), range, custom);
 
   sendSuccess(res, 200, "Analytics overview retrieved", { analytics });
 });
@@ -36,8 +53,9 @@ export const getAdvancedAnalytics = asyncHandler(async (req, res) => {
     throw new AppError("Authentication required", 401);
   }
 
-  const { range } = analyticsQuerySchema.parse(req.query);
-  const analytics = await computeAdvancedAnalytics(organization._id.toString(), range);
+  const { range, from, to } = analyticsQuerySchema.parse(req.query);
+  const custom = range === "custom" ? parseCustomBounds(from, to) : undefined;
+  const analytics = await computeAdvancedAnalytics(organization._id.toString(), range, custom);
 
   sendSuccess(res, 200, "Advanced analytics retrieved", { analytics });
 });

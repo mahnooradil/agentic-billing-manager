@@ -3,7 +3,7 @@
 import * as React from "react";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Boxes, Loader2, Mail, Pencil, Plug, Plus, Search, SearchX, Trash2 } from "lucide-react";
+import { Boxes, Loader2, Mail, Plug, Search, SearchX } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,15 +25,11 @@ import {
   listPlatformConnections,
   connectViaPipedream,
 } from "@/services/connections/platform-connections.service";
-import { listPlatforms } from "@/services/platforms/platform.service";
 import type {
   CatalogApp,
   PlatformConnection,
 } from "@/services/types/platform-connections";
-import type { Platform } from "@/services/types/platform";
 import { DisconnectDialog } from "@/components/connections/disconnect-dialog";
-import { PlatformFormDialog } from "./platform-form-dialog";
-import { DeletePlatformDialog } from "./delete-platform-dialog";
 
 type ViewStatus = "loading" | "error" | "ready";
 
@@ -44,7 +40,6 @@ interface PlatformsCachePayload {
   configured: boolean;
   apps: CatalogApp[];
   connections: PlatformConnection[];
-  platforms: Platform[];
 }
 
 /** Curated, hand-picked slugs for the "Popular platforms" shortcut — verified
@@ -160,8 +155,7 @@ function CatalogAppCard({
 
 /**
  * Platforms screen: the real connection experience for the live Pipedream
- * catalog, plus the manually-created `Platform` entries billing records
- * attach to. Section order: Connected → Your platforms → Popular → All.
+ * catalog. Section order: Connected → Popular → All.
  *
  * Wrapped in Suspense because the inner component reads `useSearchParams()`
  * (deep-link support for the Billing Agent's "Connect now" button).
@@ -194,7 +188,6 @@ function PlatformsViewInner() {
   const [connections, setConnections] = React.useState<PlatformConnection[]>(
     cached?.connections ?? []
   );
-  const [platforms, setPlatforms] = React.useState<Platform[]>(cached?.platforms ?? []);
   const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
 
@@ -205,15 +198,6 @@ function PlatformsViewInner() {
     open: boolean;
     connection: PlatformConnection | null;
   }>({ open: false, connection: null });
-
-  const [platformDialog, setPlatformDialog] = React.useState<{
-    open: boolean;
-    platform: Platform | null;
-  }>({ open: false, platform: null });
-  const [deletePlatformState, setDeletePlatformState] = React.useState<{
-    open: boolean;
-    platform: Platform | null;
-  }>({ open: false, platform: null });
 
   const reload = () => setReloadKey((key) => key + 1);
 
@@ -266,9 +250,8 @@ function PlatformsViewInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Debounced catalog + connections + platforms fetch (only debounced while
-  // the user is actively typing a search — the initial load and reloads run
-  // immediately).
+  // Debounced catalog + connections fetch (only debounced while the user is
+  // actively typing a search — the initial load and reloads run immediately).
   React.useEffect(() => {
     let ignore = false;
     const timer = setTimeout(
@@ -279,22 +262,19 @@ function PlatformsViewInner() {
         // refreshes it, so re-opening the page never flashes back to loading.
         if (!readPageCache<PlatformsCachePayload>(cacheKey)) setStatus("loading");
         try {
-          const [catalogRes, connectionsRes, platformsRes] = await Promise.all([
+          const [catalogRes, connectionsRes] = await Promise.all([
             getPipedreamCatalog(query, CATALOG_LIMIT),
             listPlatformConnections(),
-            listPlatforms(),
           ]);
           if (ignore) return;
           writePageCache(cacheKey, {
             configured: catalogRes.data.configured,
             apps: catalogRes.data.apps,
             connections: connectionsRes.data.connections,
-            platforms: platformsRes.data.platforms,
           });
           setConfigured(catalogRes.data.configured);
           setApps(catalogRes.data.apps);
           setConnections(connectionsRes.data.connections);
-          setPlatforms(platformsRes.data.platforms);
           setStatus("ready");
         } catch (error) {
           if (ignore) return;
@@ -391,27 +371,6 @@ function PlatformsViewInner() {
   };
 
   const handleDisconnected = (message: string) => {
-    setAlert({ type: "success", message });
-    reload();
-  };
-
-  const openCreatePlatform = () => {
-    setAlert(null);
-    setPlatformDialog({ open: true, platform: null });
-  };
-  const openEditPlatform = (platform: Platform) => {
-    setAlert(null);
-    setPlatformDialog({ open: true, platform });
-  };
-  const handlePlatformSaved = (message: string) => {
-    setAlert({ type: "success", message });
-    reload();
-  };
-  const openDeletePlatform = (platform: Platform) => {
-    setAlert(null);
-    setDeletePlatformState({ open: true, platform });
-  };
-  const handlePlatformDeleted = (message: string) => {
     setAlert({ type: "success", message });
     reload();
   };
@@ -531,74 +490,6 @@ function PlatformsViewInner() {
             </div>
           ) : null}
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="font-heading text-sm font-semibold text-muted-foreground">
-                Your platforms
-              </h3>
-              <Button size="sm" variant="outline" onClick={openCreatePlatform}>
-                <Plus />
-                Add platform
-              </Button>
-            </div>
-            {platforms.length === 0 ? (
-              <EmptyState
-                icon={Boxes}
-                title="No platforms yet"
-                description="Add a platform you bill customers through, so billing records have something to attach to."
-              />
-            ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {platforms.map((platform) => (
-                  <Card key={platform.id} className="flex flex-col gap-3 p-4">
-                    <div className="flex items-center gap-3">
-                      <PlatformLogo
-                        src={platform.logo ?? null}
-                        name={platform.name}
-                        className="size-10"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-foreground">
-                          {platform.name}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {platform.website ?? platform.slug}
-                        </p>
-                      </div>
-                      <span
-                        className={cn(
-                          "size-1.5 shrink-0 rounded-full",
-                          platform.status === "Active"
-                            ? "bg-emerald-500"
-                            : "bg-muted-foreground/40"
-                        )}
-                      />
-                    </div>
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Edit platform"
-                        onClick={() => openEditPlatform(platform)}
-                      >
-                        <Pencil />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Delete platform"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => openDeletePlatform(platform)}
-                      >
-                        <Trash2 />
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-
           {!query && popularApps.length > 0 ? (
             <div className="space-y-3">
               <h3 className="font-heading text-sm font-semibold text-muted-foreground">
@@ -657,18 +548,6 @@ function PlatformsViewInner() {
         onOpenChange={(open) => setDisconnect((state) => ({ ...state, open }))}
         connection={disconnect.connection}
         onDisconnected={handleDisconnected}
-      />
-      <PlatformFormDialog
-        open={platformDialog.open}
-        onOpenChange={(open) => setPlatformDialog((state) => ({ ...state, open }))}
-        platform={platformDialog.platform}
-        onSaved={handlePlatformSaved}
-      />
-      <DeletePlatformDialog
-        open={deletePlatformState.open}
-        onOpenChange={(open) => setDeletePlatformState((state) => ({ ...state, open }))}
-        platform={deletePlatformState.platform}
-        onDeleted={handlePlatformDeleted}
       />
     </PageWrapper>
   );

@@ -95,10 +95,23 @@ async function computeTopCustomers(
   };
 }
 
-/** Builds a compact analytics summary from all-time aggregates, plus a
- *  top-customers breakdown (see file docstring on why customer names appear
- *  here specifically). */
-async function runAnalyticsSummary(userId: string): Promise<AnalyticsSummary> {
+/** Parses a tool-call `from`/`to` string into a Date, undefined on anything
+ *  invalid or absent — never guessed, matching the rest of this app's date
+ *  handling (see sync-engine.ts's `parseAiDate`). */
+function parseToolDate(value: unknown): Date | undefined {
+  if (typeof value !== "string" || !value) return undefined;
+  const date = new Date(value);
+  return isNaN(date.getTime()) ? undefined : date;
+}
+
+/** Builds a compact analytics summary, plus a top-customers breakdown (see
+ *  file docstring on why customer names appear here specifically). Defaults
+ *  to all-time; pass `input.from`/`input.to` (YYYY-MM-DD) for a specific
+ *  window instead — either edge may be omitted for an open-ended range. */
+async function runAnalyticsSummary(
+  userId: string,
+  input?: Record<string, unknown>
+): Promise<AnalyticsSummary> {
   const organizationId = await getOrganizationIdForUser(userId);
   if (!organizationId) {
     return {
@@ -114,8 +127,14 @@ async function runAnalyticsSummary(userId: string): Promise<AnalyticsSummary> {
     };
   }
 
+  const from = parseToolDate(input?.from);
+  const to = parseToolDate(input?.to);
   const organizationIdStr = organizationId.toString();
-  const overview = await computeAnalyticsOverview(organizationIdStr, "all");
+  const overview = await computeAnalyticsOverview(
+    organizationIdStr,
+    from || to ? "custom" : "all",
+    from || to ? { from, to } : undefined
+  );
   const topCustomers = await computeTopCustomers(organizationIdStr, overview.primaryCurrency);
   return {
     invoiceCount: overview.invoiceCount,
@@ -152,6 +171,6 @@ async function runAnalyticsSummary(userId: string): Promise<AnalyticsSummary> {
 export const analyticsSummaryTool: AssistantTool<AnalyticsSummary> = {
   name: "get_analytics_summary",
   description:
-    "All-time billing analytics: per-currency totals (total/paid/outstanding), invoice status counts, spend by platform, recent monthly trend, rule-based insights, and top customers by invoice count and by amount — use this for 'which customer has the most invoices/spend' style questions.",
+    "Billing analytics for a time window: per-currency totals (total/paid/outstanding), invoice status counts, spend by platform, recent monthly trend, rule-based insights, and top customers by invoice count and by amount — use this for 'which customer has the most invoices/spend' style questions. Defaults to all-time; pass from/to for a specific window (e.g. 'last month', 'this quarter').",
   run: runAnalyticsSummary,
 };

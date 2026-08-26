@@ -4,12 +4,16 @@ import * as React from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   ArrowUp,
+  Check,
+  CircleAlert,
   Lightbulb,
+  Loader2,
   MessageCircle,
   Mic,
   Plug,
   Sparkles,
   Square,
+  Trash2,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -26,7 +30,10 @@ import { ApiError } from "@/services/api/client";
 import { sendAgentMessage } from "@/services/agent/agent-chat.service";
 import { agentChatStore } from "@/services/agent/agent-chat-store";
 import { getMyCredits } from "@/services/credits/credits.service";
-import type { ConnectPlatformAction } from "@/services/types/agent";
+import { updateBillingRecord, deleteBillingRecord } from "@/services/billing/billing.service";
+import type { BillingStatus } from "@/services/types/billing";
+import type { ConnectPlatformAction, AgentAction } from "@/services/types/agent";
+import type { Recommendation } from "@/services/types/recommendations";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useSpeechSynthesis } from "@/hooks/use-speech-synthesis";
 
@@ -112,6 +119,21 @@ function AgentViewInner() {
   const [error, setError] = React.useState<string | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // "Discuss with Agent" on a recommendation row — switches to the Chat tab
+  // and drops a ready-to-send prompt into the input so the Agent (now armed
+  // with search/propose-action tools) can actually help resolve it, instead
+  // of the recommendation staying a static line item.
+  const handleDiscussRecommendation = (rec: Recommendation) => {
+    const prefill = `Help me with this recommendation: "${rec.title}" — ${rec.detail}${
+      rec.suggestedAction ? ` Suggested action: ${rec.suggestedAction}.` : ""
+    }`;
+    setInput(prefill);
+    handleTabChange("chat");
+    // The textarea only exists once the Chat tab's DOM mounts, which happens
+    // on the render after handleTabChange's URL update — defer the focus.
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
 
   // Credit balance — refetched after every turn (consumption is only known
   // server-side, after the turn completes) via a reload-key bump rather than
@@ -233,6 +255,32 @@ function AgentViewInner() {
     router.push(`/dashboard/platforms?${params.toString()}`);
   };
 
+  // Confirming an update/delete action calls the SAME endpoints the Billing
+  // page's own edit/delete UI uses — the agent only ever prepares these, see
+  // managed-agent.service.ts's propose-only tools.
+  const [confirmingIndex, setConfirmingIndex] = React.useState<number | null>(null);
+  const handleConfirmAction = async (
+    action: Extract<AgentAction, { type: "update_billing_status" | "delete_billing_record" }>,
+    index: number
+  ) => {
+    setConfirmingIndex(index);
+    try {
+      if (action.type === "update_billing_status") {
+        await updateBillingRecord(action.billingId, {
+          status: action.newStatus as BillingStatus,
+        });
+      } else {
+        await deleteBillingRecord(action.billingId);
+      }
+      agentChatStore.setMessageActionResult(index, "done");
+    } catch (err) {
+      agentChatStore.setMessageActionResult(index, "error");
+      setError(err instanceof ApiError ? err.message : "Failed to apply this change.");
+    } finally {
+      setConfirmingIndex(null);
+    }
+  };
+
   const isEmpty = messages.length === 0;
   const isChatTab = activeTab === "chat";
 
@@ -352,15 +400,83 @@ function AgentViewInner() {
                       </span>
                       <div className="min-w-0 flex-1 space-y-3">
                         <MarkdownMessage content={message.content} className="text-foreground" />
-                        {message.action ? (
+                        {message.action?.type === "connect_platform" ? (
                           <Button
                             type="button"
                             size="sm"
-                            onClick={() => handleConnectAction(message.action!)}
+                            onClick={() => handleConnectAction(message.action as ConnectPlatformAction)}
                           >
                             <Plug />
                             Connect {message.action.displayName} now
                           </Button>
+                        ) : null}
+                        {message.action?.type === "update_billing_status" ? (
+                          message.actionResult === "done" ? (
+                            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                              <Check className="size-4 text-emerald-600 dark:text-emerald-400" />
+                              Marked {message.action.invoiceNumber} as {message.action.newStatus}
+                            </span>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={confirmingIndex === index}
+                              onClick={() =>
+                                void handleConfirmAction(
+                                  message.action as Extract<
+                                    AgentAction,
+                                    { type: "update_billing_status" }
+                                  >,
+                                  index
+                                )
+                              }
+                            >
+                              {confirmingIndex === index ? (
+                                <Loader2 className="animate-spin" />
+                              ) : (
+                                <Check />
+                              )}
+                              Confirm: mark {message.action.invoiceNumber} as {message.action.newStatus}
+                            </Button>
+                          )
+                        ) : null}
+                        {message.action?.type === "delete_billing_record" ? (
+                          message.actionResult === "done" ? (
+                            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                              <Check className="size-4 text-emerald-600 dark:text-emerald-400" />
+                              Deleted invoice {message.action.invoiceNumber}
+                            </span>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="destructive"
+                              disabled={confirmingIndex === index}
+                              onClick={() =>
+                                void handleConfirmAction(
+                                  message.action as Extract<
+                                    AgentAction,
+                                    { type: "delete_billing_record" }
+                                  >,
+                                  index
+                                )
+                              }
+                            >
+                              {confirmingIndex === index ? (
+                                <Loader2 className="animate-spin" />
+                              ) : (
+                                <Trash2 />
+                              )}
+                              Confirm: delete invoice {message.action.invoiceNumber}
+                            </Button>
+                          )
+                        ) : null}
+                        {message.actionResult === "error" ? (
+                          <span className="flex items-center gap-1.5 text-sm text-destructive">
+                            <CircleAlert className="size-4" />
+                            That didn&apos;t go through — try again.
+                          </span>
                         ) : null}
                       </div>
                     </div>
@@ -437,7 +553,7 @@ function AgentViewInner() {
       ) : (
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
-            <AiRecommendations />
+            <AiRecommendations onDiscuss={handleDiscussRecommendation} />
           </div>
         </div>
       )}

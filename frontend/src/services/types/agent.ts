@@ -18,10 +18,44 @@ export interface ConnectPlatformAction {
   source: "native" | "pipedream";
 }
 
+/** Surfaced when the agent has resolved a "mark as Paid/Pending/Overdue"
+ *  request to one exact record. The agent never applies this itself — the
+ *  chat UI renders a confirm button that calls the same `PUT /api/billing/:id`
+ *  the Billing page's own edit form uses. */
+export interface UpdateBillingStatusAction {
+  type: "update_billing_status";
+  billingId: string;
+  customerName: string;
+  invoiceNumber: string;
+  currentStatus: string;
+  newStatus: string;
+}
+
+/** Same confirm-first pattern, for a delete request — the confirm button
+ *  calls the existing `DELETE /api/billing/:id`. */
+export interface DeleteBillingRecordAction {
+  type: "delete_billing_record";
+  billingId: string;
+  customerName: string;
+  invoiceNumber: string;
+  amount: number;
+  currency: string;
+}
+
+export type AgentAction =
+  | ConnectPlatformAction
+  | UpdateBillingStatusAction
+  | DeleteBillingRecordAction;
+
 export interface AgentChatMessage {
   role: AgentChatRole;
   content: string;
-  action?: ConnectPlatformAction;
+  action?: AgentAction;
+  /** Set client-side once the user confirms an update/delete action, so the
+   *  button becomes a static "Done"/"Failed" state instead of being
+   *  clickable again (a record can't be deleted twice). Never sent by the
+   *  backend. */
+  actionResult?: "done" | "error";
 }
 
 /** Response `data` shape for a Billing Agent chat turn. */

@@ -14,6 +14,7 @@ import { Platform } from "@/models/platform.model";
 import {
   computeAnalyticsOverview,
   buildRangeMatch,
+  type CustomRangeBounds,
 } from "@/services/analytics/analytics.engine";
 import {
   toAdvancedAnalytics,
@@ -31,15 +32,16 @@ const DUPLICATE_LIMIT = 20;
 /** Computes the full advanced billing intelligence for a range, scoped to ONE organization. */
 export async function computeAdvancedAnalytics(
   organizationId: string,
-  range: AnalyticsRange
+  range: AnalyticsRange,
+  custom?: CustomRangeBounds
 ): Promise<AdvancedAnalytics> {
   const now = new Date();
   const rangeMatch = {
     organization: new Types.ObjectId(organizationId),
-    ...buildRangeMatch(range, now),
+    ...buildRangeMatch(range, now, custom),
   };
 
-  const overview = await computeAnalyticsOverview(organizationId, range);
+  const overview = await computeAnalyticsOverview(organizationId, range, custom);
   const primaryCurrency = overview.primaryCurrency;
 
   // Recurring: same (platform, amount, currency) seen across ≥2 distinct months.

@@ -344,6 +344,9 @@ export const updateBillingRecord = asyncHandler(async (req, res) => {
   }
 
   Object.assign(billing, body);
+  // Marks this as a human correction so a later email-sync pass never
+  // silently reverts it based on an older email — see sync-engine.ts.
+  billing.manuallyEditedAt = new Date();
   await billing.save();
   await billing.populate("platform");
 

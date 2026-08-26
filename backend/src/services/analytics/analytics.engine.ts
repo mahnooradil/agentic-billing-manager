@@ -26,15 +26,30 @@ const TOP_PLATFORMS_LIMIT = 8;
 /** Max months shown in the trend (most recent). */
 const TREND_MONTHS_LIMIT = 12;
 
+/** An explicit `from`/`to` window, used only when `range === "custom"`. */
+export interface CustomRangeBounds {
+  from?: Date;
+  to?: Date;
+}
+
 /**
  * Builds the `billingDate` filter for a range. `all` returns an empty match so
- * every record is included; bounded ranges look back N whole months from `now`.
- * Exported so advanced analytics (F6) reuse the exact same range semantics.
+ * every record is included; bounded ranges look back N whole months from `now`;
+ * `custom` uses the caller-supplied `from`/`to` bounds directly (either edge
+ * may be omitted for an open-ended range). Exported so advanced analytics
+ * (F6) reuse the exact same range semantics.
  */
 export function buildRangeMatch(
   range: AnalyticsRange,
-  now: Date = new Date()
+  now: Date = new Date(),
+  custom?: CustomRangeBounds
 ): Record<string, unknown> {
+  if (range === "custom") {
+    const billingDate: Record<string, Date> = {};
+    if (custom?.from) billingDate.$gte = custom.from;
+    if (custom?.to) billingDate.$lte = custom.to;
+    return Object.keys(billingDate).length > 0 ? { billingDate } : {};
+  }
   if (range === "all") return {};
   const months = ANALYTICS_RANGE_MONTHS[range];
   const cutoff = new Date(now);
@@ -50,12 +65,13 @@ export function buildRangeMatch(
  */
 export async function computeAnalyticsOverview(
   organizationId: string,
-  range: AnalyticsRange
+  range: AnalyticsRange,
+  custom?: CustomRangeBounds
 ): Promise<PublicAnalyticsOverview> {
   const now = new Date();
   const rangeMatch = {
     organization: new Types.ObjectId(organizationId),
-    ...buildRangeMatch(range, now),
+    ...buildRangeMatch(range, now, custom),
   };
 
   // Currency- and status-level aggregates do not depend on the primary currency,

@@ -9,22 +9,36 @@ import type {
   AdvancedAnalyticsData,
   AnalyticsOverviewData,
   AnalyticsRange,
+  CustomAnalyticsRange,
 } from "@/services/types/analytics";
 
-/** GET /analytics/overview?range=… */
+/** Builds the `range` (+ `from`/`to` when custom) query string shared by
+ *  both endpoints below. */
+function rangeQuery(range: AnalyticsRange, custom?: CustomAnalyticsRange): string {
+  const params = new URLSearchParams({ range });
+  if (range === "custom") {
+    if (custom?.from) params.set("from", custom.from);
+    if (custom?.to) params.set("to", custom.to);
+  }
+  return params.toString();
+}
+
+/** GET /analytics/overview?range=… (custom adds &from=&to=) */
 export function getAnalyticsOverview(
-  range: AnalyticsRange
+  range: AnalyticsRange,
+  custom?: CustomAnalyticsRange
 ): Promise<ApiSuccess<AnalyticsOverviewData>> {
   return api.get<ApiSuccess<AnalyticsOverviewData>>(
-    `/analytics/overview?range=${encodeURIComponent(range)}`
+    `/analytics/overview?${rangeQuery(range, custom)}`
   );
 }
 
-/** GET /analytics/advanced?range=… (F6 billing intelligence) */
+/** GET /analytics/advanced?range=… (F6 billing intelligence; custom adds &from=&to=) */
 export function getAdvancedAnalytics(
-  range: AnalyticsRange
+  range: AnalyticsRange,
+  custom?: CustomAnalyticsRange
 ): Promise<ApiSuccess<AdvancedAnalyticsData>> {
   return api.get<ApiSuccess<AdvancedAnalyticsData>>(
-    `/analytics/advanced?range=${encodeURIComponent(range)}`
+    `/analytics/advanced?${rangeQuery(range, custom)}`
   );
 }

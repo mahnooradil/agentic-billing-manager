@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Lightbulb, Check, X, RotateCcw, RefreshCw } from "lucide-react";
+import { Lightbulb, Check, X, RotateCcw, RefreshCw, MessageCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -72,13 +72,20 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 /**
- * Autonomous AI Recommendations panel — embedded as a section on the Overview
- * page. Recommendations are generated and kept up to date on the backend
- * (via the Billing Advisor Agent) after business-data changes — there is no
- * manual "Generate" action. The panel simply reflects the stored state and
- * polls for updates, and lets the user manage each recommendation's lifecycle.
+ * Autonomous AI Recommendations panel — the "Recommendations" tab on the
+ * Billing Agent page. Recommendations are generated and kept up to date on
+ * the backend (via the Billing Advisor Agent) after business-data changes —
+ * there is no manual "Generate" action. The panel simply reflects the stored
+ * state and polls for updates, and lets the user manage each recommendation's
+ * lifecycle. `onDiscuss`, when given, adds a per-row action that hands a
+ * recommendation off to the sibling Chat tab so the user can ask the Agent to
+ * actually resolve it (find the invoice, propose a status change, etc.).
  */
-export function AiRecommendations() {
+export function AiRecommendations({
+  onDiscuss,
+}: {
+  onDiscuss?: (recommendation: Recommendation) => void;
+}) {
   const { general } = usePreferences();
   const [filter, setFilter] = React.useState<RecommendationStatusFilter>("active");
   const [status, setStatus] = React.useState<ViewStatus>("loading");
@@ -244,6 +251,17 @@ export function AiRecommendations() {
                     </TableCell>
                     <TableCell className="align-top">
                       <div className="flex justify-end gap-1">
+                        {onDiscuss ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Discuss with Agent"
+                            title="Discuss with Agent"
+                            onClick={() => onDiscuss(rec)}
+                          >
+                            <MessageCircle className="size-4" />
+                          </Button>
+                        ) : null}
                         {rec.status === "active" ? (
                           <>
                             <Button

@@ -35,6 +35,11 @@ import {
 } from "@/services/email-sync/ai-invoice-extractor";
 import { consumeCredits } from "@/services/credits/credit-ledger.service";
 import { tokensToCredits } from "@/config/credits";
+import {
+  upsertNotification,
+  getNotificationPrefs,
+} from "@/services/notification/notification-engine";
+import { sendSlackAlert } from "@/services/notifications/slack";
 
 const MAX_MESSAGES_PER_RUN = 200;
 const PAGE_SIZE = 50;
@@ -48,14 +53,42 @@ interface AccountMetadata {
   emailSync?: EmailSyncState;
 }
 
+/** Alerts the connection's owner once when a sync is skipped purely because
+ *  the workspace is out of credits — otherwise this has no visible symptom
+ *  besides invoices quietly never showing up. Respects the same notification
+ *  preferences (master switch) as every other alert in the app. */
+async function notifyEmailSyncPaused(connection: PlatformConnectionDocument): Promise<void> {
+  const prefs = await getNotificationPrefs(connection.user.toString());
+  if (!prefs.enabled) return;
+
+  const { created } = await upsertNotification(connection.organization.toString(), {
+    signature: "system:email-sync-paused-no-credits",
+    category: "system",
+    severity: "warning",
+    title: "Email sync paused — out of credits",
+    message:
+      "Your workspace has run out of credits, so scanning your inbox for new invoices has paused. Add credits to resume.",
+  });
+
+  if (created && prefs.slackWebhookUrl) {
+    await sendSlackAlert(
+      prefs.slackWebhookUrl,
+      ":warning: *Email sync paused* — your workspace is out of credits, so invoice scanning has stopped until you add more."
+    ).catch(() => {
+      // Best-effort — the in-app notification above is the source of truth.
+    });
+  }
+}
+
 /**
  * Syncs one email-sync connection. Silently does nothing if the platform
- * isn't a supported email-sync source, has no Pipedream account id yet, the
- * AI extractor isn't configured, or the connection's WORKSPACE has no
+ * isn't a supported email-sync source, has no Pipedream account id yet, or
+ * the AI extractor isn't configured. If the connection's WORKSPACE has no
  * credits left (same "pre-check blocks the next usage" rule the Billing
  * Advisor Agent uses — see utils/credits.ts; credits belong to the
  * organization, not the connecting member — see Organization model's
- * docstring). Never throws.
+ * docstring), it also skips the run, but first raises a one-time notification
+ * (see `notifyEmailSyncPaused`) so this isn't silent to the user. Never throws.
  */
 export async function syncConnectionEmail(
   connection: PlatformConnectionDocument
@@ -76,7 +109,20 @@ export async function syncConnectionEmail(
   const organization = await Organization.findById(connection.organization).select(
     "creditsBalance name"
   );
-  if (!organization || organization.creditsBalance <= 0) return;
+  if (!organization || organization.creditsBalance <= 0) {
+    // Otherwise this fails completely silently — no error, no toast, nothing
+    // in the UI — since a scheduled sync has no request/response to surface
+    // one through. `upsertNotification` dedupes by (organization, signature),
+    // so this only alerts once per organization until it's resolved (the
+    // signature is reused, so it just refreshes quietly on every subsequent
+    // paused run instead of re-notifying).
+    if (organization) {
+      void notifyEmailSyncPaused(connection).catch(() => {
+        // Best-effort — a failed alert must never break/retry the sync itself.
+      });
+    }
+    return;
+  }
 
   const externalUserId = connection.user.toString();
   const runStartedAt = new Date();
@@ -175,13 +221,24 @@ export async function syncConnectionEmail(
     // invoice (e.g. a payment confirmation) is written last and wins.
     pendingUpdates.sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime());
     for (const update of pendingUpdates) {
-      const existedBefore = await Billing.exists(update.dedupeQuery);
+      const existing = await Billing.findOne(update.dedupeQuery).select("manuallyEditedAt");
+
+      // A human corrected this exact record (e.g. via the Billing page or
+      // the Billing Advisor Agent's confirm button) more recently than this
+      // email was even sent — re-reading that same old email must never
+      // silently revert their correction back to whatever it said before.
+      // A genuinely NEWER email (received after the correction) still wins,
+      // since that reflects real new information.
+      if (existing?.manuallyEditedAt && existing.manuallyEditedAt > update.receivedAt) {
+        continue;
+      }
+
       await Billing.findOneAndUpdate(
         update.dedupeQuery,
         { $set: update.setFields },
         { upsert: true, setDefaultsOnInsert: true, runValidators: true }
       );
-      if (!existedBefore) created++;
+      if (!existing) created++;
     }
 
     // Only advance the watermark when the search window was fully drained —

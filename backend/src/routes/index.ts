@@ -15,6 +15,7 @@ import supportRoutes from "@/routes/support.routes";
 import creditsRoutes from "@/routes/credits.routes";
 import organizationRoutes from "@/routes/organization.routes";
 import invitationRoutes from "@/routes/invitation.routes";
+import slackRoutes from "@/routes/slack.routes";
 
 /**
  * Root API router. All feature routers are mounted here so the
@@ -42,5 +43,9 @@ router.use("/support", supportRoutes);
 router.use("/credits", creditsRoutes);
 router.use("/organization", organizationRoutes);
 router.use("/invitations", invitationRoutes);
+// "/slack/events" (the Events API webhook) is mounted separately in app.ts,
+// ahead of this router — it needs the raw request body, not the parsed JSON
+// every other route here gets. This only carries the authenticated endpoints.
+router.use("/slack", slackRoutes);
 
 export default router;

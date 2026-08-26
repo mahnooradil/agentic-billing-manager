@@ -103,6 +103,17 @@ export const agentChatStore = {
     persist();
     emit();
   },
+  /** Records the outcome of confirming a message's proposed action (update
+   *  status / delete), so its button renders as a done/failed state instead
+   *  of being clickable again. */
+  setMessageActionResult(index: number, result: "done" | "error"): void {
+    if (!state.messages[index]) return;
+    const messages = state.messages.slice();
+    messages[index] = { ...messages[index], actionResult: result };
+    state = { messages };
+    persist();
+    emit();
+  },
   /** Clears the local transcript (paired with a server-side session reset). */
   clear(): void {
     state = { messages: [] };

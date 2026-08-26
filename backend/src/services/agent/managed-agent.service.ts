@@ -16,6 +16,10 @@ import { executeCustomTool } from "@/services/agent/agent-tools";
 import { consumeCredits } from "@/services/credits/credit-ledger.service";
 import { tokensToCredits } from "@/config/credits";
 import type { ConnectionRequirements } from "@/services/integrations/capability-resolver";
+import type {
+  ProposeUpdateStatusResult,
+  ProposeDeleteResult,
+} from "@/services/ai/tools/billing-actions.tool";
 import type { Types } from "mongoose";
 
 /**
@@ -31,9 +35,38 @@ export interface ConnectPlatformAction {
   source: "native" | "pipedream";
 }
 
+/** Surfaced when the agent has resolved a "mark as Paid/Pending/Overdue"
+ *  request to one exact record — the chat UI renders a confirm button that
+ *  calls the existing `PUT /api/billing/:id` itself; the agent never makes
+ *  this change directly (see billing-actions.tool.ts). */
+export interface UpdateBillingStatusAction {
+  type: "update_billing_status";
+  billingId: string;
+  customerName: string;
+  invoiceNumber: string;
+  currentStatus: string;
+  newStatus: string;
+}
+
+/** Same confirm-first pattern as above, for a delete request — the chat UI's
+ *  confirm button calls the existing `DELETE /api/billing/:id`. */
+export interface DeleteBillingRecordAction {
+  type: "delete_billing_record";
+  billingId: string;
+  customerName: string;
+  invoiceNumber: string;
+  amount: number;
+  currency: string;
+}
+
+export type AgentAction =
+  | ConnectPlatformAction
+  | UpdateBillingStatusAction
+  | DeleteBillingRecordAction;
+
 export interface AgentReply {
   reply: string;
-  action?: ConnectPlatformAction;
+  action?: AgentAction;
 }
 
 let client: Anthropic | null = null;
@@ -205,7 +238,7 @@ export async function sendAgentMessage(
   });
 
   let reply = "";
-  let action: ConnectPlatformAction | undefined;
+  let action: AgentAction | undefined;
   let inputTokens = 0;
   let outputTokens = 0;
   for await (const event of stream) {
@@ -242,6 +275,36 @@ export async function sendAgentMessage(
             platform: requirements.platform,
             displayName: (requirements.displayName ?? requirements.platform).trim(),
             source: requirements.source === "pipedream" ? "pipedream" : "native",
+          };
+        } else if (
+          event.name === "propose_update_billing_status" &&
+          result &&
+          typeof result === "object" &&
+          (result as ProposeUpdateStatusResult).found
+        ) {
+          const r = result as Required<ProposeUpdateStatusResult>;
+          action = {
+            type: "update_billing_status",
+            billingId: r.billingId,
+            customerName: r.customerName,
+            invoiceNumber: r.invoiceNumber,
+            currentStatus: r.currentStatus,
+            newStatus: r.proposedStatus,
+          };
+        } else if (
+          event.name === "propose_delete_billing_record" &&
+          result &&
+          typeof result === "object" &&
+          (result as ProposeDeleteResult).found
+        ) {
+          const r = result as Required<ProposeDeleteResult>;
+          action = {
+            type: "delete_billing_record",
+            billingId: r.billingId,
+            customerName: r.customerName,
+            invoiceNumber: r.invoiceNumber,
+            amount: r.amount,
+            currency: r.currency,
           };
         }
       } catch (err) {

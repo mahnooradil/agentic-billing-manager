@@ -10,15 +10,65 @@
 import { asyncHandler } from "@/utils/asyncHandler";
 import { AppError } from "@/utils/appError";
 import { verifyToken } from "@/utils/jwt";
-import { User } from "@/models/user.model";
+import { User, type UserDocument } from "@/models/user.model";
 import { Session } from "@/models/session.model";
-import { Membership } from "@/models/membership.model";
-import { Organization } from "@/models/organization.model";
+import { Membership, type MembershipDocument } from "@/models/membership.model";
+import { Organization, type OrganizationDocument } from "@/models/organization.model";
 import { createPersonalOrganization } from "@/services/organizations/organization-bootstrap.service";
 
 const BEARER_PREFIX = "Bearer ";
 /** Throttle for the `lastSeenAt` touch — avoids a write on every single request. */
 const LAST_SEEN_THROTTLE_MS = 60_000;
+
+/**
+ * Resolves the ONE organization a given user's request should be scoped to
+ * right now, self-healing `activeOrganizationId` when it's missing or stale.
+ * Shared by `authenticate` (below) and any other entry point that starts
+ * from an already-verified `User` document instead of a JWT — e.g. the
+ * Slack chat handler, which identifies the user via a linked Slack id
+ * rather than a Bearer token, but from there needs the exact same
+ * "which workspace pays for this" resolution as the web UI.
+ */
+export async function resolveActiveOrganization(
+  user: UserDocument,
+  /** Pass the caller's own already-fetched membership (scoped the same way
+   *  the lookup below would do it) to skip a redundant query — `authenticate`
+   *  fetches this in parallel with its session lookup. Omit to have this
+   *  function fetch it fresh (e.g. from the Slack chat handler). */
+  knownMembership?: MembershipDocument | null
+): Promise<{ membership: MembershipDocument; organization: OrganizationDocument }> {
+  let resolvedMembership =
+    knownMembership !== undefined
+      ? knownMembership
+      : user.activeOrganizationId
+        ? await Membership.findOne({ user: user._id, organization: user.activeOrganizationId })
+        : await Membership.findOne({ user: user._id }).sort({ createdAt: 1 });
+  let organization = resolvedMembership
+    ? await Organization.findById(resolvedMembership.organization)
+    : null;
+
+  if ((!resolvedMembership || !organization) && user.activeOrganizationId) {
+    resolvedMembership = await Membership.findOne({ user: user._id }).sort({ createdAt: 1 });
+    organization = resolvedMembership
+      ? await Organization.findById(resolvedMembership.organization)
+      : null;
+  }
+
+  if (!resolvedMembership || !organization) {
+    const bootstrapped = await createPersonalOrganization(user._id, user.fullName);
+    resolvedMembership = bootstrapped.membership;
+    organization = bootstrapped.organization;
+  }
+
+  // Persist a healed/first-resolved choice so the next request goes straight
+  // to the org-scoped query above instead of repeating this fallback.
+  if (!user.activeOrganizationId?.equals(resolvedMembership.organization)) {
+    user.activeOrganizationId = resolvedMembership.organization;
+    await user.save();
+  }
+
+  return { membership: resolvedMembership, organization };
+}
 
 export const authenticate = asyncHandler(async (req, _res, next) => {
   const header = req.headers.authorization;
@@ -91,36 +141,15 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
   // to for this request — even though a user may belong to several. A user
   // can legitimately end up with no resolvable membership here (a stale
   // `activeOrganizationId` after being removed from that org, an orphaned
-  // pre-backfill account, mid-signup race) — fall back to ANY membership
-  // they actually still have before ever bootstrapping a brand-new personal
-  // org, so switching back is never silently lost.
-  let resolvedMembership = membership;
-  let organization = resolvedMembership
-    ? await Organization.findById(resolvedMembership.organization)
-    : null;
-
-  if ((!resolvedMembership || !organization) && user.activeOrganizationId) {
-    resolvedMembership = await Membership.findOne({ user: user._id }).sort({ createdAt: 1 });
-    organization = resolvedMembership
-      ? await Organization.findById(resolvedMembership.organization)
-      : null;
-  }
-
-  if (!resolvedMembership || !organization) {
-    const bootstrapped = await createPersonalOrganization(user._id, user.fullName);
-    resolvedMembership = bootstrapped.membership;
-    organization = bootstrapped.organization;
-  }
-
-  // Persist a healed/first-resolved choice so the next request goes straight
-  // to the org-scoped query above instead of repeating this fallback.
-  if (!user.activeOrganizationId?.equals(resolvedMembership.organization)) {
-    user.activeOrganizationId = resolvedMembership.organization;
-    await user.save();
-  }
+  // pre-backfill account, mid-signup race) — `resolveActiveOrganization`
+  // falls back to ANY membership they actually still have before ever
+  // bootstrapping a brand-new personal org, so switching back is never
+  // silently lost. Reuses `membership` from the parallel lookup above
+  // instead of re-querying it.
+  const resolved = await resolveActiveOrganization(user, membership);
 
   req.user = user;
-  req.membership = resolvedMembership;
-  req.organization = organization;
+  req.membership = resolved.membership;
+  req.organization = resolved.organization;
   next();
 });

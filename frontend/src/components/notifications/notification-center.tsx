@@ -315,7 +315,7 @@ function NotificationRow({ notification: n }: { notification: Notification }) {
             ) : null}
             <p
               className={cn(
-                "truncate text-sm",
+                "text-sm break-words",
                 n.read ? "font-medium text-foreground/90" : "font-semibold"
               )}
             >

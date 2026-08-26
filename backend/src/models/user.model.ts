@@ -26,6 +26,14 @@ export interface IUser {
    *  one at a time (see auth.middleware.ts). `undefined` for a user who has
    *  never needed to switch (their only/first membership is used instead). */
   activeOrganizationId?: Types.ObjectId;
+  /** This user's Slack member id (`U…`), once they've linked their account
+   *  via a one-time code (see services/slack) — lets them chat with the
+   *  Billing Advisor Agent from a Slack DM. `undefined` until linked. */
+  slackUserId?: string;
+  /** Pending Slack link code + expiry, cleared once used. Short-lived (see
+   *  services/slack/slack-chat-handler.ts) — never treated as a login credential. */
+  slackLinkCode?: string;
+  slackLinkCodeExpiresAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -61,6 +69,19 @@ const userSchema = new Schema<IUser, UserModel>(
     activeOrganizationId: {
       type: Schema.Types.ObjectId,
       ref: "Organization",
+    },
+    slackUserId: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true, // most users never link Slack — sparse keeps them out of the unique index
+    },
+    slackLinkCode: {
+      type: String,
+      trim: true,
+    },
+    slackLinkCodeExpiresAt: {
+      type: Date,
     },
   },
   {

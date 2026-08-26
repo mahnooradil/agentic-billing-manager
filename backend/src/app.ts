@@ -5,6 +5,7 @@ import morgan from "morgan";
 
 import { env, isProduction } from "@/config/env";
 import routes from "@/routes";
+import { slackEvents } from "@/controllers/slack.controller";
 import { notFound } from "@/middlewares/notFound";
 import { errorHandler } from "@/middlewares/errorHandler";
 
@@ -18,6 +19,13 @@ export function createApp(): Application {
   // Security & infrastructure middleware
   app.use(helmet());
   app.use(cors({ origin: env.corsOrigin }));
+
+  // Slack signs requests over the exact raw body bytes — must be captured
+  // BEFORE the global JSON parser below consumes the stream, so this one
+  // route gets its own `express.raw()` ahead of everything else. See
+  // services/slack/slack-signature.ts.
+  app.use("/api/slack/events", express.raw({ type: "application/json" }), slackEvents);
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan(isProduction ? "combined" : "dev"));

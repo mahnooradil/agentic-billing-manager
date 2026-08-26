@@ -2,8 +2,16 @@
  * Analytics domain types shared between the service layer and the UI.
  * These mirror the backend `/analytics/overview` response contract (Phase 9).
  */
-export const ANALYTICS_RANGES = ["all", "3m", "6m", "12m"] as const;
+export const ANALYTICS_RANGES = ["all", "3m", "6m", "12m", "custom"] as const;
 export type AnalyticsRange = (typeof ANALYTICS_RANGES)[number];
+
+/** Only meaningful when `range === "custom"` — `YYYY-MM-DD` strings straight
+ *  out of an `<input type="date">`. Either edge may be omitted for an
+ *  open-ended range. */
+export interface CustomAnalyticsRange {
+  from?: string;
+  to?: string;
+}
 
 export type BillingStatus = "Pending" | "Paid" | "Overdue";
 

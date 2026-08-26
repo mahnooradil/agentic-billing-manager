@@ -44,6 +44,13 @@ export const env = {
   // Where support requests are emailed (Priority support feature). Falls back
   // to the Resend sending address itself, so no extra config is required.
   supportInboxEmail: process.env.SUPPORT_INBOX_EMAIL ?? process.env.RESEND_FROM_EMAIL ?? "",
+  // Slack app credentials — one bot for the whole deployment (not per
+  // organization, matching how the Anthropic/Resend keys above are global).
+  // Bot token calls the Web API (chat.postMessage); signing secret verifies
+  // inbound Events API requests actually came from Slack. Unset means the
+  // Slack chat integration reports "not configured".
+  slackBotToken: process.env.SLACK_BOT_TOKEN ?? "",
+  slackSigningSecret: process.env.SLACK_SIGNING_SECRET ?? "",
 } as const;
 
 export const isProduction = env.nodeEnv === "production";

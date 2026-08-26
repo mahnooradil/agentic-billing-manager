@@ -31,6 +31,7 @@ import { PageWrapper } from "@/components/common/page-wrapper";
 import { SectionHeader } from "@/components/common/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -65,6 +66,7 @@ const RANGE_OPTIONS: { value: AnalyticsRange; label: string }[] = [
   { value: "3m", label: "3 mo" },
   { value: "6m", label: "6 mo" },
   { value: "12m", label: "12 mo" },
+  { value: "custom", label: "Custom" },
 ];
 
 const INSIGHT_STYLES: Record<
@@ -105,8 +107,14 @@ export function AnalyticsView() {
   const formatMonth = (month: string) => fmtMonth(month);
 
   const [range, setRange] = React.useState<AnalyticsRange>("all");
-  const coreCacheKey = `analytics:core:${range}`;
-  const advancedCacheKey = `analytics:advanced:${range}`;
+  // Only read/sent when range === "custom" — YYYY-MM-DD straight out of the
+  // native date inputs below.
+  const [customFrom, setCustomFrom] = React.useState("");
+  const [customTo, setCustomTo] = React.useState("");
+  const custom = { from: customFrom || undefined, to: customTo || undefined };
+  const rangeCacheSuffix = range === "custom" ? `:${customFrom}:${customTo}` : "";
+  const coreCacheKey = `analytics:core:${range}${rangeCacheSuffix}`;
+  const advancedCacheKey = `analytics:advanced:${range}${rangeCacheSuffix}`;
   const cachedCore = readPageCache<AnalyticsOverview>(coreCacheKey);
   const [status, setStatus] = React.useState<ViewStatus>(cachedCore ? "ready" : "loading");
   const [data, setData] = React.useState<AnalyticsOverview | null>(cachedCore);
@@ -122,7 +130,7 @@ export function AnalyticsView() {
     let ignore = false;
     (async () => {
       try {
-        const response = await getAnalyticsOverview(range);
+        const response = await getAnalyticsOverview(range, custom);
         if (ignore) return;
         writePageCache(coreCacheKey, response.data.analytics);
         setData(response.data.analytics);
@@ -140,7 +148,10 @@ export function AnalyticsView() {
     return () => {
       ignore = true;
     };
-  }, [range, reloadKey, coreCacheKey]);
+    // `custom` is a fresh object every render — its two source fields
+    // (customFrom/customTo) are the real dependencies.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, reloadKey, coreCacheKey, customFrom, customTo]);
 
   // Advanced billing intelligence (F6) — loads independently; if it fails the
   // core analytics above still render (its sections just don't appear).
@@ -148,7 +159,7 @@ export function AnalyticsView() {
     let ignore = false;
     (async () => {
       try {
-        const response = await getAdvancedAnalytics(range);
+        const response = await getAdvancedAnalytics(range, custom);
         if (!ignore) {
           writePageCache(advancedCacheKey, response.data.analytics);
           setAdvanced(response.data.analytics);
@@ -160,7 +171,8 @@ export function AnalyticsView() {
     return () => {
       ignore = true;
     };
-  }, [range, reloadKey, advancedCacheKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, reloadKey, advancedCacheKey, customFrom, customTo]);
 
   const retry = () => {
     setStatus("loading");
@@ -168,18 +180,41 @@ export function AnalyticsView() {
   };
 
   const rangeFilter = (
-    <div className="flex flex-wrap items-center gap-1">
-      {RANGE_OPTIONS.map((option) => (
-        <Button
-          key={option.value}
-          size="sm"
-          variant={range === option.value ? "default" : "ghost"}
-          onClick={() => setRange(option.value)}
-          aria-pressed={range === option.value}
-        >
-          {option.label}
-        </Button>
-      ))}
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1">
+        {RANGE_OPTIONS.map((option) => (
+          <Button
+            key={option.value}
+            size="sm"
+            variant={range === option.value ? "default" : "ghost"}
+            onClick={() => setRange(option.value)}
+            aria-pressed={range === option.value}
+          >
+            {option.label}
+          </Button>
+        ))}
+      </div>
+      {range === "custom" ? (
+        <div className="flex items-center gap-1">
+          <Input
+            type="date"
+            value={customFrom}
+            onChange={(e) => setCustomFrom(e.target.value)}
+            max={customTo || undefined}
+            aria-label="From date"
+            className="h-8 w-[9.5rem]"
+          />
+          <span className="text-sm text-muted-foreground">to</span>
+          <Input
+            type="date"
+            value={customTo}
+            onChange={(e) => setCustomTo(e.target.value)}
+            min={customFrom || undefined}
+            aria-label="To date"
+            className="h-8 w-[9.5rem]"
+          />
+        </div>
+      ) : null}
     </div>
   );
 
