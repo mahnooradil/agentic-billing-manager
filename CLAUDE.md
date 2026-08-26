@@ -132,6 +132,9 @@ and clear on expiry/corruption. `AuthProvider` mounts inside `ThemeProvider`.
 **Reusable UI:** `components/common/*` (PageWrapper, PageHeader, SectionHeader, StatCard,
 EmptyState, ErrorState, LoadingSpinner, FormAlert, Pagination, Container) and
 `components/ui/*` (shadcn Base UI primitives). **Reuse these; match existing design.**
+`hooks/use-alert-state.ts` — shared success/error alert state that auto-clears success
+messages after 2s (errors stay put); used across all settings tabs, Billing, and the
+OTP resend confirmation — reuse it instead of a local `useState` + `setTimeout`.
 
 ### Frontend gotchas (these have bitten us — remember them)
 - **`react-hooks/set-state-in-effect` (Next 16) fails the build gate.** Do NOT call a
@@ -213,11 +216,20 @@ EmptyState, ErrorState, LoadingSpinner, FormAlert, Pagination, Container) and
 | F6 | Advanced Analytics — deeper billing intelligence endpoint on top of the Phase 9 analytics engine | ✅ done, pushed | `c2d3714` |
 | F7 | User Settings — one preferences doc per user (general/notifications/analytics/automation/memory/recommendations/workspace/appearance) | ✅ done, pushed | `c2d3714` |
 | — | Platform Connections + Pipedream integration — connect platforms via verified API key or Pipedream-managed OAuth, encrypted credentials at rest, per-user rate limiting | ✅ done, pushed | `c2d3714` |
-| 12 | Billing Advisor Agent — Claude Managed Agents session per user (`/api/agent/chat`), reads real billing/platform data via tools, connect-platform deep links into Platforms page | ✅ done, pushed — **further work paused 2026-07-27 by the user (see memory); do not extend without asking** | `e160171` |
+| 12 | Billing Advisor Agent — Claude Managed Agents session per user (`/api/agent/chat`), reads real billing/platform data via tools, connect-platform deep links into Platforms page | ✅ done, pushed — paused 2026-07-27, **pause lifted 2026-08-26** (see the write-adjacent-tools/Slack-chat row below) | `e160171` |
 | — | Billing-sync adapter layer (129 adapters pulling connected platforms' own billing/usage/balance data via Pipedream Connect Proxy → normalized into Billing, `source: auto_sync`), support requests module, session/OTP security hardening (Session model, JWT `jti`, per-device session list + revoke, email-change OTP), plan tiers (`config/plans.ts`), Postmark → Resend email migration | ✅ done, pushed | `0c8782d` |
+| — | Docs sync — phase log/module notes brought up to date through the billing-sync adapter commit (no code changes) | ✅ done, pushed | `f075ee6` |
+| — | Gmail invoice email-sync (fallback channel via Pipedream OAuth, `services/email-sync/`), credit-based usage tracker (`creditsBalance`, `CreditTransaction` ledger, real Claude token metering + blocking on the Billing Advisor Agent), Agent tool enrichment (connected-integrations, top-customers), Multi-user Organizations foundation (Organization/Membership/Invitation models, Resend email invites, owner/admin/member roles, Team management, Platform/Billing/PlatformConnection/Recommendation/Notification scoped by organization instead of user, existing accounts backfilled into a personal org) | ✅ done, pushed | `343ebb9` |
+| — | Auto-accept org invites after login (redirect preserved, no need to reopen the invite link) + in-app notification to owner/admin on member join | ✅ done, pushed | `13a7a24` |
+| — | Fix: self-heal missing organization — a user with no Membership (e.g. removed from an org) now gets a fresh personal org bootstrapped instead of being permanently 401-locked out | ✅ done, pushed | `f9ea876` |
+| — | Fix: vary invite email subject by date so repeated invites don't collapse into one Gmail thread (a deleted thread could otherwise swallow a genuinely new invite) | ✅ done, pushed | `e8224f4` |
+| — | UI polish: flattened sidebar seam (single border, no shadow/blur), shared `useAlertState` hook so success banners auto-dismiss after 2s across settings tabs/Billing/OTP | ✅ done, pushed | `75dc098` |
+| — | Outlook email-sync alongside Gmail (`EmailSyncProvider` abstraction keeps `sync-engine.ts` provider-agnostic; incremental sync relies on newest-first results since Graph API can't combine `$search` + date filter) + multiple email accounts per org (`accountIdentifier` added to the platform-connection uniqueness key for email-sync platforms only) + Settings > Email Accounts tab + extracted reusable `usePipedreamConnect` hook | ✅ done, pushed | `b82aa35` |
+| — | Multi-organization membership (a user can own a personal workspace AND belong to other orgs as a member; workspace switcher; active-org self-heal), credits ownership moved from User to Organization (active workspace pays for AI usage), agent chat sessions reset on workspace switch, email-sync bug fixes (oldest-to-newest staged commit to fix payment-confirmation-before-invoice ordering; vendorName/customerName swap fix; tightened invoice detection), Slack Incoming Webhook due-date alerts (`services/notifications/slack.ts`, gated by a validated webhook URL in user settings), fixed Team tab always showing "Admin" | ✅ done, pushed | `3333630` |
+| — | Billing Advisor Agent gains write-adjacent tools: `search_billing_records` (find one invoice by customer/invoice number/status) + propose-only `propose_update_billing_status`/`propose_delete_billing_record` (agent never mutates directly — chat UI renders a confirm button that calls the existing `PUT`/`DELETE /api/billing/:id`). Recommendations panel gets a "Discuss with Agent" action that hands a recommendation to the Chat tab as a prefilled prompt. Analytics gains a `custom` date-range option (`from`/`to`) end-to-end — backend engine, `get_analytics_summary` agent tool, and the frontend range picker. Notification Engine batches several recommendations changing in one refresh into a single summary notification instead of one row each. Email-sync hardening: a `manuallyEditedAt` timestamp on Billing stops a later sync pass from reverting a human's correction (Billing page edit or an agent-confirmed change) using a stale/older email; a one-time in-app + Slack notification now fires when sync pauses because the workspace is out of credits (previously silent). Platforms page drops the manual "Your platforms" add/edit/delete panel (platform creation is still reachable via the Billing form's inline "add platform") since platforms are primarily managed by connecting them now. **Slack Billing Advisor chat**: link a Slack account via a short-lived code (Settings > Notifications), then DM the bot to run the same Billing Advisor Agent turns as the in-app chat — Events API webhook with HMAC request-signature verification (`services/slack/`), per-event dedup (`SlackProcessedEvent` model), credit-gated same as the web UI | ✅ done, pushed | `775fdb1` |
 
 **Next phase: NOT yet assigned — wait for the user's brief before building anything.**
-**Note:** Phase 12 (Billing Advisor Agent) work is explicitly paused per the user — do not resume/extend it unprompted.
+**Note:** Phase 12 (Billing Advisor Agent)'s original 2026-07-27 pause was lifted 2026-08-26 — the user explicitly asked for the tool/Slack-chat extension above. No standing pause anymore; treat it like any other module.
 
 ### Module notes
 - **Platform** = a third-party service the user is billed on. Fields: `name` (2–100),
@@ -235,6 +247,10 @@ EmptyState, ErrorState, LoadingSpinner, FormAlert, Pagination, Container) and
   mirrors the platform module; `BillingView` also loads platforms for the required
   Platform select. Billing CRUD in 7A; search/filter/pagination + stats in 7B; sorting
   (date/amount) + results counter + page info in 7C. Pipeline: search → filter → sort → paginate.
+  `manuallyEditedAt` (added 2026-08-26) is stamped on every `PUT /api/billing/:id` — a
+  human correction (Billing page edit, or an agent-confirmed status change/delete) that a
+  later email-sync pass must never silently overwrite with an older email; see
+  `services/email-sync/sync-engine.ts`'s commit step.
 - **Billing stats** (7B): `GET /api/billing/stats` (authed, registered before `/:id`) →
   `data.stats.{totalRecords, paidRecords, pendingRecords, overdueRecords, totalRevenue}`.
   `totalRevenue` is the raw sum of Paid amounts across all currencies (no symbol shown) —
@@ -247,17 +263,24 @@ EmptyState, ErrorState, LoadingSpinner, FormAlert, Pagination, Container) and
   Superseded by the **Billing Advisor Agent** (Phase 12, below), which is the current
   AI surface in the app. Do not re-add the old `/api/ai/settings` or `/api/ai/chat`
   endpoints — the replacement is `/api/agent/chat`.
-- **6C search/filter/pagination** is entirely **client-side** over the loaded list
-  (no backend change): search matches name+slug, status filter All/Active/Inactive,
-  `PAGE_SIZE=10`, page resets to 1 on search/filter change, distinct "no matching
-  platforms" empty state with a Clear-filters action.
+- **6C search/filter/pagination** (client-side search/status-filter/`PAGE_SIZE=10` over
+  the manual Platform list) — ⚠️ **its UI is gone from `platforms-view.tsx` as of
+  2026-08-26**: the whole "Your platforms" add/edit/delete panel was removed from the
+  Platforms page (see the write-adjacent-tools/Slack-chat phase row). `GET /api/platforms`
+  and manual creation still exist and still work — `platform-form-dialog.tsx` is reused
+  by the Billing form's inline "add platform" flow — there's just no standalone manual
+  CRUD panel on the Platforms page anymore, since platforms are primarily managed by
+  connecting them (catalog/connections UI) now.
 - **Analytics Engine** (9, extracted to `services/analytics/analytics.engine.ts` in
   Phase 10): `GET /api/analytics/overview` (authed) — read-only aggregations over
   Billing (per-currency totals, spend-by-platform, monthly trend in a primary currency,
   status breakdown, rule-based insights, no AI). Reused by both the analytics endpoint
   and the recommendation engine. Advanced Analytics (F6) adds a deeper endpoint on top
   of the same range semantics. Frontend: `/dashboard/usage` was repurposed as Analytics
-  (CSS/flex visuals, no chart package).
+  (CSS/flex visuals, no chart package). `range` also accepts `custom` (added 2026-08-26)
+  with `from`/`to` query params — either edge optional for an open-ended window; used by
+  the frontend range picker and by the `get_analytics_summary` agent tool (e.g. "last
+  month", "this quarter").
 - **Autonomous AI Recommendation Engine** (F1, `services/ai/recommendation-engine.ts`):
   persistent recs (`Recommendation` model) with a lifecycle (active/dismissed/completed).
   A typed event bus (`services/events`) — billing/platform controllers emit
@@ -267,22 +290,47 @@ EmptyState, ErrorState, LoadingSpinner, FormAlert, Pagination, Container) and
   dismissal. `GET/PATCH /api/recommendations`, ops-only `POST /refresh`.
 - **Notification Engine** (F2): rule-based alerts (overdue billing, high-spend
   concentration, recommendation changes) subscribed to the same event bus,
-  signature-based dedup. `Notification` model + `/api/notifications`.
+  signature-based dedup. `Notification` model + `/api/notifications`. Recommendation
+  alerts (added 2026-08-26) batch everything that changed within one refresh's ~2-minute
+  window into a single summary notification (e.g. "3 new recommendations") instead of
+  one row per recommendation — see `notifyRecommendationBatch`.
 - **User Settings** (F7): one `UserSettings` doc per user covering general,
   notifications, analytics, automation, memory, recommendations, workspace, and
   appearance preferences. `/api/settings`.
 - **Platform Connections + Pipedream integration**: connect a third-party platform via
   a verified API key or Pipedream-managed OAuth; credentials encrypted at rest; per-user
   rate limiting on connection endpoints. `PlatformConnection` model, `/api/platform-connections`.
-- **Billing Advisor Agent** (Phase 12, ⚠️ **further work paused 2026-07-27** — do not
-  extend without asking): `POST /api/agent/chat` backed by a Claude Managed Agents
-  session per user (`services/agent/`, `AgentSession` model) — separate from the old
-  plain AI chat. Reads real billing/platform data via custom tools, helps connect new
-  platforms through the existing capability resolver (native adapters + Pipedream) but
-  never handles credentials itself; returns a `connect_platform` action the frontend
-  renders as a one-click deep link into the Platforms page's Connect flow. Frontend:
-  standalone Billing Agent page/nav item with voice input/output and persistent local
-  chat history.
+- **Billing Advisor Agent** (Phase 12, extended 2026-08-26 — pause lifted, see the phase
+  table note): `POST /api/agent/chat` backed by a Claude Managed Agents session per user
+  (`services/agent/`, `AgentSession` model) — separate from the old plain AI chat. Reads
+  real billing/platform data via custom tools, helps connect new platforms through the
+  existing capability resolver (native adapters + Pipedream) but never handles
+  credentials itself; returns a `connect_platform` action the frontend renders as a
+  one-click deep link into the Platforms page's Connect flow. Frontend: standalone
+  Billing Agent page/nav item with voice input/output and persistent local chat history.
+  Write-adjacent tools (2026-08-26): `search_billing_records` (`services/ai/tools/
+  billing-search.tool.ts`) finds one invoice by customer/invoice number/status;
+  `propose_update_billing_status`/`propose_delete_billing_record`
+  (`services/ai/tools/billing-actions.tool.ts`) resolve a request to an exact
+  `billingId` and return it for confirmation — **neither ever writes to the database**,
+  the chat UI's confirm button calls the same authenticated `PUT`/`DELETE
+  /api/billing/:id` the Billing page's own edit/delete UI uses. The Recommendations
+  panel's "Discuss with Agent" button hands a recommendation to the Chat tab as a
+  prefilled prompt so the agent can act on it with these tools.
+- **Slack Billing Advisor chat** (`services/slack/`, added 2026-08-26): a user links
+  their Slack account from Settings > Notifications (`POST /api/slack/link-code` issues
+  a 10-minute code; DM-ing it to the bot completes the link, storing `slackUserId` on
+  `User`), then DMs the bot anytime to run the exact same `sendAgentMessage` turn the
+  in-app chat uses — same tools, same organization scoping, same credit gate
+  (`assertCreditBalance`). `POST /api/slack/events` is the Events API webhook, mounted
+  in `app.ts` **ahead of** the global `express.json()` with its own `express.raw()`
+  because Slack signs the exact raw body bytes (`slack-signature.ts` verifies
+  `X-Slack-Signature`/`X-Slack-Request-Timestamp` via `SLACK_SIGNING_SECRET`); it ACKs
+  Slack's retry-on-no-200-in-a-few-seconds requirement immediately, then handles the
+  agent turn fire-and-forget. `SlackProcessedEvent` (unique `eventId`) dedupes Slack's
+  at-least-once delivery. Requires `SLACK_BOT_TOKEN` + `SLACK_SIGNING_SECRET` (one bot
+  for the whole deployment, like the Anthropic/Resend keys) — unset reports "not
+  configured" rather than failing.
 - **Billing-sync adapter layer** (`services/billing-sync/`): 129 platform adapters
   (`adapters/*.adapter.ts`) + `registry.ts` + `sync-engine.ts` + `scheduler.ts`. Each
   adapter pulls a connected platform's own billing/usage/balance data automatically via
@@ -301,6 +349,41 @@ EmptyState, ErrorState, LoadingSpinner, FormAlert, Pagination, Container) and
   `plan.controller.ts` + `/api/plan` expose them. Support-request priority and other
   tier-gated behavior read from here.
 - **Email**: transactional email migrated from Postmark to Resend (`services/email/`).
+- **Multi-user Organizations**: `Organization`/`Membership`/`Invitation` models. Every user
+  owns a personal `Organization` and can additionally be a `Membership` member of others
+  (compound `user`+`organization` unique index). Auth resolves an **active organization**
+  per request (self-heals by bootstrapping a fresh personal org if a user's membership was
+  removed — never a permanent lockout). `Platform`, `Billing`, `PlatformConnection`,
+  `Recommendation`, and `Notification` are all scoped by organization, not user. Roles:
+  owner/admin/member. Invites are emailed via Resend, auto-accept on login if the invitee
+  already has an account (redirect preserved through login), and notify the owner/admin on
+  join. Frontend: workspace switcher, Settings > Team tab. A redundant fallback personal
+  workspace is auto-cleaned up when a member is removed and the owner is solo again.
+- **Credits**: usage-based metering for the Billing Advisor Agent, config in
+  `config/credits.ts` (plan-tier-keyed allowance/cycle, decoupled from `config/plans.ts`).
+  Ownership lives on **Organization**, not User — whichever workspace is active pays for AI
+  usage. `CreditTransaction` ledger records every debit; agent chat sessions reset on
+  workspace switch to keep history isolated per organization. Frontend: Settings > Credits
+  tab (balance, history, pace) + credit badge/blocking in Agent chat.
+- **Email-sync (Gmail + Outlook)** (`services/email-sync/`): a fallback invoice-sync channel
+  alongside the billing-sync adapters, connected the same way (Pipedream OAuth) but reading
+  invoice emails instead of a platform API. `EmailSyncProvider` abstracts Gmail vs Outlook
+  search-query syntax and message normalization; `sync-engine.ts`'s loop (pagination, safety
+  cap, watermark, dedupe/upsert) is provider-agnostic. Messages are staged and committed
+  **oldest-to-newest per run** (Gmail search order isn't chronological — processing a
+  Paid-confirmation before its own invoice email could otherwise clobber status back to
+  Pending). An organization can connect **more than one** Gmail/Outlook inbox — the
+  `PlatformConnection` uniqueness key includes `accountIdentifier` for email-sync platforms
+  specifically (every other platform stays one-per-org). Frontend: Settings > Email Accounts
+  tab (list, last-synced time, disconnect, connect another) via the shared
+  `usePipedreamConnect` hook.
+- **Slack alerts**: `services/notifications/slack.ts` posts due-date reminders to a Slack
+  Incoming Webhook alongside the existing email notification, gated by a validated
+  `https://hooks.slack.com/services/...` URL stored in user settings. Note: as of
+  2026-08-26 there is **uncommitted, unpushed** work in progress on a broader Slack
+  integration (`slack.controller.ts`, `slack.routes.ts`, `services/slack/`,
+  `services/types/slack.ts`) — do not treat that as documented/shipped until it's actually
+  committed and pushed.
 
 ---
 
