@@ -31,13 +31,17 @@ const SEARCH_CLAUSES = [
 ];
 
 function buildSearchQuery(_sinceDate: Date | null, trackedSenders: string[]): string {
-  // Senders configured: scope to just those, no keyword filter — see
-  // gmail-provider.ts's identical reasoning (low volume from trusted
-  // senders, AI extraction itself decides promo vs. real billing content).
+  // Senders configured: scope to just those, AND still require an
+  // invoice/receipt clause — see gmail-provider.ts's identical fix (a real
+  // incident: dropping the keyword filter for tracked senders let a
+  // domain's routine marketing/notification emails through too, and the AI
+  // extractor misclassified several as billing emails in one run, creating
+  // dozens of duplicate invoices and burning the workspace's credits).
+  const keywords = `(${SEARCH_CLAUSES.join(" OR ")})`;
   if (trackedSenders.length > 0) {
-    return `(${trackedSenders.map((s) => `"from:${s}"`).join(" OR ")})`;
+    return `(${trackedSenders.map((s) => `"from:${s}"`).join(" OR ")}) AND ${keywords}`;
   }
-  return `(${SEARCH_CLAUSES.join(" OR ")})`;
+  return keywords;
 }
 
 export const OUTLOOK_PROVIDER: EmailSyncProvider = {

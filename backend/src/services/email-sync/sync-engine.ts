@@ -340,9 +340,21 @@ async function extractCandidateFields(
   // for the SAME invoice then update ONE record's status instead of creating
   // two disconnected rows. Namespaced by vendor domain to avoid cross-vendor
   // invoice-number collisions, and by provider to avoid cross-provider ones.
+  //
+  // When there's no invoice number at all, the fallback used to be keyed by
+  // the raw message id — which seemed safe (one Billing row per email) but
+  // broke badly in practice: a real inbox had dozens of separate, genuinely
+  // distinct emails about what was really the SAME recurring charge (same
+  // vendor, same amount, same day) with no invoice number in any of them —
+  // each got its own row, and the AI cost of scanning them all emptied the
+  // workspace's credits in one run. Keying by vendor + amount + day instead
+  // collapses same-day repeats of the same charge into one record, the same
+  // way a real invoice number would — while still keying by day so distinct
+  // billing cycles (different days) each still get their own row.
+  const billingDateKey = billingDate.toISOString().slice(0, 10);
   const externalId = fields.invoiceNumber
     ? `${provider.dedupePrefix}-inv-${vendorSlug}-${fields.invoiceNumber.replace(/[^A-Za-z0-9-]/g, "").toLowerCase()}`
-    : `${provider.dedupePrefix}-msg-${message.id}`;
+    : `${provider.dedupePrefix}-day-${vendorSlug}-${fields.amount}-${billingDateKey}`;
 
   const dedupeQuery = {
     organization: connection.organization,

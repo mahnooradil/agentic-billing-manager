@@ -30,15 +30,22 @@ function buildSearchQuery(sinceDate: Date | null, trackedSenders: string[]): str
     ? `after:${formatGmailDate(sinceDate)}`
     : `newer_than:${FIRST_SYNC_LOOKBACK_DAYS}d`;
 
-  // Senders configured: scope to just those, with NO keyword filter — a
-  // handful of trusted senders is naturally low-volume, so every one of
-  // their emails can go through AI extraction (which already tells promo
-  // from billing content correctly). Dropping the keyword requirement here
-  // is what actually fixes invoices whose wording never matched the
-  // keywords in the first place. No senders yet: fall back to the original
-  // whole-inbox keyword scan.
+  // Senders configured: scope to just those, AND still require an
+  // invoice/receipt keyword. An earlier version dropped the keyword filter
+  // entirely once a sender was tracked, reasoning that a handful of trusted
+  // senders is low-volume enough to let the AI extractor alone tell promo
+  // from billing content. In practice it didn't: a tracked "netflix.com"
+  // pulled in every marketing/notification email from that domain too, and
+  // the extractor misread several of them as billing emails in one run
+  // (their footers mention the subscription price), producing dozens of
+  // duplicate invoice rows for one real subscription and burning through
+  // the workspace's credits. Keeping the keyword requirement even for
+  // tracked senders cuts candidates down to what's actually invoice-shaped
+  // before they ever reach the AI call — still catches wording variance the
+  // AI is good at (e.g. "amount due" vs "your bill"), just not literally
+  // everything a domain ever emails.
   //
-  // The promotions/social/forums exclusion below only makes sense for that
+  // The promotions/social/forums exclusion below only makes sense for the
   // broad, sender-less scan — it exists to cut inbox noise, not to second-
   // guess a domain the user already trusts. Gmail's own ML sometimes drops
   // a genuine transactional email (invoice, payment receipt) into the
@@ -50,10 +57,11 @@ function buildSearchQuery(sinceDate: Date | null, trackedSenders: string[]): str
     trackedSenders.length > 0
       ? "-in:spam -in:trash"
       : "-category:promotions -category:social -category:forums -in:spam -in:trash";
+  const keywords = `(${INVOICE_KEYWORDS.join(" OR ")})`;
   const subject =
     trackedSenders.length > 0
-      ? `(${trackedSenders.map((s) => `from:${s}`).join(" OR ")})`
-      : `(${INVOICE_KEYWORDS.join(" OR ")})`;
+      ? `(${trackedSenders.map((s) => `from:${s}`).join(" OR ")}) ${keywords}`
+      : keywords;
 
   return `${subject} ${noise} ${window}`;
 }
