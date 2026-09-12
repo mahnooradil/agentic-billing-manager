@@ -80,7 +80,17 @@ export const GMAIL_PROVIDER: EmailSyncProvider = {
     const headers = message.payload?.headers ?? [];
     const fromHeader = headers.find((h) => h.name.toLowerCase() === "from")?.value ?? null;
     const subject = headers.find((h) => h.name.toLowerCase() === "subject")?.value ?? null;
-    const receivedAt = message.internalDate ? new Date(Number(message.internalDate)) : new Date();
+    // Defensive: a malformed/non-numeric `internalDate` would silently
+    // produce an Invalid Date (no error here) that later crashes when
+    // something calls `.toISOString()` on it — falling back to "now" is a
+    // safe default rather than letting that happen further down the line.
+    const parsedInternalDate = message.internalDate
+      ? new Date(Number(message.internalDate))
+      : null;
+    const receivedAt =
+      parsedInternalDate && !Number.isNaN(parsedInternalDate.getTime())
+        ? parsedInternalDate
+        : new Date();
     return {
       id: message.id,
       receivedAt,

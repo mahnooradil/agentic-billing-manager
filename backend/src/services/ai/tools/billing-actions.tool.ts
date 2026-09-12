@@ -81,7 +81,7 @@ export async function runProposeUpdateBillingStatus(
     invoiceNumber: record.invoiceNumber,
     currentStatus: record.status,
     proposedStatus: newStatus as BillingStatus,
-    message: `Ready to mark invoice ${record.invoiceNumber} (${record.customerName}) as ${newStatus}. Show the confirm button — this has NOT been changed yet.`,
+    message: `Ready to mark invoice ${record.invoiceNumber} (${record.customerName}) as ${newStatus} — this has NOT been changed yet. Tell the user it's staged and waiting for their confirmation to actually apply it; never claim it's already done. Don't describe a specific UI element (e.g. "the button below") — this reply can be relayed somewhere with no button, like Slack, where the chat UI's own confirm control never renders.`,
   };
 }
 
@@ -103,6 +103,6 @@ export async function runProposeDeleteBillingRecord(
     invoiceNumber: record.invoiceNumber,
     amount: record.amount,
     currency: record.currency,
-    message: `Ready to delete invoice ${record.invoiceNumber} (${record.customerName}, ${record.amount} ${record.currency}). Show the confirm button — this has NOT been deleted yet. Deletion is permanent, so make sure the user actually asked for this exact invoice.`,
+    message: `Ready to delete invoice ${record.invoiceNumber} (${record.customerName}, ${record.amount} ${record.currency}) — this has NOT been deleted yet. Tell the user it's staged and waiting for their confirmation to actually apply it; never claim it's already done. Don't describe a specific UI element (e.g. "the button below") — this reply can be relayed somewhere with no button, like Slack, where the chat UI's own confirm control never renders. Deletion is permanent, so make sure the user actually asked for this exact invoice.`,
   };
 }

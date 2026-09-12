@@ -32,6 +32,7 @@ import { Membership } from "@/models/membership.model";
 import { Organization } from "@/models/organization.model";
 import { createPersonalOrganization } from "@/services/organizations/organization-bootstrap.service";
 import { consumeInvitationForNewSignup } from "@/services/organizations/invitation.service";
+import { invalidateCachedAuth } from "@/middlewares/auth-cache";
 import type {
   RequestRegisterOtpInput,
   RequestLoginOtpInput,
@@ -281,6 +282,9 @@ export const switchOrganization = asyncHandler(async (req, res) => {
 
   user.activeOrganizationId = membership.organization;
   await user.save();
+  // Otherwise a still-warm auth cache entry could keep resolving requests
+  // against the OLD organization for up to its TTL — see auth-cache.ts.
+  invalidateCachedAuth(user._id.toString());
 
   sendSuccess(res, 200, "Switched organization", {
     organization: toPublicOrganization(organization, membership.role),
@@ -309,6 +313,10 @@ export const signOutEverywhere = asyncHandler(async (req, res) => {
     { user: user._id, jti: { $ne: req.sessionJti }, revokedAt: { $exists: false } },
     { $set: { revokedAt: new Date() } }
   );
+  // The whole point of this endpoint is other devices losing access
+  // immediately — a stale auth-cache entry must not give any of them a few
+  // more free seconds. See auth-cache.ts.
+  invalidateCachedAuth(user._id.toString());
 
   const token = generateToken({
     id: user._id.toString(),
@@ -329,6 +337,7 @@ export const updateProfile = asyncHandler(async (req, res) => {
   const { fullName } = req.body as UpdateProfileInput;
   user.fullName = fullName;
   await user.save();
+  invalidateCachedAuth(user._id.toString());
 
   sendSuccess(res, 200, "Profile updated", {
     user: toPublicUser(user),
@@ -400,6 +409,9 @@ export const deleteAccount = asyncHandler(async (req, res) => {
   ]);
 
   await user.deleteOne();
+  // Otherwise a cached entry could keep answering requests as this
+  // now-deleted user for up to the cache TTL. See auth-cache.ts.
+  invalidateCachedAuth(user._id.toString());
 
   sendSuccess(res, 200, "Account deleted", null);
 });
@@ -493,6 +505,9 @@ export const revokeSession = asyncHandler(async (req, res) => {
 
   session.revokedAt = new Date();
   await session.save();
+  // That revoked session's own cached entry (keyed by its jti) must not
+  // keep answering requests for up to the cache TTL. See auth-cache.ts.
+  invalidateCachedAuth(user._id.toString());
 
   sendSuccess(res, 200, "Session revoked", null);
 });

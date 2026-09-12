@@ -15,6 +15,7 @@ import { Membership } from "@/models/membership.model";
 import { Invitation } from "@/models/invitation.model";
 import { User } from "@/models/user.model";
 import { cleanupRedundantFallbackWorkspace } from "@/services/organizations/organization-bootstrap.service";
+import { invalidateCachedAuth } from "@/middlewares/auth-cache";
 import type {
   UpdateOrganizationInput,
   UpdateMembershipRoleInput,
@@ -100,6 +101,10 @@ export const updateMemberRole = asyncHandler(async (req, res) => {
   const { role } = req.body as UpdateMembershipRoleInput;
   target.role = role;
   await target.save();
+  // Otherwise the affected member's own cached auth context (their old
+  // role, via req.membership) could keep answering for up to the cache
+  // TTL — see auth-cache.ts.
+  invalidateCachedAuth(target.user.toString());
 
   const targetUser = await User.findById(target.user);
   if (!targetUser) throw new AppError("Member's user account no longer exists.", 404);
@@ -133,6 +138,9 @@ export const removeMember = asyncHandler(async (req, res) => {
   }
 
   await target.deleteOne();
+  // Otherwise the removed member's cached auth context could keep resolving
+  // to this organization for up to the cache TTL — see auth-cache.ts.
+  invalidateCachedAuth(target.user.toString());
 
   // If this removal leaves the organization solo-owned again, a fallback
   // personal workspace created for the owner (see

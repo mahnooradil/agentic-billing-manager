@@ -8,6 +8,12 @@ import { syncConnectionEmail } from "@/services/email-sync/sync-engine";
 import { isEmailSyncPlatform } from "@/services/email-sync/registry";
 
 const SYNC_INTERVAL_MS = 60 * 60 * 1000;
+/** Run once shortly after startup too — otherwise a restart resets this
+ *  clock to zero, and on a host that redeploys/restarts more often than the
+ *  interval (observed in production: a connection's lastSyncedAt sat still
+ *  for over a day), the recurring pass could go a very long time without
+ *  ever actually firing. Mirrors due-date-scheduler.ts's identical fix. */
+const STARTUP_DELAY_MS = 60_000;
 
 async function runSyncPass(): Promise<void> {
   const connections = await PlatformConnection.find({
@@ -22,6 +28,9 @@ async function runSyncPass(): Promise<void> {
 
 /** Starts the recurring email-sync job. Fire-and-forget; never throws. */
 export function startEmailSyncScheduler(): void {
+  setTimeout(() => {
+    void runSyncPass();
+  }, STARTUP_DELAY_MS);
   setInterval(() => {
     void runSyncPass();
   }, SYNC_INTERVAL_MS);

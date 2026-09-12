@@ -65,9 +65,18 @@ export const OUTLOOK_PROVIDER: EmailSyncProvider = {
         : `<${sender.address}>`
       : null;
 
+    // Defensive: a malformed `receivedDateTime` would silently produce an
+    // Invalid Date (no error here) that can later crash a `.toISOString()`
+    // call, or subtly break the oldest-to-newest sort in sync-engine.ts
+    // (NaN comparisons never behave the way a real timestamp comparison
+    // would) — falling back to "now" is a safe default instead.
+    const parsedReceivedAt = message.receivedDateTime ? new Date(message.receivedDateTime) : null;
+    const receivedAt =
+      parsedReceivedAt && !Number.isNaN(parsedReceivedAt.getTime()) ? parsedReceivedAt : new Date();
+
     return {
       id: message.id,
-      receivedAt: message.receivedDateTime ? new Date(message.receivedDateTime) : new Date(),
+      receivedAt,
       subject: message.subject ?? null,
       plainText,
       fromHeader,

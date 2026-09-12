@@ -33,12 +33,17 @@ export interface NotificationSnapshot {
   status: NotificationStatus;
 }
 
-const POLL_INTERVAL_MS = 5_000;
+// Matches the top-of-file docstring's "20s BACKUP" — was accidentally left at
+// 5s, which meant every open dashboard tab hit the backend 4x more often than
+// intended, all the time the app is open, competing with real user requests
+// for no benefit (the mutation-burst below already delivers same-user updates
+// in ~1s; this poll only exists to catch background/other-user changes).
+const POLL_INTERVAL_MS = 20_000;
 // After a mutation by the current user, the backend creates the notification
 // ASYNCHRONOUSLY (fire-and-forget engine), so an immediate refresh can run before
 // it exists. A dense, fast burst catches the common case (billing/platform rules,
 // no AI call) within ~1s of it being persisted, and keeps checking with backoff
-// for the slower AI-recommendation path — so the 5s poll is a rare fallback, not
+// for the slower AI-recommendation path — so the 20s poll is a rare fallback, not
 // the normal delivery path. No WebSockets/SSE.
 const MUTATION_REFRESH_DELAYS_MS = [
   150, 400, 700, 1000, 1500, 2200, 3200, 4500, 6000, 8000, 10500, 13500, 17000,

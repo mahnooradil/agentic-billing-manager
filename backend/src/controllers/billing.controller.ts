@@ -41,8 +41,8 @@ async function findBillingOr404(
     throw new AppError("Billing record not found", 404);
   }
   const billing = await Billing.findOne({ _id: id, organization: organizationId })
-    .populate("platform")
-    .populate("platformConnection");
+    .populate("platform", "name slug")
+    .populate("platformConnection", "displayName platform");
   if (!billing) {
     throw new AppError("Billing record not found", 404);
   }
@@ -72,8 +72,8 @@ export const listBillingRecords = asyncHandler(async (req, res) => {
   }
 
   const records = await Billing.find({ organization: organization._id })
-    .populate("platform")
-    .populate("platformConnection")
+    .populate("platform", "name slug")
+    .populate("platformConnection", "displayName platform")
     .sort({ billingDate: -1, createdAt: -1 });
   sendSuccess(res, 200, "Billing records retrieved", {
     billingRecords: records.map(toPublicBilling),
@@ -88,8 +88,8 @@ export const exportBillingRecords = asyncHandler(async (req, res) => {
   }
 
   const records = await Billing.find({ organization: organization._id })
-    .populate("platform")
-    .populate("platformConnection")
+    .populate("platform", "name slug")
+    .populate("platformConnection", "displayName platform")
     .sort({ billingDate: -1, createdAt: -1 });
 
   const csv = toCsv(
