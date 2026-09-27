@@ -51,10 +51,7 @@ const SEVERITY_LABELS: Record<RecommendationSeverity, string> = {
 
 const SEVERITY_STYLES: Record<RecommendationSeverity, { pill: string; dot: string }> = {
   high: { pill: "bg-destructive/10 text-destructive", dot: "bg-destructive" },
-  medium: {
-    pill: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-    dot: "bg-amber-500",
-  },
+  medium: { pill: "bg-primary/10 text-primary", dot: "bg-primary" },
   low: { pill: "bg-muted text-muted-foreground", dot: "bg-muted-foreground" },
 };
 
@@ -149,7 +146,7 @@ export function AiRecommendations({
     <div className="flex flex-col gap-4">
       <SectionHeader
         title="Recommendations"
-        description="Your Billing Agent reviews your invoices and flags what needs attention — overdue payments, cash-flow risk, and where your spend is concentrated."
+        description="Your AI Assistant reviews your invoices and flags what needs attention — overdue payments, cash-flow risk, and where your spend is concentrated."
         actions={autoRefreshIndicator}
       />
 

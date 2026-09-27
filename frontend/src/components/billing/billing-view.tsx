@@ -106,14 +106,20 @@ export function BillingView() {
     };
   }, [reloadKey]);
 
-  // Apply search (customer/invoice) + status filter, then slice the page.
+  // Apply search (customer/vendor/invoice) + status filter, then slice the
+  // page. `platform.name` is included because for a connected (auto_sync/
+  // email_sync) record it's the actual vendor's display name (Netflix, AWS,
+  // ...) — `customerName` alone can be the workspace's own name for those
+  // records, so a row visibly labelled "Netflix" would otherwise never match
+  // a search for "Netflix" (same root cause as the agent search fix).
   const filtered = React.useMemo(() => {
     const query = search.trim().toLowerCase();
     return records.filter((record) => {
       const matchesQuery =
         query === "" ||
         record.customerName.toLowerCase().includes(query) ||
-        record.invoiceNumber.toLowerCase().includes(query);
+        record.invoiceNumber.toLowerCase().includes(query) ||
+        record.platform.name.toLowerCase().includes(query);
       const matchesStatus = statusFilter === "all" || record.status === statusFilter;
       return matchesQuery && matchesStatus;
     });
@@ -221,7 +227,7 @@ export function BillingView() {
   return (
     <PageWrapper>
       <PageHeader
-        title="Billing"
+        title="Invoices"
         description="Track invoices and payment status across your platforms."
         actions={
           <Button onClick={openCreate} disabled={noPlatforms}>

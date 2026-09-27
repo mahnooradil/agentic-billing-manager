@@ -8,8 +8,9 @@
  * pull) and by the recurring scheduler (services/billing-sync/scheduler.ts).
  */
 import { Billing } from "@/models/billing.model";
-import type { PlatformConnectionDocument } from "@/models/platform-connection.model";
+import { PlatformConnection, type PlatformConnectionDocument } from "@/models/platform-connection.model";
 import { getBillingSyncAdapter } from "@/services/billing-sync/registry";
+import { resolveVendor } from "@/services/vendors/vendor-resolver.service";
 
 interface AccountMetadata {
   pipedreamAccountId?: string;
@@ -37,6 +38,18 @@ export async function syncConnectionBilling(
       pipedreamAccountId
     );
 
+    // Real vendor identity (Task 7) — resolved once per connection, since
+    // every record from this connection is the same vendor. No domain
+    // (a platform's own billing API has no sending domain to observe) —
+    // dedupes by name instead, so this collapses onto the SAME Vendor
+    // document as an email-derived one for the same real vendor if that
+    // name matches (e.g. both resolve to "AWS"), fixing the double-count
+    // the audit describes for a vendor connected through two channels.
+    const vendorDoc =
+      records.length > 0
+        ? await resolveVendor(connection.organization, { name: connection.displayName })
+        : null;
+
     for (const record of records) {
       await Billing.findOneAndUpdate(
         {
@@ -52,6 +65,8 @@ export async function syncConnectionBilling(
             source: "auto_sync",
             externalId: record.externalId,
             customerName: connection.displayName,
+            ...(vendorDoc ? { vendor: vendorDoc._id } : {}),
+            ...(vendorDoc?.domain ? { vendorDomain: vendorDoc.domain } : {}),
             invoiceNumber: record.externalId,
             amount: record.amount,
             currency: record.currency,
@@ -63,7 +78,37 @@ export async function syncConnectionBilling(
         { upsert: true, setDefaultsOnInsert: true, runValidators: true }
       );
     }
-  } catch {
-    // Best-effort: a provider hiccup on one connection must not affect others.
+
+    // Sync observability (S-17 fix) — see email-sync/sync-engine.ts's
+    // identical pattern for the full reasoning.
+    await PlatformConnection.updateOne(
+      { _id: connection._id },
+      {
+        $set: { lastSyncAt: new Date(), lastSyncStatus: "success", invoicesFound: records.length },
+        $unset: { lastSyncError: "" },
+      }
+    ).catch(() => {
+      // Best-effort — never let an observability write fail the sync itself.
+    });
+  } catch (error) {
+    // Previously a bare `catch {}` (S-17) — see email-sync/sync-engine.ts's
+    // identical pattern for the full reasoning.
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[billing-sync] connection ${connection._id.toString()} (${connection.platform}) failed:`,
+      message
+    );
+    await PlatformConnection.updateOne(
+      { _id: connection._id },
+      {
+        $set: {
+          lastSyncAt: new Date(),
+          lastSyncStatus: "error",
+          lastSyncError: "The last sync attempt failed. It will retry automatically.",
+        },
+      }
+    ).catch(() => {
+      // Best-effort — never let an observability write fail the sync itself.
+    });
   }
 }

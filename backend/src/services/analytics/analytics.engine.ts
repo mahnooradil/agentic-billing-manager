@@ -120,21 +120,36 @@ export async function computeAnalyticsOverview(
     const platformPipeline: PipelineStage[] = [
       { $match: currencyMatch },
       {
-        // A record has exactly one of `platform` (manual) or
-        // `platformConnection` (auto_sync/email_sync). Grouping by the ref
-        // ALONE would merge every vendor behind one email/OAuth connection
-        // (e.g. Netflix, Spotify, and GitHub all via the same Gmail inbox)
-        // into a single bucket — `vendorName` (set by email-sync's AI
-        // extraction) breaks those back apart; auto_sync/manual records
-        // have no `vendorName`, so they group exactly as before.
+        // Task 7: group by the real, resolved Vendor identity when known —
+        // this is what actually fixes grouping "by connection" instead of
+        // "by vendor" (the audit's own framing): the SAME vendor billed
+        // through two different connections (e.g. a direct AWS billing-sync
+        // connection AND an AWS invoice email in a Gmail inbox) now collapses
+        // into one bucket instead of two. Falls back to the pre-Task-7
+        // `{platform|platformConnection, vendorName}` grouping only for a
+        // manual record (no Vendor concept — its `platform` ref already is
+        // its own one-platform-one-vendor identity) or a not-yet-backfilled
+        // legacy record (`vendor` unset) — `vendorNameFallback` is ignored
+        // once `_id.ref` actually is a Vendor id.
         $group: {
-          _id: { ref: { $ifNull: ["$platform", "$platformConnection"] }, vendor: "$vendorName" },
+          _id: {
+            ref: { $ifNull: ["$vendor", { $ifNull: ["$platform", "$platformConnection"] }] },
+            vendorNameFallback: "$vendorName",
+          },
           total: { $sum: "$amount" },
           count: { $sum: 1 },
         },
       },
       { $sort: { total: -1 } },
       { $limit: TOP_PLATFORMS_LIMIT },
+      {
+        $lookup: {
+          from: "vendors",
+          localField: "_id.ref",
+          foreignField: "_id",
+          as: "vendorDoc",
+        },
+      },
       {
         $lookup: {
           from: "platforms",
@@ -152,23 +167,36 @@ export async function computeAnalyticsOverview(
         },
       },
       {
-        // Exactly one of these two arrays has a match (the other is
-        // empty) — a manual Platform's own name/slug, or a synced
-        // connection's name/slug, overridden by the specific vendor name
-        // when one was captured (see the group stage's comment).
+        // Exactly one of these three arrays has a match (the others are
+        // empty) — a resolved Vendor's own name/domain takes precedence,
+        // then a manual Platform's own name/slug, then a synced
+        // connection's name/slug (overridden by the legacy vendorName
+        // fallback when one was captured — see the group stage's comment).
         $addFields: {
           platform: {
             $cond: [
-              { $gt: [{ $size: "$platformDoc" }, 0] },
+              { $gt: [{ $size: "$vendorDoc" }, 0] },
               {
-                name: { $arrayElemAt: ["$platformDoc.name", 0] },
-                slug: { $arrayElemAt: ["$platformDoc.slug", 0] },
+                name: { $arrayElemAt: ["$vendorDoc.name", 0] },
+                slug: { $ifNull: [{ $arrayElemAt: ["$vendorDoc.domain", 0] }, ""] },
               },
               {
-                name: {
-                  $ifNull: ["$_id.vendor", { $arrayElemAt: ["$connectionDoc.displayName", 0] }],
-                },
-                slug: { $arrayElemAt: ["$connectionDoc.platform", 0] },
+                $cond: [
+                  { $gt: [{ $size: "$platformDoc" }, 0] },
+                  {
+                    name: { $arrayElemAt: ["$platformDoc.name", 0] },
+                    slug: { $arrayElemAt: ["$platformDoc.slug", 0] },
+                  },
+                  {
+                    name: {
+                      $ifNull: [
+                        "$_id.vendorNameFallback",
+                        { $arrayElemAt: ["$connectionDoc.displayName", 0] },
+                      ],
+                    },
+                    slug: { $arrayElemAt: ["$connectionDoc.platform", 0] },
+                  },
+                ],
               },
             ],
           },

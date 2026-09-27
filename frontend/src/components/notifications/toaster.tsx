@@ -19,14 +19,8 @@ import {
 
 const TYPE_META: Record<ToastType, { icon: LucideIcon; className: string }> = {
   info: { icon: Info, className: "text-foreground" },
-  success: {
-    icon: CircleCheck,
-    className: "text-emerald-600 dark:text-emerald-400",
-  },
-  warning: {
-    icon: TriangleAlert,
-    className: "text-amber-600 dark:text-amber-400",
-  },
+  success: { icon: CircleCheck, className: "text-primary" },
+  warning: { icon: TriangleAlert, className: "text-foreground" },
   error: { icon: CircleAlert, className: "text-destructive" },
 };
 

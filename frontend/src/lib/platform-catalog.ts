@@ -1,12 +1,19 @@
 /**
  * Static catalog of supported platforms (Phase F8). The single source of truth
- * for how each platform is presented (label, category, monogram, brand-tinted
- * badge, and its default connection method). Adding a platform later is one
- * entry here plus the matching backend enum — no redesign.
+ * for how each platform is presented (label, category, monogram, badge, and
+ * its default connection method). Adding a platform later is one entry here
+ * plus the matching backend enum — no redesign.
  *
- * Icons render as monograms (the project forbids <img>), with LITERAL Tailwind
- * classes so the JIT scanner keeps them.
+ * Icons render as monograms (the project forbids <img>). Every platform
+ * shares the SAME neutral badge treatment (`MONOGRAM_BADGE` below) rather
+ * than a distinct brand hue per platform — the black/white/one-accent
+ * redesign intentionally drops the rainbow-of-8-hues per-brand tinting that
+ * used to live on each catalog entry.
  */
+
+/** One shared, neutral badge style for every platform monogram — no
+ *  per-brand color. */
+export const MONOGRAM_BADGE = "bg-secondary text-secondary-foreground";
 import type {
   ConnectionPlatform,
   ConnectionType,
@@ -42,7 +49,7 @@ export const PLATFORM_CATALOG: PlatformMeta[] = [
     label: "Stripe",
     category: "Payments",
     monogram: "S",
-    badge: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+    badge: MONOGRAM_BADGE,
     connectionType: "oauth",
   },
   {
@@ -50,7 +57,7 @@ export const PLATFORM_CATALOG: PlatformMeta[] = [
     label: "PayPal",
     category: "Payments",
     monogram: "P",
-    badge: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+    badge: MONOGRAM_BADGE,
     connectionType: "oauth",
   },
   {
@@ -58,7 +65,7 @@ export const PLATFORM_CATALOG: PlatformMeta[] = [
     label: "Fiverr",
     category: "Freelance",
     monogram: "F",
-    badge: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    badge: MONOGRAM_BADGE,
     connectionType: "oauth",
   },
   {
@@ -66,7 +73,7 @@ export const PLATFORM_CATALOG: PlatformMeta[] = [
     label: "Upwork",
     category: "Freelance",
     monogram: "U",
-    badge: "bg-green-500/10 text-green-600 dark:text-green-400",
+    badge: MONOGRAM_BADGE,
     connectionType: "oauth",
   },
   {
@@ -74,7 +81,7 @@ export const PLATFORM_CATALOG: PlatformMeta[] = [
     label: "OpenAI",
     category: "AI Providers",
     monogram: "AI",
-    badge: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
+    badge: MONOGRAM_BADGE,
     connectionType: "api_key",
   },
   {
@@ -82,7 +89,7 @@ export const PLATFORM_CATALOG: PlatformMeta[] = [
     label: "Anthropic",
     category: "AI Providers",
     monogram: "A",
-    badge: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    badge: MONOGRAM_BADGE,
     connectionType: "api_key",
   },
   {
@@ -90,7 +97,7 @@ export const PLATFORM_CATALOG: PlatformMeta[] = [
     label: "Google Gemini",
     category: "AI Providers",
     monogram: "G",
-    badge: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+    badge: MONOGRAM_BADGE,
     connectionType: "api_key",
   },
   {
@@ -98,7 +105,7 @@ export const PLATFORM_CATALOG: PlatformMeta[] = [
     label: "OpenRouter",
     category: "AI Providers",
     monogram: "OR",
-    badge: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+    badge: MONOGRAM_BADGE,
     connectionType: "api_key",
   },
 ];
@@ -139,7 +146,7 @@ export function integrationCardMeta(connection: PlatformConnection): CardMeta {
     label: connection.displayName || connection.platform,
     category: "Integration",
     monogram: initialsOf(connection.displayName || connection.platform),
-    badge: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+    badge: MONOGRAM_BADGE,
     connectionType: connection.connectionType,
   };
 }

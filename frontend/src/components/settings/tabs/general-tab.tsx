@@ -40,7 +40,7 @@ const DATE_FORMAT_LABELS: Record<(typeof DATE_FORMATS)[number], string> = {
 
 const LANDING_PAGE_LABELS: Record<(typeof LANDING_PAGES)[number], string> = {
   overview: "Dashboard",
-  billing: "Billing",
+  billing: "Invoices",
   usage: "Analytics",
 };
 

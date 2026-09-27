@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { NotificationCenter } from "@/components/notifications/notification-center";
 import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
+import { WorkspaceIndicator } from "./workspace-indicator";
 
 interface TopNavbarProps {
   /** Opens the mobile navigation drawer. */
@@ -13,8 +14,8 @@ interface TopNavbarProps {
 }
 
 /**
- * Sticky top navigation bar: mobile menu trigger, theme toggle, live
- * notifications, and the user avatar menu.
+ * Sticky top navigation bar: mobile menu trigger, the active-workspace
+ * indicator, theme toggle, live notifications, and the user avatar menu.
  */
 export function TopNavbar({ onMenuClick }: TopNavbarProps) {
   return (
@@ -28,6 +29,8 @@ export function TopNavbar({ onMenuClick }: TopNavbarProps) {
       >
         <Menu />
       </Button>
+
+      <WorkspaceIndicator />
 
       <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />

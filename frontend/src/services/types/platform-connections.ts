@@ -40,6 +40,14 @@ export interface PlatformConnection {
   lastVerifiedAt: string | null;
   /** Safe message from the last failed verification (null when healthy). */
   lastError: string | null;
+  /** When the most recent SYNC RUN completed, success or failure — distinct
+   *  from lastVerifiedAt (the credential's own health check). */
+  lastSyncAt: string | null;
+  lastSyncStatus: "success" | "error" | null;
+  /** Safe message from the most recent failed sync run (null when healthy). */
+  lastSyncError: string | null;
+  messagesScanned: number | null;
+  invoicesFound: number | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -26,14 +26,26 @@ export interface IUser {
    *  one at a time (see auth.middleware.ts). `undefined` for a user who has
    *  never needed to switch (their only/first membership is used instead). */
   activeOrganizationId?: Types.ObjectId;
-  /** This user's Slack member id (`U…`), once they've linked their account
-   *  via a one-time code (see services/slack) — lets them chat with the
-   *  Billing Advisor Agent from a Slack DM. `undefined` until linked. */
-  slackUserId?: string;
-  /** Pending Slack link code + expiry, cleared once used. Short-lived (see
-   *  services/slack/slack-chat-handler.ts) — never treated as a login credential. */
+  /** This user's linked Slack identities, one per CONNECTED WORKSPACE (an
+   *  Organization's `slackWorkspace` — see organization.model.ts). A Slack
+   *  member id (`U…`) is only unique WITHIN its own workspace (`teamId`), so
+   *  a user who belongs to several organizations, each with their own
+   *  separate connected Slack workspace, needs one entry per workspace —
+   *  never a single flat id. Set via a one-time link code (see
+   *  services/slack/slack-chat-handler.ts) once per workspace. */
+  slackLinks: Array<{
+    teamId: string;
+    slackUserId: string;
+    organization: Types.ObjectId;
+  }>;
+  /** Pending Slack link code + expiry, cleared once used. Scoped to the
+   *  specific organization (and therefore Slack workspace) the code was
+   *  generated for — redeeming it in the wrong workspace's DM must not
+   *  silently link against a different org than the one intended. Short-
+   *  lived — never treated as a login credential. */
   slackLinkCode?: string;
   slackLinkCodeExpiresAt?: Date;
+  slackLinkOrganizationId?: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,11 +82,15 @@ const userSchema = new Schema<IUser, UserModel>(
       type: Schema.Types.ObjectId,
       ref: "Organization",
     },
-    slackUserId: {
-      type: String,
-      trim: true,
-      unique: true,
-      sparse: true, // most users never link Slack — sparse keeps them out of the unique index
+    slackLinks: {
+      type: [
+        {
+          teamId: { type: String, required: true, trim: true },
+          slackUserId: { type: String, required: true, trim: true },
+          organization: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
+        },
+      ],
+      default: [],
     },
     slackLinkCode: {
       type: String,
@@ -82,6 +98,10 @@ const userSchema = new Schema<IUser, UserModel>(
     },
     slackLinkCodeExpiresAt: {
       type: Date,
+    },
+    slackLinkOrganizationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organization",
     },
   },
   {
@@ -93,6 +113,15 @@ const userSchema = new Schema<IUser, UserModel>(
       },
     },
   }
+);
+
+// Enforces that a (teamId, slackUserId) pair — one Slack identity within one
+// specific workspace — is never linked to more than one User document. A
+// multikey index: each array element becomes its own index entry, so this
+// still catches a collision even though the fields live inside an array.
+userSchema.index(
+  { "slackLinks.teamId": 1, "slackLinks.slackUserId": 1 },
+  { unique: true, sparse: true }
 );
 
 export const User = model<IUser, UserModel>("User", userSchema);

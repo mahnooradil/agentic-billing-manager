@@ -19,6 +19,7 @@ import { sendSuccess } from "@/utils/apiResponse";
 import { toPublicBilling } from "@/utils/billing.serializer";
 import { toCsv, parseCsv } from "@/utils/csv";
 import { Billing, type BillingDocument } from "@/models/billing.model";
+import { BillingEvent } from "@/models/billing-event.model";
 import { Platform } from "@/models/platform.model";
 import { emitBusinessDataChanged } from "@/services/events/event-bus";
 import {
@@ -26,6 +27,7 @@ import {
   getRemainingBillingRecordCapacity,
 } from "@/utils/plan-limits";
 import { importBillingRowSchema } from "@/validators/billing.validator";
+import { recordBillingEvent } from "@/services/billing/billing-event-recorder.service";
 import type {
   CreateBillingInput,
   UpdateBillingInput,
@@ -42,7 +44,8 @@ async function findBillingOr404(
   }
   const billing = await Billing.findOne({ _id: id, organization: organizationId })
     .populate("platform", "name slug")
-    .populate("platformConnection", "displayName platform");
+    .populate("platformConnection", "displayName platform")
+    .populate("vendor", "name domain");
   if (!billing) {
     throw new AppError("Billing record not found", 404);
   }
@@ -74,6 +77,7 @@ export const listBillingRecords = asyncHandler(async (req, res) => {
   const records = await Billing.find({ organization: organization._id })
     .populate("platform", "name slug")
     .populate("platformConnection", "displayName platform")
+    .populate("vendor", "name domain")
     .sort({ billingDate: -1, createdAt: -1 });
   sendSuccess(res, 200, "Billing records retrieved", {
     billingRecords: records.map(toPublicBilling),
@@ -90,6 +94,7 @@ export const exportBillingRecords = asyncHandler(async (req, res) => {
   const records = await Billing.find({ organization: organization._id })
     .populate("platform", "name slug")
     .populate("platformConnection", "displayName platform")
+    .populate("vendor", "name domain")
     .sort({ billingDate: -1, createdAt: -1 });
 
   const csv = toCsv(
@@ -337,6 +342,7 @@ export const updateBillingRecord = asyncHandler(async (req, res) => {
 
   const body = req.body as UpdateBillingInput;
   const billing = await findBillingOr404(req.params.id as string, organization._id);
+  const previousStatus = billing.status;
 
   // Only re-validate the platform reference when it is actually changing.
   if (body.platform) {
@@ -349,6 +355,27 @@ export const updateBillingRecord = asyncHandler(async (req, res) => {
   billing.manuallyEditedAt = new Date();
   await billing.save();
   await billing.populate("platform");
+
+  // Task 8 (dual-write, behind a flag) — a human changing the status is the
+  // ONE event type that always wins in deriveStatus(), recorded here so
+  // that guarantee actually holds. Only for a REAL change, not a no-op save
+  // of the same status, and only for auto_sync/email_sync records (a manual
+  // record has no BillingEvent history at all — nothing synced ever writes
+  // one for it, so there's nothing for a correction to override).
+  if (body.status && body.status !== previousStatus && billing.source !== "manual") {
+    await recordBillingEvent({
+      organization: organization._id,
+      billing: billing._id,
+      type: "user_correction",
+      occurredAt: new Date(),
+      confidence: 1,
+      source: "user",
+      correctedStatus: body.status,
+      createdBy: user._id,
+    }).catch(() => {
+      // Best-effort — see the function's own docstring.
+    });
+  }
 
   emitBusinessDataChanged({
     source: "billing",
@@ -370,6 +397,11 @@ export const deleteBillingRecord = asyncHandler(async (req, res) => {
 
   const billing = await findBillingOr404(req.params.id as string, organization._id);
   await billing.deleteOne();
+  // Best-effort cleanup of this record's BillingEvent history (Task 8) — an
+  // orphaned event referencing a deleted Billing id is harmless (nothing
+  // reads events except by billing id, which will simply never match
+  // again), but there's no reason to leave it around either.
+  await BillingEvent.deleteMany({ billing: billing._id }).catch(() => {});
   emitBusinessDataChanged({
     source: "billing",
     action: "delete",

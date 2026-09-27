@@ -15,12 +15,18 @@
  * on the wrong record.
  */
 import { Billing, BILLING_STATUSES, type BillingStatus } from "@/models/billing.model";
+import type { PlatformDocument } from "@/models/platform.model";
+import type { PlatformConnectionDocument } from "@/models/platform-connection.model";
+import type { VendorDocument } from "@/models/vendor.model";
 import { getOrganizationIdForUser } from "@/services/organizations/membership-lookup.service";
 
 export interface ProposeUpdateStatusResult {
   found: boolean;
   billingId?: string;
   customerName?: string;
+  /** Who this bill is actually FROM — see billing-search.tool.ts's
+   *  DISAMBIGUATION_NOTE; `customerName` alone is not reliable for this. */
+  vendor?: string | null;
   invoiceNumber?: string;
   currentStatus?: string;
   proposedStatus?: BillingStatus;
@@ -31,6 +37,7 @@ export interface ProposeDeleteResult {
   found: boolean;
   billingId?: string;
   customerName?: string;
+  vendor?: string | null;
   invoiceNumber?: string;
   amount?: number;
   currency?: string;
@@ -43,7 +50,26 @@ export interface ProposeDeleteResult {
 async function findOwnedBilling(userId: string, billingId: string) {
   const organizationId = await getOrganizationIdForUser(userId);
   if (!organizationId) return null;
-  return Billing.findOne({ _id: billingId, organization: organizationId });
+  return Billing.findOne({ _id: billingId, organization: organizationId })
+    .populate("platformConnection", "displayName")
+    .populate("platform", "name")
+    .populate("vendor", "name domain");
+}
+
+/** Same derivation as billing-search.tool.ts/billing.serializer.ts — the
+ *  real vendor, when this differs from the overloaded `customerName` field.
+ *  Prefers the resolved Vendor's name (Task 7) over the older per-record
+ *  strings when available. */
+function vendorOf(record: {
+  vendorName?: string;
+  vendor?: unknown;
+  platform?: unknown;
+  platformConnection?: unknown;
+}): string | null {
+  const platform = record.platform as PlatformDocument | null;
+  const connection = record.platformConnection as PlatformConnectionDocument | null;
+  const vendorDoc = record.vendor as VendorDocument | null;
+  return vendorDoc?.name ?? record.vendorName ?? connection?.displayName ?? platform?.name ?? null;
 }
 
 export async function runProposeUpdateBillingStatus(
@@ -61,12 +87,14 @@ export async function runProposeUpdateBillingStatus(
   if (!record) {
     return { found: false, message: "No billing record found with that id — search again first." };
   }
+  const vendor = vendorOf(record);
 
   if (record.status === newStatus) {
     return {
       found: true,
       billingId: record._id.toString(),
       customerName: record.customerName,
+      vendor,
       invoiceNumber: record.invoiceNumber,
       currentStatus: record.status,
       proposedStatus: newStatus as BillingStatus,
@@ -78,10 +106,11 @@ export async function runProposeUpdateBillingStatus(
     found: true,
     billingId: record._id.toString(),
     customerName: record.customerName,
+    vendor,
     invoiceNumber: record.invoiceNumber,
     currentStatus: record.status,
     proposedStatus: newStatus as BillingStatus,
-    message: `Ready to mark invoice ${record.invoiceNumber} (${record.customerName}) as ${newStatus} — this has NOT been changed yet. Tell the user it's staged and waiting for their confirmation to actually apply it; never claim it's already done. Don't describe a specific UI element (e.g. "the button below") — this reply can be relayed somewhere with no button, like Slack, where the chat UI's own confirm control never renders.`,
+    message: `Ready to mark invoice ${record.invoiceNumber} (${vendor ?? record.customerName}) as ${newStatus} — this has NOT been changed yet. Tell the user it's staged and waiting for their confirmation to actually apply it; never claim it's already done. Don't describe a specific UI element (e.g. "the button below") — this reply can be relayed somewhere with no button, like Slack, where the chat UI's own confirm control never renders. Use 'vendor', not 'customerName', when saying who this bill is from — customerName isn't reliable for that (see search_billing_records' note).`,
   };
 }
 
@@ -95,14 +124,16 @@ export async function runProposeDeleteBillingRecord(
   if (!record) {
     return { found: false, message: "No billing record found with that id — search again first." };
   }
+  const vendor = vendorOf(record);
 
   return {
     found: true,
     billingId: record._id.toString(),
     customerName: record.customerName,
+    vendor,
     invoiceNumber: record.invoiceNumber,
     amount: record.amount,
     currency: record.currency,
-    message: `Ready to delete invoice ${record.invoiceNumber} (${record.customerName}, ${record.amount} ${record.currency}) — this has NOT been deleted yet. Tell the user it's staged and waiting for their confirmation to actually apply it; never claim it's already done. Don't describe a specific UI element (e.g. "the button below") — this reply can be relayed somewhere with no button, like Slack, where the chat UI's own confirm control never renders. Deletion is permanent, so make sure the user actually asked for this exact invoice.`,
+    message: `Ready to delete invoice ${record.invoiceNumber} (${vendor ?? record.customerName}, ${record.amount} ${record.currency}) — this has NOT been deleted yet. Tell the user it's staged and waiting for their confirmation to actually apply it; never claim it's already done. Don't describe a specific UI element (e.g. "the button below") — this reply can be relayed somewhere with no button, like Slack, where the chat UI's own confirm control never renders. Use 'vendor', not 'customerName', when saying who this bill is from — customerName isn't reliable for that (see search_billing_records' note). Deletion is permanent, so make sure the user actually asked for this exact invoice.`,
   };
 }

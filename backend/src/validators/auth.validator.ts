@@ -58,6 +58,12 @@ export const verifyEmailChangeSchema = z.object({
     .regex(/^\d{6}$/, "Enter the 6-digit code"),
 });
 
+/** "Continue with Google" — the ID token Google Identity Services hands the
+ *  frontend after a successful sign-in, verified server-side. */
+export const googleSignInSchema = z.object({
+  credential: z.string().trim().min(1, "A Google credential is required"),
+});
+
 /** Switches which of the caller's own organizations is active. */
 export const switchOrganizationSchema = z.object({
   organizationId: z
@@ -73,3 +79,4 @@ export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type RequestEmailChangeInput = z.infer<typeof requestEmailChangeSchema>;
 export type VerifyEmailChangeInput = z.infer<typeof verifyEmailChangeSchema>;
 export type SwitchOrganizationInput = z.infer<typeof switchOrganizationSchema>;
+export type GoogleSignInInput = z.infer<typeof googleSignInSchema>;

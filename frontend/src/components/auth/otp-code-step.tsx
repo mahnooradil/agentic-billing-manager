@@ -6,12 +6,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FormAlert } from "@/components/common/form-alert";
@@ -32,7 +26,8 @@ interface OtpCodeStepProps {
  * Step 2 of the passwordless flow — shared by login and register, which only
  * differ in how the code was requested (step 1). Verifying is identical
  * either way (`POST /auth/verify-otp`), so this step never needs to know
- * which flow it's in.
+ * which flow it's in. Plain, chrome-less markup (no card) to match the
+ * minimal single-column auth layout.
  */
 export function OtpCodeStep({ email, onVerify, onResend, onBack }: OtpCodeStepProps) {
   const [error, setError] = React.useState<string | null>(null);
@@ -82,64 +77,65 @@ export function OtpCodeStep({ email, onVerify, onResend, onBack }: OtpCodeStepPr
   };
 
   return (
-    <>
-      <CardHeader>
-        <CardTitle className="text-lg">Check your email</CardTitle>
-        <CardDescription>
+    <div className="space-y-8">
+      <div className="space-y-1.5 text-center">
+        <h1 className="font-heading text-2xl font-semibold text-foreground">
+          Enter the verification code
+        </h1>
+        <p className="text-sm text-muted-foreground">
           We sent a 6-digit code to <span className="font-medium text-foreground">{email}</span>.
-        </CardDescription>
-      </CardHeader>
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <CardContent className="space-y-4">
-          {error ? <FormAlert variant="error" message={error} /> : null}
-          {resendStatus.type === "sent" ? (
-            <FormAlert variant="success" message="A new code has been sent." />
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+        {error ? <FormAlert variant="error" message={error} /> : null}
+        {resendStatus.type === "sent" ? (
+          <FormAlert variant="success" message="A new code has been sent." />
+        ) : null}
+        {resendStatus.type === "error" ? (
+          <FormAlert variant="error" message={resendStatus.message} />
+        ) : null}
+
+        <div className="space-y-2">
+          <Label htmlFor="code">Verification code</Label>
+          <Input
+            id="code"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            placeholder="123456"
+            aria-invalid={Boolean(errors.code)}
+            {...register("code")}
+          />
+          {errors.code ? (
+            <p className="text-xs text-destructive">{errors.code.message}</p>
           ) : null}
-          {resendStatus.type === "error" ? (
-            <FormAlert variant="error" message={resendStatus.message} />
-          ) : null}
+        </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="code">Verification code</Label>
-            <Input
-              id="code"
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              placeholder="123456"
-              aria-invalid={Boolean(errors.code)}
-              {...register("code")}
-            />
-            {errors.code ? (
-              <p className="text-xs text-destructive">{errors.code.message}</p>
-            ) : null}
-          </div>
+        <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+          {isSubmitting ? <Loader2 className="animate-spin" /> : null}
+          {isSubmitting ? "Verifying…" : "Continue"}
+        </Button>
 
-          <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? <Loader2 className="animate-spin" /> : null}
-            {isSubmitting ? "Verifying…" : "Verify"}
-          </Button>
-
-          <div className="flex items-center justify-between text-sm">
-            <button
-              type="button"
-              onClick={onBack}
-              className="text-muted-foreground underline-offset-4 hover:underline"
-            >
-              Use a different email
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleResend()}
-              disabled={resending}
-              className="font-medium text-foreground underline-offset-4 hover:underline disabled:opacity-50"
-            >
-              {resending ? "Sending…" : "Resend code"}
-            </button>
-          </div>
-        </CardContent>
+        <div className="flex items-center justify-between text-sm">
+          <button
+            type="button"
+            onClick={onBack}
+            className="text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Use a different email
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleResend()}
+            disabled={resending}
+            className="font-medium text-foreground underline-offset-4 hover:underline disabled:opacity-50"
+          >
+            {resending ? "Sending…" : "Resend code"}
+          </button>
+        </div>
       </form>
-    </>
+    </div>
   );
 }

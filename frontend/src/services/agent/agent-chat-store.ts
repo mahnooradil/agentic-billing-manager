@@ -121,13 +121,33 @@ export const agentChatStore = {
     emit();
   },
   /**
-   * Drops the in-memory conversation and forces the next `subscribe()` to
-   * re-hydrate from storage. Called on login/logout so a same-tab account
-   * switch can never keep a previous user's messages in memory.
+   * Drops the in-memory conversation AND the stored transcript under the
+   * CURRENT storage key, then forces the next `subscribe()` to re-hydrate
+   * (finding nothing, so it starts empty). Called on login/logout (a same-tab
+   * account switch can never keep a previous user's messages in memory) and
+   * on organization switch.
+   *
+   * The organization case is why this must also clear storage, not just
+   * memory: `storageKey()` is namespaced by user id only, not by
+   * organization (this app has no separate client-side "active org" concept
+   * to key on) — so within the SAME user, switching workspaces previously
+   * left the old workspace's transcript sitting in that same storage slot.
+   * Re-hydrating after a mere in-memory clear would just read it straight
+   * back, silently showing one workspace's conversation while viewing
+   * another. Removing it here — right as the switch happens, while
+   * `storageKey()` still resolves against the pre-switch session — actually
+   * closes that gap instead of only appearing to.
    */
   reset(): void {
     hydrated = false;
     state = EMPTY;
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem(storageKey());
+      } catch {
+        /* storage unavailable — nothing left to clear */
+      }
+    }
     emit();
   },
 };

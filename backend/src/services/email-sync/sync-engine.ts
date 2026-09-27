@@ -16,8 +16,14 @@
  * Called from two places: right after an email-sync connection is created
  * (one immediate pull) and by the recurring scheduler (scheduler.ts).
  */
+import type { Types } from "mongoose";
+
 import { Billing } from "@/models/billing.model";
 import { Organization } from "@/models/organization.model";
+import {
+  ProcessedMessage,
+  PROCESSED_MESSAGE_TTL_DAYS,
+} from "@/models/processed-message.model";
 import {
   PlatformConnection,
   type PlatformConnectionDocument,
@@ -28,12 +34,21 @@ import {
   type EmailSyncProvider,
   type NormalizedEmailMessage,
 } from "@/services/email-sync/provider";
-import { parseSender } from "@/services/email-sync/parser";
+import {
+  parseSender,
+  hasReplyToMismatch,
+  applySenderTrustPenalty,
+} from "@/services/email-sync/parser";
 import {
   extractInvoiceFields,
   isAiExtractionConfigured,
+  MODEL as EXTRACTION_MODEL,
 } from "@/services/email-sync/ai-invoice-extractor";
 import { consumeCredits } from "@/services/credits/credit-ledger.service";
+import { resolveVendor } from "@/services/vendors/vendor-resolver.service";
+import { recordBillingEvent } from "@/services/billing/billing-event-recorder.service";
+import type { BillingEventType } from "@/models/billing-event.model";
+import type { BillingStatus } from "@/models/billing.model";
 import { tokensToCredits } from "@/config/credits";
 import {
   upsertNotification,
@@ -44,6 +59,12 @@ import { sendSlackAlert } from "@/services/notifications/slack";
 const MAX_MESSAGES_PER_RUN = 200;
 const PAGE_SIZE = 50;
 const OVERLAP_DAYS = 1;
+/** Task 8 — a BillingEvent's `confidence` is required, but the AI
+ *  extractor's own `confidence` field can legitimately be null (the model
+ *  simply didn't return one). A moderate default rather than a fake 1.0 or
+ *  0 — treated as "unknown, assume reasonably reliable" by the state
+ *  machine, not as strong evidence either way. */
+const DEFAULT_EVENT_CONFIDENCE = 0.7;
 /** How far back a Paid/Overdue confirmation (no real invoice number) may
  *  reach to resolve an existing open invoice's status, instead of creating a
  *  new row — generous enough for common NET-30-with-grace terms, bounded so
@@ -55,6 +76,35 @@ const OPEN_INVOICE_MATCH_WINDOW_MS = 45 * 86_400_000;
  *  literal "." — regex-special — from a decimal amount). */
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Records that a message was actually checked, so no future run — however
+ *  many times this message reappears inside the rolling search window —
+ *  ever pays for the AI extractor to look at it again. Upsert, not insert:
+ *  a genuinely new-and-unique dedupe key per (connection, messageId) means
+ *  this can only ever be called once per real message per outcome, but
+ *  upserting keeps it safe against an unexpected re-run of the same commit. */
+async function markMessageProcessed(
+  connectionId: Types.ObjectId,
+  messageId: string,
+  outcome: "invoice" | "not_billing"
+): Promise<void> {
+  const now = new Date();
+  await ProcessedMessage.updateOne(
+    { connection: connectionId, messageId },
+    {
+      $set: {
+        outcome,
+        processedAt: now,
+        expiresAt: new Date(now.getTime() + PROCESSED_MESSAGE_TTL_DAYS * 86_400_000),
+      },
+    },
+    { upsert: true }
+  ).catch(() => {
+    // Best-effort — if this write fails, the worst case is the message gets
+    // re-checked on a future run (paying for it again), never that a real
+    // invoice silently gets skipped. Never let this abort the sync itself.
+  });
 }
 
 interface EmailSyncState {
@@ -193,6 +243,7 @@ async function syncConnectionEmailInner(
     setFields: Record<string, unknown>;
     receivedAt: Date;
     openInvoiceLookup: { externalIdPrefix: string } | null;
+    messageId: string;
   }> = [];
 
   try {
@@ -205,6 +256,21 @@ async function syncConnectionEmailInner(
         pageToken
       );
       for (const messageId of page.messageIds) {
+        // The actual fix for the re-extraction loop: a message already
+        // recorded here — from THIS run's own earlier page, or any previous
+        // run, however many times it keeps reappearing inside the rolling
+        // OVERLAP_DAYS search window — is skipped before it can cost
+        // anything. Deliberately checked BEFORE the cap/credits gates below,
+        // so a run doesn't burn its 200-message budget re-confirming old
+        // ground; it reaches genuinely new candidates instead, which is what
+        // lets backfill make real progress across runs (GM-004) instead of
+        // re-fetching the identical first page forever.
+        const alreadyProcessed = await ProcessedMessage.exists({
+          connection: connection._id,
+          messageId,
+        });
+        if (alreadyProcessed) continue;
+
         if (processed >= MAX_MESSAGES_PER_RUN) {
           hitCap = true;
           break;
@@ -247,7 +313,14 @@ async function syncConnectionEmailInner(
               setFields: extracted.fields.setFields,
               receivedAt: message.receivedAt,
               openInvoiceLookup: extracted.fields.openInvoiceLookup,
+              messageId,
             });
+          } else {
+            // Genuinely checked and confirmed not a billing email — mark it
+            // now (no later commit step depends on this one, unlike the
+            // "invoice" case below, which is only marked once its Billing
+            // write actually lands).
+            await markMessageProcessed(connection._id, messageId, "not_billing");
           }
         } catch {
           // One bad/unreachable message must never abort the whole run —
@@ -297,7 +370,7 @@ async function syncConnectionEmailInner(
         }
       }
 
-      const existing = await Billing.findOne(dedupeQuery).select("manuallyEditedAt");
+      const existing = await Billing.findOne(dedupeQuery).select("manuallyEditedAt amount");
 
       // A human corrected this exact record (e.g. via the Billing page or
       // the Billing Advisor Agent's confirm button) more recently than this
@@ -309,12 +382,69 @@ async function syncConnectionEmailInner(
         continue;
       }
 
-      await Billing.findOneAndUpdate(
+      const savedBilling = await Billing.findOneAndUpdate(
         dedupeQuery,
         { $set: update.setFields },
-        { upsert: true, setDefaultsOnInsert: true, runValidators: true }
+        { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
       );
       if (!existing) created++;
+
+      // Task 8 (dual-write, behind a flag) — append the evidence this
+      // write represents, then re-derive status from the record's WHOLE
+      // history. Best-effort: this is a comparison layer, not the source of
+      // truth yet, so it must never fail the actual `status` write above.
+      if (savedBilling) {
+        const setFields = update.setFields as {
+          status?: BillingStatus;
+          amount?: number;
+          extractionConfidence?: number;
+          sourceMessageId?: string;
+        };
+        const status = setFields.status ?? "Pending";
+        const confidence = setFields.extractionConfidence ?? DEFAULT_EVENT_CONFIDENCE;
+        // Awaited (not fire-and-forget) and sequenced deliberately: each
+        // call's own internal recompute reads the FULL event history at
+        // that moment, so the amount_changed call (when it happens) must
+        // run strictly after the status event's own insert has landed, or
+        // its recompute could read a stale history and leave a stored
+        // derivedStatus one event behind.
+        await recordBillingEvent({
+          organization: connection.organization,
+          billing: savedBilling._id,
+          type: eventTypeForStatus(status, !existing),
+          occurredAt: update.receivedAt,
+          confidence,
+          source: "email_sync",
+          sourceMessageId: setFields.sourceMessageId,
+        }).catch(() => {
+          // Best-effort — see the function's own docstring.
+        });
+        if (
+          existing &&
+          typeof setFields.amount === "number" &&
+          setFields.amount !== existing.amount
+        ) {
+          await recordBillingEvent({
+            organization: connection.organization,
+            billing: savedBilling._id,
+            type: "amount_changed",
+            occurredAt: update.receivedAt,
+            confidence,
+            source: "email_sync",
+            amount: setFields.amount,
+            sourceMessageId: setFields.sourceMessageId,
+          }).catch(() => {
+            // Best-effort — see the function's own docstring.
+          });
+        }
+      }
+
+      // Marked here, only once the Billing write actually lands — not when
+      // the extraction was first staged above. If the process dies between
+      // staging and this commit loop, this message has NO processed record,
+      // so it's correctly re-attempted on the next run instead of being
+      // permanently treated as "done" with no Billing row to show for it.
+      await markMessageProcessed(connection._id, update.messageId, "invoice");
     }
 
     // Only advance the watermark when the search window was fully drained —
@@ -325,6 +455,18 @@ async function syncConnectionEmailInner(
     // whatever didn't get through. Stopping early because the results ran
     // past `sinceDate` (Outlook) IS a fully-drained window, so it still
     // advances the watermark.
+    //
+    // `hitCap` deliberately still blocks the advance even now that
+    // ProcessedMessage exists. Advancing it to "now" after a capped run
+    // would narrow every future search window forward past whatever's still
+    // unprocessed beyond message #200 — those messages would never be
+    // searched for again and would be lost, not just delayed. Leaving the
+    // watermark where it is means the *same* search window gets reissued on
+    // the next run — but now the already-handled prefix is skipped almost
+    // instantly via ProcessedMessage instead of being re-billed, so each run
+    // reaches genuinely new candidates within its own 200-message budget.
+    // That is what actually makes GM-004's "run 1: first 200, run 2: the
+    // next 200, run 3: the final 100" backfill-completion behavior work.
     const allAttemptsFailed = processed > 0 && extractionErrors === processed;
     if (!hitCap && !outOfCredits && !allAttemptsFailed) {
       await PlatformConnection.updateOne(
@@ -340,8 +482,54 @@ async function syncConnectionEmailInner(
         triggeredBy: externalUserId,
       });
     }
-  } catch {
-    // Best-effort: a provider hiccup must not affect other connections/users.
+
+    // Sync observability (S-17 fix) — records that a run actually happened
+    // and what it did, separate from lastVerifiedAt/lastError (the
+    // CREDENTIAL's own health). Written on every completed pass, whether or
+    // not it fully drained the window (hitCap/outOfCredits are normal
+    // operational states, not failures) — `lastSyncStatus: "error"` is
+    // reserved for the catch block below, a genuine crash.
+    await PlatformConnection.updateOne(
+      { _id: connection._id },
+      {
+        $set: {
+          lastSyncAt: new Date(),
+          lastSyncStatus: "success",
+          messagesScanned: processed,
+          invoicesFound: created,
+        },
+        $unset: { lastSyncError: "" },
+      }
+    ).catch(() => {
+      // Best-effort — never let an observability write fail the sync itself.
+    });
+  } catch (error) {
+    // Previously a bare `catch {}` — a provider outage, an expired token, or
+    // an unexpected bug all produced literally no signal anywhere (S-17):
+    // no log, no `lastSyncError`, no way to tell a broken integration from
+    // an empty inbox. Still best-effort (a hiccup on one connection must
+    // never affect others), but now actually visible to both the operator
+    // (console) and the customer (`lastSyncError`, rendered in the UI).
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[email-sync] connection ${connection._id.toString()} (${connection.platform}) failed:`,
+      message
+    );
+    await PlatformConnection.updateOne(
+      { _id: connection._id },
+      {
+        $set: {
+          lastSyncAt: new Date(),
+          lastSyncStatus: "error",
+          // A fixed, safe message — never the raw exception text, which
+          // could in principle echo a URL/token fragment from a provider
+          // error. The real message is already logged above for debugging.
+          lastSyncError: "The last sync attempt failed. It will retry automatically.",
+        },
+      }
+    ).catch(() => {
+      // Best-effort — never let an observability write fail the sync itself.
+    });
   }
 }
 
@@ -379,6 +567,50 @@ function meaningfulString(value: string | null | undefined): string | null {
   const trimmed = value.trim();
   if (!trimmed || MEANINGLESS_VALUES.has(trimmed.toLowerCase())) return null;
   return trimmed;
+}
+
+/** Maps an AI-observed status onto the richer BillingEvent vocabulary
+ *  (Task 8). The AI extractor's schema has no way to distinguish an
+ *  ORIGINAL invoice from a follow-up reminder — both come back as
+ *  "Pending" — so this uses the one signal sync-engine.ts already has for
+ *  free: whether a Billing record for this externalId existed before this
+ *  write. The first-ever "Pending" observation for a record is its
+ *  issuance; every later one is a reminder. */
+function eventTypeForStatus(status: BillingStatus, isNewRecord: boolean): BillingEventType {
+  switch (status) {
+    case "Paid":
+      return "payment_confirmed";
+    case "Overdue":
+      return "payment_failed";
+    case "Pending":
+    default:
+      return isNewRecord ? "invoice_issued" : "reminder";
+  }
+}
+
+const EVIDENCE_SNIPPET_MAX_CHARS = 300;
+
+/** Bounded, sanitized excerpt of the source email's own text, stored as the
+ *  record's `evidence` — deliberately derived here in code from the raw
+ *  body, never asked of the AI model. Letting the model "quote" the email
+ *  back would just reproduce whatever attacker-controlled text it contains
+ *  into a NEW persisted field, one the agent later reads as context — a
+ *  second injection surface for no real benefit, since a plain, deterministic
+ *  prefix already answers "what did this record actually come from" just as
+ *  well as an AI-picked quote would. */
+function buildEvidenceSnippet(bodyText: string): string | null {
+  const cleaned = bodyText
+    // Strip control/non-printable characters (keep normal whitespace) before
+    // collapsing it — this is stored text an operator or the agent will
+    // read, not raw email bytes.
+    // eslint-disable-next-line no-control-regex -- deliberately matching control chars to strip them
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return null;
+  return cleaned.length > EVIDENCE_SNIPPET_MAX_CHARS
+    ? `${cleaned.slice(0, EVIDENCE_SNIPPET_MAX_CHARS - 3)}...`
+    : cleaned;
 }
 
 /** Extracts one candidate message's billing fields and prices the AI call
@@ -426,7 +658,9 @@ async function extractCandidateFields(
     return { fields: null, creditsUsed };
   }
 
-  const { displayName, domain } = parseSender(message.fromHeader ?? undefined);
+  const { displayName, email: senderEmail, domain } = parseSender(
+    message.fromHeader ?? undefined
+  );
   const vendorSlug =
     (domain ?? "unknown")
       .replace(/\.(com|net|org|io|co)$/i, "")
@@ -446,6 +680,33 @@ async function extractCandidateFields(
   const invoiceNumber = invoiceNumberFromAi ?? `EMAIL-${message.id.slice(0, 10).toUpperCase()}`;
   const billingDate = parseAiDate(fields.billingDate) ?? message.receivedAt;
   const dueDate = parseAiDate(fields.dueDate);
+
+  // Real vendor identity (Task 7) — resolved by domain, the reliable key for
+  // an email-derived vendor, so the SAME vendor across many emails (and even
+  // across a separate billing-sync connection to the same vendor) collapses
+  // onto one Vendor document instead of staying three disconnected strings.
+  const vendorDoc = await resolveVendor(connection.organization, {
+    name: vendorName,
+    domain,
+  });
+
+  // Task 9 — sender verification. DMARC failing is real, mail-server-
+  // verified evidence the From: address may be spoofed; a Reply-To/From
+  // domain mismatch is a second, independent BEC signal. Either one
+  // downgrades this extraction's confidence rather than rejecting the
+  // email outright — a legitimate vendor can genuinely have DMARC
+  // misconfigured, so this is a trust signal for the user/agent to weigh,
+  // not an automatic block.
+  const senderAuthResult = message.authResults.dmarc;
+  const senderReplyToMismatch = hasReplyToMismatch(
+    message.fromHeader ?? undefined,
+    message.replyToHeader ?? undefined
+  );
+  const adjustedConfidence = applySenderTrustPenalty(
+    fields.confidence,
+    message.authResults,
+    senderReplyToMismatch
+  );
 
   // Prefer a semantic dedupe key (vendor + invoice number) over the raw message
   // id: an initial "your invoice" email and a later "payment received" receipt
@@ -480,6 +741,8 @@ async function extractCandidateFields(
     externalId,
   };
 
+  const evidenceSnippet = buildEvidenceSnippet(message.plainText);
+
   // No real invoice number, and this email is reporting a Paid/Overdue
   // OUTCOME rather than a fresh bill: the day-keyed externalId above only
   // catches same-day repeats, so hand the caller a vendor+amount prefix (day
@@ -502,6 +765,8 @@ async function extractCandidateFields(
         source: "email_sync",
         externalId,
         vendorName,
+        vendor: vendorDoc._id,
+        ...(vendorDoc.domain ? { vendorDomain: vendorDoc.domain } : {}),
         customerName: organizationName,
         invoiceNumber,
         amount: fields.amount,
@@ -510,6 +775,23 @@ async function extractCandidateFields(
         ...(dueDate ? { dueDate } : {}),
         status: fields.status ?? "Pending",
         notes: provider.notesText,
+        // Provenance trail (Task 6) — lets a user or the agent verify where
+        // this record actually came from instead of taking one AI guess on
+        // faith. `evidence`/`extractionConfidence` are omitted rather than
+        // set to a fake default when unavailable, matching every other
+        // optional field's pattern in this object.
+        sourceMessageId: message.id,
+        ...(message.threadId ? { sourceThreadId: message.threadId } : {}),
+        ...(senderEmail ? { senderEmail } : {}),
+        ...(domain ? { senderDomain: domain } : {}),
+        receivedAt: message.receivedAt,
+        ...(message.subject ? { subject: message.subject } : {}),
+        ...(adjustedConfidence !== null ? { extractionConfidence: adjustedConfidence } : {}),
+        extractionModel: EXTRACTION_MODEL,
+        extractedAt: new Date(),
+        ...(evidenceSnippet ? { evidence: [evidenceSnippet] } : {}),
+        senderAuthResult,
+        senderReplyToMismatch,
       },
     },
     creditsUsed,

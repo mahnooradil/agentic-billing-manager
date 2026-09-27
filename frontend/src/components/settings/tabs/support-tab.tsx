@@ -74,11 +74,8 @@ interface SupportCachePayload {
 }
 
 const STATUS_STYLES: Record<SupportRequest["status"], { pill: string; dot: string }> = {
-  open: { pill: "bg-amber-500/10 text-amber-700 dark:text-amber-400", dot: "bg-amber-500" },
-  resolved: {
-    pill: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-    dot: "bg-emerald-500",
-  },
+  open: { pill: "bg-secondary text-secondary-foreground", dot: "bg-muted-foreground" },
+  resolved: { pill: "bg-primary/10 text-primary", dot: "bg-primary" },
 };
 
 /**

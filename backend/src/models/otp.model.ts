@@ -42,7 +42,12 @@ const otpSchema = new Schema<IOtp, OtpModel>(
     codeHash: { type: String, required: true },
     fullName: { type: String, trim: true, default: undefined },
     attempts: { type: Number, default: 0 },
-    expiresAt: { type: Date, required: true },
+    // TTL index — MongoDB physically deletes the document once `expiresAt`
+    // itself has passed (`expireAfterSeconds: 0` means "at the field's own
+    // value", not an offset from it). Previously an expired-but-never-
+    // verified code would linger in the collection forever; `consumeOtp`
+    // only ever cleaned one up reactively, when someone tried to use it.
+    expiresAt: { type: Date, required: true, index: { expireAfterSeconds: 0 } },
   },
   { timestamps: true }
 );

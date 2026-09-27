@@ -8,9 +8,9 @@ export type FlatStatTone = "neutral" | "primary" | "success" | "warning" | "dang
 const TONE_STYLES: Record<FlatStatTone, string> = {
   neutral: "bg-secondary text-secondary-foreground",
   primary: "bg-primary/10 text-primary",
-  success: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  warning: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  danger: "bg-red-500/10 text-red-600 dark:text-red-400",
+  success: "bg-success/10 text-success",
+  warning: "bg-warning/10 text-warning",
+  danger: "bg-destructive/10 text-destructive",
 };
 
 interface FlatStatCardProps {

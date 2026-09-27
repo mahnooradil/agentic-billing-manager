@@ -44,13 +44,42 @@ export const env = {
   // Where support requests are emailed (Priority support feature). Falls back
   // to the Resend sending address itself, so no extra config is required.
   supportInboxEmail: process.env.SUPPORT_INBOX_EMAIL ?? process.env.RESEND_FROM_EMAIL ?? "",
-  // Slack app credentials — one bot for the whole deployment (not per
-  // organization, matching how the Anthropic/Resend keys above are global).
-  // Bot token calls the Web API (chat.postMessage); signing secret verifies
-  // inbound Events API requests actually came from Slack. Unset means the
-  // Slack chat integration reports "not configured".
-  slackBotToken: process.env.SLACK_BOT_TOKEN ?? "",
+  // Slack — one App (client id/secret), distributed via its own "Add to
+  // Slack" OAuth install to EACH customer organization's own workspace (see
+  // services/slack/slack-oauth.service.ts). Client id/secret and signing
+  // secret are App-level (global, the same for every installing workspace —
+  // Slack signs every request with the same secret regardless of which
+  // workspace it's from); the BOT TOKEN itself is per-organization, stored
+  // encrypted on `Organization.slackWorkspace`, never a single global value.
+  // Unset client id/secret/signing secret means the whole Slack integration
+  // (install + chat) reports "not configured".
+  slackClientId: process.env.SLACK_CLIENT_ID ?? "",
+  slackClientSecret: process.env.SLACK_CLIENT_SECRET ?? "",
   slackSigningSecret: process.env.SLACK_SIGNING_SECRET ?? "",
+  // Where Slack redirects back after a workspace admin approves the install —
+  // must exactly match one of the Redirect URLs configured on the Slack App.
+  slackOauthRedirectUri:
+    process.env.SLACK_OAUTH_REDIRECT_URI ?? "",
+  // Stripe (Buy Credits) — lets a workspace purchase additional Billing
+  // Advisor credits via Stripe Checkout (see services/payments/). Unset
+  // means the feature reports "not configured" (never faked), same
+  // convention as every other optional integration above.
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+  // "Continue with Google" sign-in — verifies the ID token Google Identity
+  // Services hands the frontend (see controllers/auth.controller.ts's
+  // `googleSignIn`); no client secret is needed for ID-token verification,
+  // only the client id (also used, as `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, by the
+  // frontend to initialize the button). Unset means the feature reports "not
+  // configured", same convention as every other optional integration above.
+  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
+  // Index integrity (S-01 fix, see config/index-integrity.ts) — when "true",
+  // every model's declared indexes are actively synced (built/dropped) at
+  // boot. Off by default: meant to be enabled for one deploy after an index
+  // changes, then turned off again, not left on permanently. The read-only
+  // assertion that fails startup on a missing index always runs regardless
+  // of this flag.
+  syncIndexesOnBoot: process.env.SYNC_INDEXES_ON_BOOT === "true",
 } as const;
 
 export const isProduction = env.nodeEnv === "production";

@@ -38,6 +38,12 @@ export interface VerifyOtpData {
   user: AuthUser;
 }
 
+/** "Continue with Google" — the ID token Google Identity Services hands
+ *  back after a successful sign-in. */
+export interface GoogleSignInPayload {
+  credential: string;
+}
+
 /** Change-email flow: request a code at the new address, then verify it. */
 export interface RequestEmailChangePayload {
   newEmail: string;

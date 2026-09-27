@@ -4,7 +4,7 @@
  */
 import type { EmailSyncProvider } from "@/services/email-sync/provider";
 import { listCandidateMessageIds, getMessage } from "@/services/email-sync/gmail-client";
-import { extractPlainText } from "@/services/email-sync/parser";
+import { extractPlainText, parseAuthenticationResults } from "@/services/email-sync/parser";
 
 const INVOICE_KEYWORDS = [
   "invoice",
@@ -78,8 +78,14 @@ export const GMAIL_PROVIDER: EmailSyncProvider = {
     const message = await getMessage(externalUserId, pipedreamAccountId, messageId);
     if (!message) return null;
     const headers = message.payload?.headers ?? [];
-    const fromHeader = headers.find((h) => h.name.toLowerCase() === "from")?.value ?? null;
-    const subject = headers.find((h) => h.name.toLowerCase() === "subject")?.value ?? null;
+    const header = (name: string) =>
+      headers.find((h) => h.name.toLowerCase() === name)?.value ?? null;
+    const fromHeader = header("from");
+    const subject = header("subject");
+    const replyToHeader = header("reply-to");
+    // Gmail's own receiving server stamps this — real evidence, not
+    // anything the sender controls (Task 9, S-08).
+    const authResults = parseAuthenticationResults(header("authentication-results"));
     // Defensive: a malformed/non-numeric `internalDate` would silently
     // produce an Invalid Date (no error here) that later crashes when
     // something calls `.toISOString()` on it — falling back to "now" is a
@@ -93,10 +99,13 @@ export const GMAIL_PROVIDER: EmailSyncProvider = {
         : new Date();
     return {
       id: message.id,
+      threadId: message.threadId,
       receivedAt,
       subject,
       plainText: extractPlainText(message),
       fromHeader,
+      replyToHeader,
+      authResults,
     };
   },
 };

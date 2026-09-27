@@ -316,7 +316,15 @@ export const connectViaPipedream = asyncHandler(async (req, res) => {
     accountIdentifier,
     lastVerifiedAt: new Date(),
     lastError: account.healthy ? undefined : "Account needs re-authentication.",
-    metadata: { pipedreamAccountId: account.id, pipedreamApp: account.app },
+    // Dotted paths (S-11 fix) — this same `set` object is applied via
+    // `$set` on both a first connect AND a reconnect (`upsert: true` below).
+    // A plain `metadata: {...}` here would REPLACE the whole subdocument on
+    // every call, silently wiping `metadata.emailSync.lastSyncedAt` — the
+    // email-sync watermark — every time a user simply reconnects an already-
+    // working Gmail/Outlook account, forcing a full re-scan from the first-
+    // sync lookback window. Dotted paths only ever touch these two fields.
+    "metadata.pipedreamAccountId": account.id,
+    "metadata.pipedreamApp": account.app,
   };
 
   const connection = await PlatformConnection.findOneAndUpdate(

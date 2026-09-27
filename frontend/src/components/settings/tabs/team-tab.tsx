@@ -276,7 +276,7 @@ export function TeamSettingsTab() {
                       className={cn(
                         "flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
                         member.role === "owner"
-                          ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                          ? "bg-primary/10 text-primary"
                           : "bg-muted text-muted-foreground"
                       )}
                     >

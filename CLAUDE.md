@@ -6,18 +6,30 @@ workflow rules, and the exact status of every phase built so far, so work can be
 resumed from any machine or a fresh session without losing context.
 
 > Companion docs (do not duplicate — cross-reference):
-> - `docs/ARCHITECTURE.md` — locked/frozen target architecture blueprint
-> - `docs/DECISIONS.md` — locked technical decisions
-> - `docs/PRODUCTION-HARDENING.md` — approved-but-deferred hardening backlog
+> - `docs/ARCHITECTURE.md` — locked/frozen target architecture blueprint. **⚠️ Known stale as of
+>   a 2026-09-15 external audit (see §10 below): it describes a LangGraph agent on Qwen 3
+>   Instruct that was never built. The real stack is Claude Managed Agents + Claude Haiku 4.5.
+>   Do not implement LangGraph/Qwen because this doc says to. It has not been rewritten yet —
+>   that rewrite is itself part of the audit backlog in §10, not yet actioned.**
+> - `docs/DECISIONS.md` — locked technical decisions. Same caveat: D-001 (the LangGraph/Qwen
+>   decision) was superseded by the actual Claude-based implementation and no decision entry
+>   was ever added to record that. Treat D-001 as stale, not binding.
+> - `docs/PRODUCTION-HARDENING.md` — approved-but-deferred hardening backlog. Overlaps
+>   significantly with §10 below (§10 is more current and evidence-backed — prefer it).
+> - `docs/audit/00` through `07` — the full external founder/CTO/architect audit (15 Sept 2026,
+>   commit `e3ad6ad`) archived verbatim. §10 below is a condensed, actionable summary of these;
+>   go to the numbered files for full evidence, file:line citations, and the complete test matrix.
 
 ---
 
 ## 1. What this project is
 
-**agentic-billing-manager** is a phase-based monorepo: a billing/usage manager that
-will eventually pull data from Pipedream → an adapter layer → an analytics engine →
-LangGraph AI modules (that end-state is a **blueprint only** in `docs/ARCHITECTURE.md`;
-nothing of it is implemented yet).
+**agentic-billing-manager** is a phase-based monorepo: a billing/usage manager that pulls
+data from Pipedream → 129 billing-sync adapters + Gmail/Outlook email-sync → an analytics
+engine → a Claude Managed Agents "Billing Advisor Agent". (`docs/ARCHITECTURE.md` describes
+a *different*, never-built LangGraph/Qwen end-state — that document is stale; see the
+companion-docs callout above and §10 below. The AI layer that actually exists is Claude,
+not LangGraph.)
 
 It is built **strictly one phase at a time**. Each phase has a tightly-scoped brief.
 
@@ -94,10 +106,16 @@ dup-key `11000` / JWT errors → proper status + `errors[]`.
 No hardcoded URIs anywhere. `autoIndex: !isProduction`. `server.ts` connects to Mongo
 FIRST, starts Express only on success, exits(1) on failure, graceful SIGINT/SIGTERM.
 
-**Auth:** JWT (generate/verify, secret+expiry from env). `authenticate` middleware
-attaches `req.user` from the Bearer token. Passwords bcrypt cost 12, `select: false`,
-pre-save hash. Login returns one generic "Invalid email or password" (no user
-enumeration).
+**Auth:** JWT (generate/verify, secret+expiry from env), `jti` claim tied to a `Session`
+document for per-device revoke. `authenticate` middleware attaches `req.user` from the
+Bearer token. **Passwordless** — this went passwordless at some point after the phase-3
+foundation below was written; there is no password field on `User`, no bcrypt anywhere.
+Every session starts the same way: request a 6-digit OTP by email
+(`POST /auth/{register,login}/request-otp`), then verify it (`POST /auth/verify-otp`) —
+verifying an unknown email creates the account (register flow), a known one logs in.
+**Known issue (P0-02, §10):** the OTP is generated with `Math.random()` (not a CSPRNG),
+the 5-attempt counter is a non-atomic read-modify-write, and none of the three OTP routes
+are rate-limited — this is a real, unfixed vulnerability, not yet remediated.
 
 ---
 
@@ -395,4 +413,262 @@ OTP resend confirmation — reuse it instead of a local `useState` + `setTimeout
 - Cross-tab logout sync; 401 refresh-token flow; Playwright e2e.
 - Remove leftover Next.js `public/*.svg` boilerplate.
 
-See `docs/PRODUCTION-HARDENING.md` for the full deferred backlog.
+See `docs/PRODUCTION-HARDENING.md` for the full deferred backlog. **Largely superseded by
+the more current, evidence-backed backlog in §10 below** — prefer §10 when the two overlap.
+
+---
+
+## 10. External founder/CTO/architect audit (15 Sept 2026) — reference backlog, NOT yet actioned
+
+An external audit was run against commit `e3ad6ad` (full repo read: ~21k LOC backend,
+~107 frontend TSX; static verification; no code modified). The user shared all 7 source
+documents in full on 2026-09-21 and asked that they be understood and recorded — **not**
+implemented yet. **This whole section is a reference backlog. Nothing in it is authorized
+for implementation until the user explicitly assigns a phase from it, per §2's golden
+rules ("one phase at a time", "wait for instruction").**
+
+**Full source, archived verbatim:** `docs/audit/00-EXECUTIVE-SUMMARY.md` through
+`docs/audit/07-TEST-MATRIX.md`. This section is a condensed index into those — go there
+for exact file:line evidence, the full P2/P3 lists, the complete 300+-row test matrix, the
+adversarial-AI test list, and the mermaid architecture/flow diagrams. Do not re-derive
+findings from memory; re-read the actual file before acting on any of this.
+
+### 10.1 — One-paragraph verdict (`00`)
+
+A competently built, genuinely thoughtful CRUD SaaS with an AI chat feature bolted on —
+not yet an AI financial agent. Engineering craft (HTTP-layer tenancy, org-switch/agent
+interaction, Slack signature verification, incident-driven code comments) is well above
+average. But the product needs three things it does not have: a domain model that can
+represent an invoice's *life* (not just a snapshot), a provenance trail that lets a user
+verify anything, and an ingestion pipeline that finds invoices reliably and affordably.
+All three are **absent, not partial**. Would not launch today, accept payments today, or
+trust it with real invoices today — but the backbone is sound and the gaps are fixable
+without a rewrite. None of the P0s below are architectural; they're four bugs and a
+missing migration. The expensive work is the domain model (one collection, not the system).
+
+### 10.2 — P0 blockers (launch-blocking; fix first, in this order)
+
+1. **Indexes never build in production** — `autoIndex: !isProduction`
+   (`backend/src/config/database.ts:40`), no `syncIndexes()`/migration anywhere in the
+   repo. Every uniqueness guarantee the code relies on is fictional in prod: duplicate
+   `User.email` accounts, duplicate OTPs (defeats the attempt limiter), the entire
+   email-sync dedup key, `SlackProcessedEvent` dedup (Slack retries re-bill). **Do this
+   first** — half a day, unblocks/derisks everything else.
+2. **Auth OTPs are predictable and brute-forceable** — three compounding defects in
+   `backend/src/controllers/auth.controller.ts`: `Math.random()` (not a CSPRNG) generates
+   the code (`:67`); the 5-attempt counter is a non-atomic read-modify-write, bypassable by
+   concurrency (`:104`); none of the three OTP routes are rate-limited. The OTP *is* the
+   only credential in this passwordless app. Fix: `crypto.randomInt`, atomic
+   `findOneAndUpdate` with `$inc`+`$lt`, mount the existing `rateLimit()` middleware on all
+   three auth routes, `app.set('trust proxy', 1)`.
+3. **Email sync can loop forever, re-billing the same 200 emails** —
+   `backend/src/services/email-sync/sync-engine.ts`: `MAX_MESSAGES_PER_RUN = 200` (`:44`);
+   if a mailbox has more candidates, the watermark never advances (`:329`), so every hourly
+   run re-fetches and re-extracts the identical first 200 messages, forever, burning
+   credits and never completing backfill. Separately, `OVERLAP_DAYS = 1` (`:46`) means even
+   steady-state re-extracts every last-24h message on every hourly run — **~24× the
+   necessary AI spend, permanently** (§10.5). Fix: a `ProcessedEmailMessage
+   {connection, messageId, processedAt}` collection with a unique index; skip anything
+   already processed; let the watermark advance on cap once per-message idempotency covers
+   you.
+4. **No revenue path exists** — zero Stripe integration. `PUT /api/plan` lets any
+   owner/admin self-assign their org to Business tier for free
+   (`backend/src/controllers/plan.controller.ts:66`). Monetization is 0% built.
+
+### 10.3 — P1 findings (serious correctness/security/cost — fix before beta/payments/public launch)
+
+- **No provenance — nothing is verifiable** (`backend/src/models/billing.model.ts`). A
+  `Billing` record stores no source message id, thread id, sender address/domain,
+  extraction confidence, or evidence. "Where did this invoice come from?" and "why is this
+  Pending?" are unanswerable by construction. **This is called out as the single
+  highest-leverage fix in the whole audit** — one schema addition unlocks trust UX,
+  dedup, the state machine, and a future learning loop simultaneously. Minimum fields:
+  `sourceMessageId`, `sourceThreadId`, `senderEmail`, `senderDomain`, `receivedAt`,
+  `subject`, `extractionConfidence`, `extractionModel`, `extractedAt`, `evidence[]`,
+  `statusConfidence`, `statusSetBy`, `paymentDate`, `supersedes`/`duplicateOf`.
+- **"Show invoices from AWS" does not work** — the domain model is inverted (modelled as
+  receivable, not payable). `Billing.customerName` is required and for email-derived
+  records is set to **the user's own org name** (`sync-engine.ts:505`); the real vendor
+  only lives in optional `vendorName`. The agent's `search_billing_records` tool has no
+  vendor parameter at all (`billing-search.tool.ts`) — the single most important query in
+  the product vision fails silently. Same root cause independently breaks the Billing
+  page's own search box (typing "Netflix" on a row labelled "Netflix" returns zero
+  results — `billing-view.tsx:110-121`, since it only searches `customerName`/
+  `invoiceNumber`, never the vendor). Fix: rename to `vendor`/`vendorDomain`/`billedTo`,
+  add a real `Vendor` collection, add vendor params to the search tool and the frontend
+  search box — sequence with the provenance migration.
+- **Status is a single-email LLM guess with no confidence or event history**
+  (`ai-invoice-extractor.ts:75-82`, `sync-engine.ts:280-320`). Chronological
+  oldest-to-newest commit *within one run* is genuinely well done, but a stale reminder
+  arriving in a later run after a real payment confirmation still flips a Paid invoice back
+  to Pending — no representation for out-of-order evidence across runs. Fix: an append-only
+  `BillingEvent` log (one row per email-derived observation, with provenance); derive
+  `Billing.status` as a projection via a deterministic state machine, not a direct write.
+- **Indirect prompt injection** — email body is concatenated into the Haiku extraction
+  call with no system prompt, no delimiters, no "treat as untrusted data" framing
+  (`ai-invoice-extractor.ts:118-127`). Forced tool-call output is a real partial
+  mitigation, but every *field value* is attacker-controlled: no SPF/DKIM/DMARC check, no
+  `Reply-To` vs `From` comparison — a spoofed "AWS" invoice for $48,000 normalizes straight
+  into the trusted dataset. Extracted `vendorName`/`invoiceNumber` are stored unsanitized
+  and later `JSON.stringify`'d raw into the agent's context
+  (`managed-agent.service.ts:259`) — a second-order injection surface.
+- **129 billing-sync adapters are mostly not invoices** (full census in
+  `docs/audit/05`, Part A) — of 129 adapters, **124 hardcode `status: "Pending"` forever**,
+  **122 stamp `billingDate: now`** (the sync time, not a real billing date), and 101 model
+  usage/balance/quota rather than a discrete invoice. Only 5 adapters
+  (`gocardless`, `heroku`, `mongodb`, `northflank`, `snapchat-marketing`) derive a real
+  status. Consequence: "outstanding" accumulates permanently-pending accrual rows that
+  never clear; monthly trend is misdated; a platform connected via both billing-sync *and*
+  email-sync double-counts (different `platformConnection`, so the unique index can't
+  catch it) — and double-counting is exactly the scenario this product is built to prevent,
+  not an edge case. Fix (do not patch 129 adapters individually): split into `Billing`
+  (discrete obligations) vs. a new `UsageAccrual` (month-to-date metered spend, explicitly
+  labelled, excluded from outstanding/overdue).
+- **No PDF/attachment parsing** (`email-sync/parser.ts`) — only walks `text/plain` →
+  `text/html` → snippet; attachments are never touched, so a near-empty email with a PDF
+  invoice attached is invisible. Hard recall ceiling no prompt tuning fixes. Compounding:
+  `gmail-client.ts:76` already fetches `format=full` (pulling attachment bytes through the
+  Pipedream proxy) and then discards them unused.
+- **Outlook sync may silently skip mail (unverified)** — Graph `$search` can't combine
+  with `$filter`; the workaround assumes results arrive newest-first and advances the
+  watermark on early-stop (`outlook-provider.ts:46`, `sync-engine.ts:329`). Graph
+  `$search` is actually relevance-ranked. **Explicitly flagged as unverified from the audit
+  sandbox — must be tested against a real mailbox before Outlook is offered to customers.**
+- **Encryption key falls back to the JWT secret, no rotation possible**
+  (`backend/src/utils/crypto.ts:23`) — if `AI_ENCRYPTION_KEY` is unset (defaults to `""`),
+  stored third-party API keys are encrypted with the same secret that signs JWTs; bare
+  SHA-256 with no salt/stretching; no key version in the stored payload, so rotation
+  requires a full re-encryption migration.
+- **Unbounded list/export endpoints** — `GET /api/billing` and `/billing/export` both
+  `.find()` with two `.populate()`s, no limit/pagination/projection
+  (`billing.controller.ts:74,90`); no compound indexes on `Billing` at all; `autoMarkOverdue`
+  full-scans across all tenants with no index on `dueDate`
+  (`notification-engine.ts:442`).
+- **Mixed-currency sums presented as one number** — `getBillingStats`
+  (`billing.controller.ts:266-276`) sums Paid amounts across whatever currencies exist as a
+  bare scalar (USD+EUR+PKR added together), acknowledged in its own code comment.
+  `analytics.engine.ts:80-107` does currency grouping *correctly* elsewhere in the same
+  codebase, then silently filters platform-breakdown/trend to the primary currency only
+  (`:110`) — two different correctness standards in one app. `overview-view.tsx`'s headline
+  number is `totalsByCurrency[0]` with no UI indication other currencies are excluded.
+- **Credit accounting under-recovers and can be outrun** — `consumeCredits` is fire-and-forget
+  (`void`, not awaited) *after* the work completes (`managed-agent.service.ts:337`);
+  `assertCreditBalance` reads from a 5-second in-memory auth cache with no reservation, so
+  concurrent requests can drive a balance arbitrarily negative; no `MAX_ITERATIONS` on the
+  agent's tool loop; `tokensToCredits` (`config/credits.ts:70`) ignores cache tokens and
+  Managed Agents' `$0.08/session-hour` runtime dimension entirely.
+
+### 10.4 — Cost/economics findings (`03`) — the most commercially dangerous finding in the audit
+
+- **Verified rates:** Haiku 4.5 $1/$5 per MTok in/out; Sonnet 5 $2/$10; Managed Agents
+  session runtime **$0.08/session-hour** (billed only while `running`, idle is free) — this
+  dimension is **not metered anywhere in the credit ledger**. Batch API (−50%) and Fast
+  Mode discounts **do not apply inside Managed Agents** at all.
+- **The 24× bug, quantified:** with `OVERLAP_DAYS=1` and no processed-message store, a
+  normal 2-inbox/60-new-invoices-per-month customer generates **2,880 extractions/month
+  instead of 120** — 8,640 credits consumed against a Pro allowance of 4,000.
+- **The credit-cycle bug compounds it:** `CREDIT_CYCLE_DAYS_BY_PLAN` in
+  `config/credits.ts:52` gives Pro/Business their AI allowance **once per year, not
+  monthly**. Combined with the 24× bug, a normal paying customer **exhausts their entire
+  annual allowance in ~13 days**, then has a dead product for 11.5 months, with **no
+  purchase/top-up flow to buy more**. A large mailbox (>200 candidates) dies in under 7
+  hours. **Fix both together**: processed-message table + monthly cycles for every tier.
+- Fixing just the two ingestion bugs is estimated to be worth **~48 points of gross margin**
+  at scale (74% vs 26% at 1,000 customers) — the highest-ROI engineering work in the repo.
+- Recommended credit redefinition: stop pricing in "1,000 blended tokens" (meaningless to a
+  customer); price in customer-visible units (1 credit = one invoice extracted, 5 = one AI
+  agent answer, 0 = any deterministic/non-LLM query, which should never touch Claude at all).
+- Verdict on Pipedream: **keep for the 129 billing-sync adapters** (right tool, huge
+  provider surface), **but consider moving Gmail/Outlook to direct OAuth** — email sync is
+  ~99% of proxy volume and both providers have real incremental-sync primitives
+  (`history.list`, Graph delta queries) Pipedream's generic proxy can't expose; also
+  removes the Outlook ordering risk in 10.3 properly. Not yet decided/actioned.
+
+### 10.5 — Frontend/UX findings (`05`) not already covered above
+
+- **Information architecture buries the core action** — connecting Gmail/Outlook (the
+  action that makes the whole product work) lived in Settings → a sub-tab, several clicks
+  deep, with no dashboard path to first value. **Note: this was independently identified
+  and already fixed in this session's own work** — Email Accounts management was removed
+  from Settings and folded directly into the Platforms page with inline "Connect
+  Gmail"/"Connect Outlook" actions (see the phase-status-log entries after 2026-09-20).
+  Re-verify this against the audit's P2-19/UX-001 framing rather than assuming it's fully
+  resolved — the audit's ask was broader (≤3 clicks from register to connected inbox,
+  privacy explanation before OAuth consent, sync-progress indicator — those are still
+  outstanding).
+- **No onboarding / first-run guidance at all** — no "connect your first inbox" step, no
+  explanation of what's read before OAuth consent, no sync-progress state
+  ("scanning… 340/1,200"), no "confirm these 8 detected vendors" verification step. The
+  audit's proposed customer journey (`05`, Part C) sequences: register → explain what's
+  read → connect first inbox → live scan progress → **user confirms detected vendors**
+  (does not exist today, but is cheap once provenance lands and is high-value: it's the
+  "wow" moment, the trust-building step, and the first learning-loop training signal all
+  at once) → populated workspace → set one alert → invite a teammate.
+- **No trust UX** — no way for a user to tell a row apart as "I typed this" / "AI found
+  this in an email" / "this is a usage accrual, not an invoice." Blocked on provenance
+  (10.3) landing first.
+- **Dashboard answers "how much did I spend" not "what do I need to do"** — no
+  needs-attention section (overdue, due ≤7 days, failed syncs, unhealthy integrations,
+  records awaiting confirmation).
+- Recommendations engine: **structurally well-designed** (signature-based lifecycle,
+  correct reconciliation, never resurrects a user dismissal) but **the inputs can't support
+  useful output** — no usage/seat/login-frequency signal anywhere in the system, so it can
+  produce "AWS spend rose 22%" but never the brief's target example ("usage dropped 70%,
+  cancel this"). No `estimatedImpact` field exists on the model either. Recommendation:
+  narrow scope to what current data supports (anomalies, price increases, duplicates) and
+  add a required dollar-impact field; don't promise usage-based suggestions until a usage
+  signal actually exists.
+- Smaller items (P3, full list in `docs/audit/05`): no CSP header (`helmet()` defaults
+  only — meaningful since JWT lives in `localStorage`), no accessibility pass, unauthenticated
+  + unthrottled invite-token preview route, 858-line `analytics-view.tsx` as a
+  decomposition candidate, `page-data-cache` never invalidates on mutation.
+
+### 10.6 — Security findings summary (`06` §5, full 20-item table with file:line + exploit + fix in that file)
+
+Ranked P0→P3, S-01 through S-20. The P0/P1 ones not already covered in 10.2/10.3 above:
+Slack link-code brute force with no rate limit on the DM path (global match across all
+users — a successful guess binds an attacker's Slack id to a victim account, S-11); explicit
+user-enumeration message on login (`"No account found with this email..."`, S-12); no RBAC
+on billing mutations — any `member` role can delete any org's financial records (S-13); no
+`trust proxy` so the one existing rate limiter buckets by the proxy's IP, not the client's
+(S-14). **Cross-tenant/IDOR verdict: none found** — every business-collection query traced
+scopes correctly by `organization`, `findBillingOr404` returns 404 not 403 (no existence
+leak). The two seams to watch, not yet broken: `AgentSession` keyed by user not
+`(user, org)`, and a dual org-resolution path between `req.organization` (HTTP) and
+`getOrganizationIdForUser()` (agent tools) that credits/data could theoretically diverge on
+under a concurrent org-switch race.
+
+### 10.7 — Documentation drift (`02` §8) — separate from, but related to, the companion-docs callout above
+
+11 specific drift findings (D1–D11) — full table in `docs/audit/02-ARCHITECTURE-AND-DRIFT.md`
+§8. Highlights beyond the LangGraph/Qwen issue already flagged above: `README.md` claims
+"production-ready" (zero tests, zero CI, no payments, indexes never built in prod — should
+be struck); `PRODUCTION-HARDENING.md` still references pre-passwordless auth endpoints that
+no longer exist; `ARCHITECTURE.md` claims a "Forecast Engine"/"Cost Optimizer" that were
+never built (the real analytics engine does totals/status-splits/trend/duplicate-detection,
+no forecasting). Recommended sequencing (not yet done): rewrite `ARCHITECTURE.md` against
+the diagrams in `docs/audit/02`, add a `DECISIONS.md` D-004 entry superseding D-001, strike
+the "production-ready" claim, rewrite `PRODUCTION-HARDENING.md` against the current
+passwordless flow.
+
+### 10.8 — Test matrix & inventories (`06`, `07`) — reference only
+
+`docs/audit/07-TEST-MATRIX.md` has ~300 specific test cases (AUTH/ORG/GM/OL/AI/ADV/CR/AN/INF/UX,
+each numbered) the audit recommends building, with a suggested stack (Vitest +
+`mongodb-memory-server` + supertest, Playwright, an AI eval corpus of ≥500 anonymized
+real emails, `autocannon`). `docs/audit/06-INVENTORIES.md` has the full feature/API/DB/
+AI-call inventory tables (52 API endpoints, only 1 currently rate-limited). Repo currently
+has **zero tests, zero CI** — this is itself one of the "must fix before public launch"
+items.
+
+### 10.9 — Sequencing (`04`) — the audit's own recommended order, NOT a commitment
+
+The audit's own 30/60/90-day roadmap (full detail + acceptance criteria + file lists for
+each of the "next 10 engineering tasks" in `docs/audit/04-ROADMAP-AND-LAUNCH-READINESS.md`
+§5): (1) build indexes in prod, (2) harden OTP flow, (3) processed-message store, (4) CI +
+first tests, (5) sync observability (`lastSyncError`/`lastSyncAt` surfaced in the UI),
+(6) provenance schema + backfill, (7) vendor domain model, (8) `BillingEvent` log + status
+state machine, (9) prompt-injection defense + sender verification, (10) Stripe
+minimum-production-grade. This ordering is the audit's own recommendation, not something
+already agreed with the user — **wait for the user to actually assign a phase from this
+list** (or a different order) before starting any of it, per §2's golden rules.

@@ -9,7 +9,17 @@
  */
 import type { EmailSyncProvider } from "@/services/email-sync/provider";
 import { listCandidateMessageIds, getMessage } from "@/services/email-sync/outlook-client";
-import { stripHtml } from "@/services/email-sync/parser";
+import { stripHtml, parseAuthenticationResults } from "@/services/email-sync/parser";
+
+/** Graph's `emailAddress` shape -> the "Name <email>" format `parser.ts`'s
+ *  `parseSender` expects, matching Gmail's raw header format so both
+ *  providers feed the same downstream parsing. */
+function formatEmailAddress(
+  address: { name?: string; address?: string } | undefined
+): string | null {
+  if (!address?.address) return null;
+  return address.name ? `"${address.name}" <${address.address}>` : `<${address.address}>`;
+}
 
 // Graph's $search clause syntax: `"<property>:<text>"`, joined with OR/AND
 // (operators outside the quotes, uppercase). Multi-word phrases are just the
@@ -58,12 +68,12 @@ export const OUTLOOK_PROVIDER: EmailSyncProvider = {
     const plainText =
       message.body?.contentType?.toLowerCase() === "text" ? body : stripHtml(body);
 
-    const sender = message.from?.emailAddress;
-    const fromHeader = sender?.address
-      ? sender.name
-        ? `"${sender.name}" <${sender.address}>`
-        : `<${sender.address}>`
-      : null;
+    const fromHeader = formatEmailAddress(message.from?.emailAddress);
+    const replyToHeader = formatEmailAddress(message.replyTo?.[0]?.emailAddress);
+    const authHeader = message.internetMessageHeaders?.find(
+      (h) => h.name?.toLowerCase() === "authentication-results"
+    )?.value;
+    const authResults = parseAuthenticationResults(authHeader);
 
     // Defensive: a malformed `receivedDateTime` would silently produce an
     // Invalid Date (no error here) that can later crash a `.toISOString()`
@@ -76,10 +86,13 @@ export const OUTLOOK_PROVIDER: EmailSyncProvider = {
 
     return {
       id: message.id,
+      threadId: message.conversationId ?? null,
       receivedAt,
       subject: message.subject ?? null,
       plainText,
       fromHeader,
+      replyToHeader,
+      authResults,
     };
   },
 };

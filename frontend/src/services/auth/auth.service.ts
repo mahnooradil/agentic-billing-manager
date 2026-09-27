@@ -10,6 +10,7 @@ import type {
   RequestLoginOtpPayload,
   VerifyOtpPayload,
   VerifyOtpData,
+  GoogleSignInPayload,
   UpdateProfilePayload,
   RequestEmailChangePayload,
   VerifyEmailChangePayload,
@@ -52,6 +53,17 @@ export function verifyOtp(
   });
 }
 
+/** POST /auth/google — "Continue with Google". Issues a session exactly
+ *  like `verifyOtp` — Google has already proven the email for us. */
+export function googleSignIn(
+  payload: GoogleSignInPayload
+): Promise<ApiSuccess<VerifyOtpData>> {
+  return apiRequest<ApiSuccess<VerifyOtpData>>("/auth/google", {
+    method: "POST",
+    body: payload,
+  });
+}
+
 /** PATCH /auth/profile — update the authenticated user's display name. */
 export function updateProfile(
   payload: UpdateProfilePayload
@@ -62,6 +74,13 @@ export function updateProfile(
 /** DELETE /auth/account — permanently deletes the account and all its data. */
 export function deleteAccount(): Promise<ApiSuccess<null>> {
   return api.delete<ApiSuccess<null>>("/auth/account");
+}
+
+/** POST /auth/logout — revokes THIS device's own session, so it stops
+ *  showing as an active session (Security tab) immediately, instead of
+ *  lingering until its token naturally expires. */
+export function logout(): Promise<ApiSuccess<null>> {
+  return api.post<ApiSuccess<null>>("/auth/logout");
 }
 
 /** POST /auth/sign-out-everywhere — invalidates every other session's token

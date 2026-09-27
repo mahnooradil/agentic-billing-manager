@@ -43,42 +43,31 @@ const FILTERS: { value: NotificationFilter; label: string }[] = [
   { value: "recommendation", label: "Recommendation" },
 ];
 
-// ── One consistent semantic color system (no random purple/pink). ──
-type ColorKey = "red" | "amber" | "emerald" | "blue" | "indigo" | "slate";
+// ── Black/white/gray + the one accent — category is conveyed by icon and
+//    label (below), never by a distinct hue per category. Color is reserved
+//    for exactly two signals: something genuinely critical (destructive,
+//    the same red used for errors/deletions app-wide) and a positive
+//    resolution (the accent). Everything else is neutral. ──
+type ColorKey = "critical" | "resolved" | "neutral";
 
 const COLOR: Record<
   ColorKey,
   { badge: string; border: string; dot: string }
 > = {
-  red: {
-    badge: "bg-red-500/10 text-red-600 dark:text-red-400",
-    border: "border-l-red-500",
-    dot: "bg-red-500",
+  critical: {
+    badge: "bg-destructive/10 text-destructive",
+    border: "border-l-destructive",
+    dot: "bg-destructive",
   },
-  amber: {
-    badge: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-    border: "border-l-amber-500",
-    dot: "bg-amber-500",
+  resolved: {
+    badge: "bg-primary/10 text-primary",
+    border: "border-l-primary",
+    dot: "bg-primary",
   },
-  emerald: {
-    badge: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-    border: "border-l-emerald-500",
-    dot: "bg-emerald-500",
-  },
-  blue: {
-    badge: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-    border: "border-l-blue-500",
-    dot: "bg-blue-500",
-  },
-  indigo: {
-    badge: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400",
-    border: "border-l-indigo-500",
-    dot: "bg-indigo-500",
-  },
-  slate: {
-    badge: "bg-slate-500/10 text-slate-700 dark:text-slate-400",
-    border: "border-l-slate-400",
-    dot: "bg-slate-400",
+  neutral: {
+    badge: "bg-secondary text-secondary-foreground",
+    border: "border-l-border",
+    dot: "bg-muted-foreground",
   },
 };
 
@@ -97,21 +86,21 @@ function resolveMeta(n: Notification): {
   label: string;
 } {
   const t = n.title.toLowerCase();
-  if (t.includes("resolved")) return { icon: CheckCheck, color: "emerald", label: "Resolved" };
-  if (n.severity === "critical") return { icon: TriangleAlert, color: "red", label: "Critical" };
+  if (t.includes("resolved")) return { icon: CheckCheck, color: "resolved", label: "Resolved" };
+  if (n.severity === "critical") return { icon: TriangleAlert, color: "critical", label: "Critical" };
 
   switch (n.category) {
     case "billing":
-      return { icon: Receipt, color: n.severity === "warning" ? "amber" : "blue", label: "Billing" };
+      return { icon: Receipt, color: "neutral", label: "Billing" };
     case "recommendation":
-      return { icon: Sparkles, color: "indigo", label: "Recommendation" };
+      return { icon: Sparkles, color: "neutral", label: "Recommendation" };
     case "usage":
-      return { icon: BarChart3, color: n.severity === "warning" ? "amber" : "blue", label: "Usage" };
+      return { icon: BarChart3, color: "neutral", label: "Usage" };
     case "system":
-      if (/\bai\b/.test(t)) return { icon: Brain, color: "indigo", label: "AI" };
-      return { icon: Info, color: n.severity === "warning" ? "amber" : "slate", label: "System" };
+      if (/\bai\b/.test(t)) return { icon: Brain, color: "neutral", label: "AI" };
+      return { icon: Info, color: "neutral", label: "System" };
     default:
-      return { icon: Info, color: "slate", label: "System" };
+      return { icon: Info, color: "neutral", label: "System" };
   }
 }
 

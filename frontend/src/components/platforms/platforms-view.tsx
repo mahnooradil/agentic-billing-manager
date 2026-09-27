@@ -1,21 +1,24 @@
 "use client";
 
 import * as React from "react";
-import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Boxes, Loader2, Mail, Plug, Search, SearchX } from "lucide-react";
+import { Boxes, Filter, Mail, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { FormAlert } from "@/components/common/form-alert";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
+import { SectionHeader } from "@/components/common/section-header";
 import { cn } from "@/lib/utils";
-import { lastEmailSyncedAt, timeAgo } from "@/lib/email-sync-platforms";
+import {
+  EMAIL_SYNC_APPS,
+  emailSyncProviderLabel,
+  isEmailSyncPlatform,
+} from "@/lib/email-sync-platforms";
 import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { useAlertState } from "@/hooks/use-alert-state";
 import { usePipedreamConnect } from "@/hooks/use-pipedream-connect";
@@ -25,140 +28,40 @@ import {
   listPlatformConnections,
   connectViaPipedream,
 } from "@/services/connections/platform-connections.service";
-import type {
-  CatalogApp,
-  PlatformConnection,
-} from "@/services/types/platform-connections";
+import { listBillingRecords } from "@/services/billing/billing.service";
+import type { PlatformConnection } from "@/services/types/platform-connections";
+import type { BillingRecord } from "@/services/types/billing";
+import { PlatformLogo } from "@/components/platforms/platform-logo";
+import { ConnectPlatformDialog } from "@/components/platforms/connect-platform-dialog";
+import { TrackedSendersDialog } from "@/components/platforms/tracked-senders-dialog";
 import { DisconnectDialog } from "@/components/connections/disconnect-dialog";
 
 type ViewStatus = "loading" | "error" | "ready";
 
-/** Highest limit the catalog endpoint accepts today. */
-const CATALOG_LIMIT = 100;
-
+const CACHE_KEY = "platforms";
 interface PlatformsCachePayload {
-  configured: boolean;
-  apps: CatalogApp[];
   connections: PlatformConnection[];
+  billingRecords: BillingRecord[];
 }
 
-/** Curated, hand-picked slugs for the "Popular platforms" shortcut — verified
- *  against the live Pipedream catalog's exact `nameSlug` values. Restricted
- *  to platforms with a real billing-sync adapter (see backend/src/services/
- *  billing-sync/registry.ts) since the catalog itself is now filtered the
- *  same way — anything else here would just be a dead end. */
-const POPULAR_SLUGS = [
-  "stripe",
-  "paypal",
-  "github",
-  "digital_ocean",
-  "vercel_token_auth",
-  "cloudflare_api_key",
-  "heroku",
-  "mongodb",
-  "openai",
-  "anthropic",
-  "sendgrid",
-  "twilio",
-];
-
-/** Reads `metadata.emailSync.lastSyncedAt` off a connection, if present —
- *  stamped by the backend's email-sync engine after each completed run. */
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const letters = parts.map((part) => part[0]).join("");
-  return (letters || name.trim()).slice(0, 2).toUpperCase() || "?";
-}
-
-/** A platform's logo when available, falling back to a monogram otherwise. */
-function PlatformLogo({
-  src,
-  name,
-  className,
-}: {
-  src: string | null;
-  name: string;
-  className?: string;
-}) {
-  const [failed, setFailed] = React.useState(false);
-
-  if (!src || failed) {
-    return (
-      <span
-        className={cn(
-          "flex shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground",
-          className
-        )}
-      >
-        {initialsOf(name)}
-      </span>
-    );
-  }
-
-  return (
-    <span
-      className={cn(
-        "relative shrink-0 overflow-hidden rounded-full bg-muted",
-        className
-      )}
-    >
-      <Image
-        src={src}
-        alt=""
-        fill
-        unoptimized
-        sizes="40px"
-        className="object-contain p-1.5"
-        onError={() => setFailed(true)}
-      />
-    </span>
-  );
-}
-
-/** One connectable catalog app — used by both the "Popular" and "All
- *  platforms" sections so the card markup lives in exactly one place. */
-function CatalogAppCard({
-  app,
-  connecting,
-  onConnect,
-}: {
-  app: CatalogApp;
-  connecting: string | null;
-  onConnect: (app: CatalogApp) => void;
-}) {
-  return (
-    <Card className="flex flex-row items-center gap-3 p-4">
-      <PlatformLogo src={app.imgSrc} name={app.name} className="size-10" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">{app.name}</p>
-        {app.description ? (
-          <p className="truncate text-xs text-muted-foreground">{app.description}</p>
-        ) : null}
-      </div>
-      <Button size="sm" variant="outline" onClick={() => onConnect(app)}>
-        {connecting === app.nameSlug ? (
-          <>
-            <Loader2 className="animate-spin" />
-            Cancel
-          </>
-        ) : (
-          <>
-            <Plug />
-            Connect
-          </>
-        )}
-      </Button>
-    </Card>
-  );
+interface ConnectedPlatformRow {
+  key: string;
+  label: string;
+  accountCount: number;
 }
 
 /**
- * Platforms screen: the real connection experience for the live Pipedream
- * catalog. Section order: Connected → Popular → All.
+ * Platforms screen: a direct, connection-status-first view (no search-first
+ * catalog browsing as the main content — that flow now lives behind the
+ * "Connect a platform" button, in `ConnectPlatformDialog`).
+ *
+ * Section order: Connected Platforms → Connected Gmail/Outlook accounts,
+ * each with the real vendors (Netflix, AWS, …) whose invoices have actually
+ * been found in that inbox — derived from Billing records' `source` +
+ * `platformConnection` link, not static/mock data.
  *
  * Wrapped in Suspense because the inner component reads `useSearchParams()`
- * (deep-link support for the Billing Agent's "Connect now" button).
+ * (deep-link support for the AI Assistant's "Connect now" button).
  */
 export function PlatformsView() {
   return (
@@ -179,29 +82,65 @@ function PlatformsViewInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [query, setQuery] = React.useState("");
-  const cacheKey = `platforms:${query}`;
-  const cached = readPageCache<PlatformsCachePayload>(cacheKey);
+  const cached = readPageCache<PlatformsCachePayload>(CACHE_KEY);
   const [status, setStatus] = React.useState<ViewStatus>(cached ? "ready" : "loading");
-  const [apps, setApps] = React.useState<CatalogApp[]>(cached?.apps ?? []);
-  const [configured, setConfigured] = React.useState(cached?.configured ?? true);
   const [connections, setConnections] = React.useState<PlatformConnection[]>(
     cached?.connections ?? []
   );
+  const [billingRecords, setBillingRecords] = React.useState<BillingRecord[]>(
+    cached?.billingRecords ?? []
+  );
   const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
+  const reload = () => setReloadKey((key) => key + 1);
 
-  const [actionError, setActionError] = React.useState<string | null>(null);
   const [alert, setAlert] = useAlertState();
-
+  const [connectOpen, setConnectOpen] = React.useState(false);
   const [disconnect, setDisconnect] = React.useState<{
     open: boolean;
     connection: PlatformConnection | null;
   }>({ open: false, connection: null });
+  const [senderDialogTarget, setSenderDialogTarget] = React.useState<PlatformConnection | null>(
+    null
+  );
 
-  const reload = () => setReloadKey((key) => key + 1);
+  React.useEffect(() => {
+    let ignore = false;
+    (async () => {
+      if (!readPageCache<PlatformsCachePayload>(CACHE_KEY)) setStatus("loading");
+      try {
+        const [connectionsRes, billingRes] = await Promise.all([
+          listPlatformConnections(),
+          listBillingRecords(),
+        ]);
+        if (ignore) return;
+        const payload: PlatformsCachePayload = {
+          connections: connectionsRes.data.connections,
+          billingRecords: billingRes.data.billingRecords,
+        };
+        writePageCache(CACHE_KEY, payload);
+        setConnections(payload.connections);
+        setBillingRecords(payload.billingRecords);
+        setStatus("ready");
+      } catch (error) {
+        if (ignore) return;
+        setLoadError(
+          error instanceof ApiError ? error.message : "Failed to load platforms."
+        );
+        setStatus("error");
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [reloadKey]);
 
-  const { connectingSlug: connecting, connect, clearAll: clearConnecting } = usePipedreamConnect(
+  // Shared connect flow for anything triggered directly from this page (not
+  // through ConnectPlatformDialog's own instance): the deep-link below, and
+  // the "Connect Gmail"/"Connect Outlook" buttons. A freshly-connected email
+  // account gets prompted right away for which senders to watch — the whole
+  // point of asking is to avoid a silent whole-inbox scan by default.
+  const { connectingSlug: connectingEmailApp, connect } = usePipedreamConnect(
     async (app, accountId) => {
       const res = await connectViaPipedream({
         platform: app.nameSlug,
@@ -210,339 +149,360 @@ function PlatformsViewInner() {
       });
       setAlert({ type: "success", message: res.message ?? `${app.name} connected.` });
       reload();
+      if (isEmailSyncPlatform(app.nameSlug)) setSenderDialogTarget(res.data.connection);
     },
-    (message) => setActionError(message)
+    (message) => setAlert({ type: "error", message })
   );
-  const handleConnect = (app: CatalogApp) => {
-    setActionError(null);
-    void connect(app);
-  };
-
-  // Safety net for a back-navigation that restores this page from the
-  // browser's bfcache (e.g. cancelling the Pipedream popup and going back):
-  // any Connect button stuck mid-flight is cleared and the connections list
-  // is refreshed, instead of staying stuck until a manual page refresh.
+  const connectParam = searchParams.get("connect");
+  const deepLinkHandledRef = React.useRef(false);
   React.useEffect(() => {
-    const handlePageShow = (event: PageTransitionEvent) => {
-      if (!event.persisted) return;
-      clearConnecting();
-      reload();
-    };
-    window.addEventListener("pageshow", handlePageShow);
-    return () => window.removeEventListener("pageshow", handlePageShow);
-  }, [clearConnecting]);
-
-  // Deep-link from the Billing Agent chat ("Connect X now") — pre-fills the
-  // search box with that platform so it surfaces immediately, then clears it.
-  React.useEffect(() => {
-    const connectParam = searchParams.get("connect");
-    if (!connectParam) return;
-    let ignore = false;
+    if (!connectParam || deepLinkHandledRef.current) return;
+    deepLinkHandledRef.current = true;
+    router.replace(pathname, { scroll: false });
     (async () => {
-      await Promise.resolve();
-      if (ignore) return;
-      setQuery(searchParams.get("label") ?? connectParam);
-      router.replace(pathname, { scroll: false });
+      try {
+        const res = await getPipedreamCatalog(connectParam, 5);
+        const target = res.data.apps.find(
+          (app) => app.nameSlug.toLowerCase() === connectParam.toLowerCase()
+        );
+        if (target) void connect(target);
+      } catch {
+        // Silent — the user can still connect manually via the dialog.
+      }
     })();
-    return () => {
-      ignore = true;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Debounced catalog + connections fetch (only debounced while the user is
-  // actively typing a search — the initial load and reloads run immediately).
-  React.useEffect(() => {
-    let ignore = false;
-    const timer = setTimeout(
-      async () => {
-        // Only show the full-page spinner when there's nothing cached to
-        // display yet — a mount with fresh cached data (or a search re-run)
-        // instead keeps showing what's already on screen while this quietly
-        // refreshes it, so re-opening the page never flashes back to loading.
-        if (!readPageCache<PlatformsCachePayload>(cacheKey)) setStatus("loading");
-        try {
-          const [catalogRes, connectionsRes] = await Promise.all([
-            getPipedreamCatalog(query, CATALOG_LIMIT),
-            listPlatformConnections(),
-          ]);
-          if (ignore) return;
-          writePageCache(cacheKey, {
-            configured: catalogRes.data.configured,
-            apps: catalogRes.data.apps,
-            connections: connectionsRes.data.connections,
-          });
-          setConfigured(catalogRes.data.configured);
-          setApps(catalogRes.data.apps);
-          setConnections(connectionsRes.data.connections);
-          setStatus("ready");
-        } catch (error) {
-          if (ignore) return;
-          setLoadError(
-            error instanceof ApiError ? error.message : "Failed to load platforms."
-          );
-          setStatus("error");
-        }
-      },
-      query ? 300 : 0
-    );
-    return () => {
-      ignore = true;
-      clearTimeout(timer);
-    };
-  }, [query, reloadKey, cacheKey]);
+  }, [connectParam]);
 
   const retry = () => {
     setStatus("loading");
     reload();
   };
 
-  const connectedByPlatform = React.useMemo(() => {
-    const map = new Map<string, PlatformConnection>();
+  // "Connected Platforms" — one row per distinct connected platform,
+  // whether that's an email provider (Gmail/Outlook) or a direct
+  // billing-sync connection (Stripe, PayPal, …).
+  const connectedPlatformRows = React.useMemo<ConnectedPlatformRow[]>(() => {
+    const map = new Map<string, ConnectedPlatformRow>();
     for (const c of connections) {
-      if (c.connectionType === "oauth") map.set(c.platform, c);
+      if (c.status !== "connected") continue;
+      const key = c.platform.toLowerCase();
+      const label = isEmailSyncPlatform(c.platform)
+        ? emailSyncProviderLabel(c.platform)
+        : c.displayName;
+      const existing = map.get(key);
+      if (existing) existing.accountCount += 1;
+      else map.set(key, { key, label, accountCount: 1 });
     }
-    return map;
+    return Array.from(map.values());
   }, [connections]);
 
-  const connectedApps = React.useMemo(
-    () => Array.from(connectedByPlatform.values()),
-    [connectedByPlatform]
+  // Email-sync connections, grouped by provider (Gmail / Outlook) — each
+  // provider gets its own "Connected <Provider> accounts" section below.
+  const emailProviderGroups = React.useMemo(() => {
+    const groups = new Map<string, PlatformConnection[]>();
+    for (const c of connections) {
+      if (!isEmailSyncPlatform(c.platform)) continue;
+      const key = c.platform.toLowerCase();
+      const list = groups.get(key) ?? [];
+      list.push(c);
+      groups.set(key, list);
+    }
+    return Array.from(groups.entries()).map(([key, list]) => ({
+      key,
+      label: emailSyncProviderLabel(key),
+      connections: list,
+    }));
+  }, [connections]);
+
+  // Every email provider with zero connected accounts — always offered,
+  // regardless of whether a DIFFERENT provider already has one (e.g. Gmail
+  // connected shouldn't hide the still-unconnected Outlook button).
+  const unconnectedEmailApps = React.useMemo(
+    () =>
+      EMAIL_SYNC_APPS.filter(
+        (app) => !emailProviderGroups.some((group) => group.key === app.nameSlug)
+      ),
+    [emailProviderGroups]
   );
 
-  const browseApps = React.useMemo(
-    () => apps.filter((app) => !connectedByPlatform.has(app.nameSlug)),
-    [apps, connectedByPlatform]
-  );
-
-  // Popular platforms — a fixed, curated subset of `browseApps`, in curated
-  // (not catalog) order. Excluded from "All platforms" below so nothing is
-  // ever shown twice on the same page.
-  const popularApps = React.useMemo(() => {
-    const bySlug = new Map(browseApps.map((app) => [app.nameSlug, app]));
-    return POPULAR_SLUGS.map((slug) => bySlug.get(slug)).filter(
-      (app): app is CatalogApp => Boolean(app)
-    );
-  }, [browseApps]);
-
-  const popularSlugSet = React.useMemo(
-    () => new Set(popularApps.map((app) => app.nameSlug)),
-    [popularApps]
-  );
-
-  const otherApps = React.useMemo(
-    () => browseApps.filter((app) => !popularSlugSet.has(app.nameSlug)),
-    [browseApps, popularSlugSet]
-  );
-
-  // While searching, show every match in one list (no curated split) — only
-  // the idle/browse view separates Popular from everything else.
-  const allSectionApps = query ? browseApps : otherApps;
-
-  // The full catalog can be a few thousand apps — reveal it in chunks instead
-  // of rendering every card up front. An earlier scroll-triggered
-  // (IntersectionObserver) version turned out unreliable at this catalog size
-  // (a single batch renders taller than any reasonable trigger margin, so it
-  // read as permanently "stuck" once the user stopped scrolling exactly at
-  // the edge). An explicit "Load more" button has no such geometry to get
-  // wrong — it always works on click, every time.
-  const REVEAL_BATCH = 120;
-  const [visibleCount, setVisibleCount] = React.useState(REVEAL_BATCH);
-  // Reset the reveal count when a new list loads (adjusted during render,
-  // per React's guidance for state that depends on a changing key — not in
-  // an effect, since that would cause an extra cascading render).
-  const revealResetKey = `${query}:${reloadKey}`;
-  const [lastRevealResetKey, setLastRevealResetKey] = React.useState(revealResetKey);
-  if (lastRevealResetKey !== revealResetKey) {
-    setLastRevealResetKey(revealResetKey);
-    setVisibleCount(REVEAL_BATCH);
-  }
-  const visibleApps = allSectionApps.slice(0, visibleCount);
-  const hasMoreApps = visibleCount < allSectionApps.length;
-  const loadMore = () =>
-    setVisibleCount((count) => Math.min(count + REVEAL_BATCH, allSectionApps.length));
-
-  const logoFor = (nameSlug: string): string | null =>
-    apps.find((app) => app.nameSlug === nameSlug)?.imgSrc ?? null;
+  // Real vendors (Netflix, AWS, …) whose invoices were actually found in
+  // each specific inbox — derived from Billing records, never mock data.
+  // For an email-sync record, the serializer puts the connection's id in
+  // `platform.id` and the detected vendor name in `platform.name`.
+  const syncedVendorsByConnection = React.useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const record of billingRecords) {
+      if (record.source !== "email_sync") continue;
+      const set = map.get(record.platform.id) ?? new Set<string>();
+      set.add(record.platform.name);
+      map.set(record.platform.id, set);
+    }
+    return map;
+  }, [billingRecords]);
 
   const openDisconnect = (connection: PlatformConnection) => {
     setAlert(null);
     setDisconnect({ open: true, connection });
   };
-
   const handleDisconnected = (message: string) => {
     setAlert({ type: "success", message });
     reload();
   };
+  const handleConnectEmail = (app: (typeof EMAIL_SYNC_APPS)[number]) => {
+    setAlert(null);
+    void connect(app);
+  };
+  const handleSendersSaved = (message: string) => {
+    setAlert({ type: "success", message });
+    reload();
+  };
+  const handleConnected = (message: string) => {
+    setAlert({ type: "success", message });
+    reload();
+  };
+
+  const connectedSlugs = new Set(connections.map((c) => c.platform.toLowerCase()));
+  const nothingConnected =
+    connectedPlatformRows.length === 0 && emailProviderGroups.length === 0;
 
   return (
     <PageWrapper>
       <PageHeader
-        title="Integrations"
-        description="Connect the platforms you're billed on — every invoice and subscription stays in sync, automatically."
+        title="Platforms"
+        description="Where your billing data comes from — connected platforms, and the email accounts syncing invoices automatically."
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => router.push("/dashboard/settings?tab=email-sync")}
-          >
-            <Mail />
-            Connect email for invoice sync
+          <Button onClick={() => setConnectOpen(true)}>
+            <Plus />
+            Connect a platform
           </Button>
         }
       />
 
       {alert ? <FormAlert variant={alert.type} message={alert.message} /> : null}
-      {actionError ? <FormAlert variant="error" message={actionError} /> : null}
 
-      <div className="relative max-w-md">
-        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search platforms — Stripe, GitHub, PayPal, DigitalOcean…"
-          className="pl-8"
-          aria-label="Search platforms"
-        />
-      </div>
-      <p className="text-sm text-muted-foreground">
-        Only platforms with real, automatic billing sync are shown here — no dead-end
-        connections. No direct sync for a platform yet?{" "}
-        <button
-          type="button"
-          onClick={() => router.push("/dashboard/settings?tab=email-sync")}
-          className="font-medium text-foreground underline underline-offset-2"
-        >
-          Connect Gmail or Outlook
-        </button>{" "}
-        instead and we&apos;ll scan it for invoice emails.
-      </p>
-
-      {status === "loading" && apps.length === 0 ? (
+      {status === "loading" && connections.length === 0 ? (
         <div className="flex flex-1 items-center justify-center py-16">
           <LoadingSpinner label="Loading platforms…" />
         </div>
       ) : status === "error" ? (
         <ErrorState description={loadError} onRetry={retry} />
-      ) : !configured ? (
+      ) : nothingConnected ? (
         <EmptyState
           icon={Boxes}
-          title="Pipedream isn't connected"
-          description="This server doesn't have Pipedream configured yet, so no platforms can be shown."
+          title="Nothing connected yet"
+          description="Connect a platform directly, or connect Gmail/Outlook to scan for invoice emails automatically."
+          action={
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button onClick={() => setConnectOpen(true)}>
+                <Plus />
+                Connect a platform
+              </Button>
+              {EMAIL_SYNC_APPS.map((app) => (
+                <Button
+                  key={app.nameSlug}
+                  variant="outline"
+                  onClick={() => handleConnectEmail(app)}
+                  disabled={connectingEmailApp !== null && connectingEmailApp !== app.nameSlug}
+                >
+                  <Mail />
+                  Connect {app.name}
+                </Button>
+              ))}
+            </div>
+          }
         />
       ) : (
         <div className="space-y-8">
-          {connectedApps.length > 0 ? (
-            <div className="space-y-3">
-              <h3 className="font-heading text-sm font-semibold text-muted-foreground">
-                Connected platforms
-              </h3>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {connectedApps.map((connection) => (
-                  <Card
-                    key={connection.id}
-                    className="flex flex-col gap-3 p-4"
-                  >
-                    <div className="flex items-center gap-3">
-                      <PlatformLogo
-                        src={logoFor(connection.platform)}
-                        name={connection.displayName}
-                        className="size-10"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-foreground">
-                          {connection.displayName}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {connection.accountIdentifier ?? "Connected"}
-                        </p>
-                        {(() => {
-                          const syncedAt = lastEmailSyncedAt(connection.metadata);
-                          return syncedAt ? (
-                            <p className="truncate text-xs text-muted-foreground">
-                              Invoices last checked {timeAgo(syncedAt)}
-                            </p>
-                          ) : null;
-                        })()}
-                      </div>
-                      <span
-                        className={cn(
-                          "size-1.5 shrink-0 rounded-full",
-                          connection.status === "connected"
-                            ? "bg-emerald-500"
-                            : "bg-red-500"
-                        )}
-                      />
-                    </div>
-                    <div className="flex justify-end">
+          <section className="space-y-3">
+            <SectionHeader title="Connected Platforms" />
+            <Card className="divide-y overflow-hidden p-0">
+              {connectedPlatformRows.map((row) => (
+                <div key={row.key} className="flex items-center gap-3 px-5 py-3.5">
+                  <PlatformLogo src={null} name={row.label} className="size-9" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{row.label}</p>
+                    {row.accountCount > 1 ? (
+                      <p className="text-xs text-muted-foreground">
+                        {row.accountCount} accounts connected
+                      </p>
+                    ) : null}
+                  </div>
+                  <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+                </div>
+              ))}
+            </Card>
+          </section>
+
+          {emailProviderGroups.length === 0 ? (
+            <section className="space-y-3">
+              <SectionHeader title="Connected Gmail accounts" />
+              <EmptyState
+                icon={Mail}
+                title="No email accounts connected"
+                description="Connect Gmail or Outlook to scan for invoice emails automatically — a fallback behind direct platform sync."
+                action={
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {EMAIL_SYNC_APPS.map((app) => (
                       <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => openDisconnect(connection)}
+                        key={app.nameSlug}
+                        variant="outline"
+                        onClick={() => handleConnectEmail(app)}
+                        disabled={
+                          connectingEmailApp !== null && connectingEmailApp !== app.nameSlug
+                        }
                       >
-                        Disconnect
+                        <Mail />
+                        Connect {app.name}
                       </Button>
+                    ))}
+                  </div>
+                }
+              />
+            </section>
+          ) : (
+            emailProviderGroups.map((group) => {
+              const app = EMAIL_SYNC_APPS.find((a) => a.nameSlug === group.key);
+              return (
+              <section key={group.key} className="space-y-3">
+                <SectionHeader
+                  title={`Connected ${group.label} accounts`}
+                  actions={
+                    app ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleConnectEmail(app)}
+                        disabled={connectingEmailApp !== null}
+                      >
+                        <Plus />
+                        Connect another
+                      </Button>
+                    ) : undefined
+                  }
+                />
+                <div className="space-y-3">
+                  {group.connections.map((connection) => {
+                    const vendors = Array.from(
+                      syncedVendorsByConnection.get(connection.id) ?? []
+                    ).sort((a, b) => a.localeCompare(b));
+                    return (
+                      <Card key={connection.id} className="p-4">
+                        <div className="flex items-center gap-3">
+                          <PlatformLogo
+                            src={null}
+                            name={connection.accountIdentifier || connection.displayName}
+                            className="size-9"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-foreground">
+                              {connection.accountIdentifier || connection.displayName}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {connection.status === "connected"
+                                ? "Connected · Synchronization active"
+                                : connection.lastError ?? "Needs re-authentication"}
+                            </p>
+                          </div>
+                          <span
+                            className={cn(
+                              "size-1.5 shrink-0 rounded-full",
+                              connection.status === "connected"
+                                ? "bg-primary"
+                                : "bg-destructive"
+                            )}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Manage senders for ${connection.accountIdentifier || connection.displayName}`}
+                            title="Manage which senders are watched"
+                            onClick={() => setSenderDialogTarget(connection)}
+                          >
+                            <Filter />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => openDisconnect(connection)}
+                          >
+                            Disconnect
+                          </Button>
+                        </div>
+                        <div className="mt-3 border-t pt-3">
+                          <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+                            Synchronized platforms
+                          </p>
+                          {vendors.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              No invoices synced from this inbox yet.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {vendors.map((vendor) => (
+                                <span
+                                  key={vendor}
+                                  className="rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground"
+                                >
+                                  {vendor}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </section>
+              );
+            })
+          )}
+
+          {emailProviderGroups.length > 0
+            ? unconnectedEmailApps.map((app) => (
+                <section key={app.nameSlug} className="space-y-3">
+                  <SectionHeader
+                    title={`Connected ${app.name} accounts`}
+                    actions={
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleConnectEmail(app)}
+                        disabled={connectingEmailApp !== null}
+                      >
+                        <Mail />
+                        Connect
+                      </Button>
+                    }
+                  />
+                  <Card className="flex flex-row items-center gap-3 px-5 py-4">
+                    <PlatformLogo src={null} name={app.name} className="size-9" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground">Not connected</p>
+                      <p className="text-xs text-muted-foreground">
+                        Connect to scan for invoice emails automatically.
+                      </p>
                     </div>
                   </Card>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {!query && popularApps.length > 0 ? (
-            <div className="space-y-3">
-              <h3 className="font-heading text-sm font-semibold text-muted-foreground">
-                Popular platforms
-              </h3>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {popularApps.map((app) => (
-                  <CatalogAppCard
-                    key={app.id}
-                    app={app}
-                    connecting={connecting}
-                    onConnect={handleConnect}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="space-y-3">
-            <h3 className="font-heading text-sm font-semibold text-muted-foreground">
-              {query ? "Search results" : "All platforms"}
-            </h3>
-            {allSectionApps.length === 0 ? (
-              <EmptyState
-                icon={SearchX}
-                title="No matching platforms"
-                description={`No platforms match "${query}".`}
-              />
-            ) : (
-              <>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {visibleApps.map((app) => (
-                    <CatalogAppCard
-                      key={app.id}
-                      app={app}
-                      connecting={connecting}
-                      onConnect={handleConnect}
-                    />
-                  ))}
-                </div>
-                {hasMoreApps ? (
-                  <div className="flex justify-center py-4">
-                    <Button variant="outline" onClick={loadMore}>
-                      Load more platforms ({allSectionApps.length - visibleCount} remaining)
-                    </Button>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
+                </section>
+              ))
+            : null}
         </div>
       )}
 
+      <ConnectPlatformDialog
+        open={connectOpen}
+        onOpenChange={setConnectOpen}
+        connectedSlugs={connectedSlugs}
+        onConnected={handleConnected}
+      />
+      <TrackedSendersDialog
+        open={senderDialogTarget !== null}
+        onOpenChange={(open) => !open && setSenderDialogTarget(null)}
+        connection={senderDialogTarget}
+        onSaved={(_updated, message) => handleSendersSaved(message)}
+      />
       <DisconnectDialog
         open={disconnect.open}
         onOpenChange={(open) => setDisconnect((state) => ({ ...state, open }))}

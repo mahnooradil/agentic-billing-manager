@@ -117,7 +117,7 @@ export function InviteAcceptView({ token }: { token: string }) {
             <ErrorState description={loadError} />
           ) : accepted ? (
             <div className="flex flex-col items-center gap-3 py-6 text-center">
-              <CheckCircle2 className="size-10 text-emerald-500" />
+              <CheckCircle2 className="size-10 text-primary" />
               <p className="font-medium">You&apos;ve joined {preview.organizationName}</p>
               <p className="text-sm text-muted-foreground">Taking you to your dashboard…</p>
             </div>

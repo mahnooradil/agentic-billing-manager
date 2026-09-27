@@ -109,6 +109,20 @@ export interface IPlatformConnection {
   lastVerifiedAt?: Date;
   /** Safe, secret-free message from the most recent failed verification. */
   lastError?: string;
+  /** Sync observability (S-17 fix — previously a sync failure had no visible
+   *  symptom at all, indistinguishable from an empty inbox). Written by
+   *  services/email-sync/sync-engine.ts and services/billing-sync/sync-engine.ts
+   *  at the end of every run, success or failure — separate from
+   *  lastVerifiedAt/lastError above, which track the CREDENTIAL's own health,
+   *  not whether the most recent sync PASS actually completed. */
+  lastSyncAt?: Date;
+  lastSyncStatus?: "success" | "error";
+  /** Safe, secret-free message from the most recent failed sync run. */
+  lastSyncError?: string;
+  /** Email-sync only: candidate messages checked in the last run. */
+  messagesScanned?: number;
+  /** Records created/updated in the last run (email-sync or billing-sync). */
+  invoicesFound?: number;
   /** How the connection was initiated (manual UI vs the AI assistant). */
   source: ConnectionSource;
   createdAt: Date;
@@ -214,6 +228,25 @@ const platformConnectionSchema = new Schema<
     lastError: {
       type: String,
       maxlength: [500, "Error message must be at most 500 characters"],
+    },
+    lastSyncAt: {
+      type: Date,
+    },
+    lastSyncStatus: {
+      type: String,
+      enum: { values: ["success", "error"], message: "Invalid sync status" },
+    },
+    lastSyncError: {
+      type: String,
+      maxlength: [500, "Sync error message must be at most 500 characters"],
+    },
+    messagesScanned: {
+      type: Number,
+      min: 0,
+    },
+    invoicesFound: {
+      type: Number,
+      min: 0,
     },
     source: {
       type: String,

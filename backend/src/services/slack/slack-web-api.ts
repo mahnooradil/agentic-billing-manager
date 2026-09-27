@@ -2,25 +2,28 @@
  * Slack Web API — outbound replies for the Billing Advisor Agent's Slack DM
  * chat (services/slack/slack-chat-handler.ts). Separate from
  * services/notifications/slack.ts, which posts one-way alerts through a
- * user-pasted Incoming Webhook URL; this instead authenticates as the app's
- * own bot user (`env.slackBotToken`) so it can reply into a specific DM
- * channel. Same project convention as everywhere else that talks to a single
- * documented REST endpoint: plain `fetch`, no `@slack/web-api` dependency.
+ * user-pasted Incoming Webhook URL; this instead authenticates as the
+ * installing organization's OWN bot user — a per-organization token (see
+ * organization.model.ts's `slackWorkspace.botToken`), not a single global
+ * one, since each customer organization connects its own separate Slack
+ * workspace. Same project convention as everywhere else that talks to a
+ * single documented REST endpoint: plain `fetch`, no `@slack/web-api`
+ * dependency.
  */
-import { env } from "@/config/env";
 import { AppError } from "@/utils/appError";
 
 const SLACK_API_BASE = "https://slack.com/api";
 const SEND_TIMEOUT_MS = 10_000;
 
-export function isSlackBotConfigured(): boolean {
-  return Boolean(env.slackBotToken && env.slackSigningSecret);
-}
-
-/** Posts one plain-text message into a Slack channel/DM as the app's bot. */
-export async function postSlackMessage(channel: string, text: string): Promise<void> {
-  if (!isSlackBotConfigured()) {
-    throw new AppError("Slack chat isn't configured on this server yet.", 503);
+/** Posts one plain-text message into a Slack channel/DM, authenticating as
+ *  the given organization's own installed bot. */
+export async function postSlackMessage(
+  botToken: string,
+  channel: string,
+  text: string
+): Promise<void> {
+  if (!botToken) {
+    throw new AppError("This workspace hasn't connected Slack yet.", 503);
   }
 
   const controller = new AbortController();
@@ -31,7 +34,7 @@ export async function postSlackMessage(channel: string, text: string): Promise<v
       method: "POST",
       signal: controller.signal,
       headers: {
-        Authorization: `Bearer ${env.slackBotToken}`,
+        Authorization: `Bearer ${botToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ channel, text }),

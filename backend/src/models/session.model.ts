@@ -53,4 +53,10 @@ const sessionSchema = new Schema<ISession, SessionModel>(
   }
 );
 
+// TTL — a session record is device-list bookkeeping (its JWT already expires
+// daily regardless), so 90 days after creation it's just stale clutter, not
+// an active credential. `expireAfterSeconds` here is an offset applied to
+// `createdAt`, unlike Otp's TTL which fires at the field's own value.
+sessionSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+
 export const Session = model<ISession, SessionModel>("Session", sessionSchema);

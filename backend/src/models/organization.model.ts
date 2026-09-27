@@ -23,8 +23,9 @@ export interface IOrganization {
    *  matching who actually pays for the plan (the org, not an individual
    *  member). A user's own personal workspace has its own pool too — same
    *  field, just an organization of one. Can dip slightly below zero — see
-   *  CreditTransaction's `balanceAfter` field for why. No payment processor
-   *  wired up yet. */
+   *  CreditTransaction's `balanceAfter` field for why. Topped up either by
+   *  the plan-cycle reset or by buying credits directly (see
+   *  `stripeCustomerId` below). */
   creditsBalance: number;
   /** When this organization's plan-cycle credit allowance was last applied
    *  (see services/credits/credit-reset-scheduler.ts). `undefined` for an
@@ -39,6 +40,26 @@ export interface IOrganization {
    *  auto-delete it later if it's still empty once no longer needed —
    *  never touches a workspace without this flag. */
   isFallbackPersonal?: boolean;
+  /** This organization's Stripe Customer id, once it's bought credits at
+   *  least once (see services/payments/stripe-checkout.service.ts) — reused
+   *  across purchases instead of creating a new Stripe customer every time.
+   *  `undefined` until the first checkout. */
+  stripeCustomerId?: string;
+  /** This organization's own connected Slack workspace, via Slack's "Add to
+   *  Slack" OAuth install (see services/slack/slack-oauth.service.ts) — one
+   *  bot token PER organization, not a single global one, since this app is
+   *  sold to separate customer companies who each need their own Slack
+   *  workspace connected, never sharing one another's. `botToken` is
+   *  encrypted at rest the same way PlatformConnection's credentials are
+   *  (see utils/crypto.ts). `undefined` until this organization installs the
+   *  app into a workspace. */
+  slackWorkspace?: {
+    teamId: string;
+    teamName?: string;
+    botToken: string;
+    botUserId?: string;
+    connectedAt: Date;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -71,6 +92,20 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
       type: Boolean,
       default: false,
     },
+    stripeCustomerId: {
+      type: String,
+      trim: true,
+    },
+    slackWorkspace: {
+      type: {
+        teamId: { type: String, required: true, trim: true },
+        teamName: { type: String, trim: true },
+        botToken: { type: String, required: true },
+        botUserId: { type: String, trim: true },
+        connectedAt: { type: Date, required: true },
+      },
+      default: undefined,
+    },
   },
   {
     timestamps: true,
@@ -82,6 +117,11 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
     },
   }
 );
+
+// A Slack workspace (team) may only ever be connected to ONE organization —
+// prevents two different customer organizations both claiming the same
+// installed workspace.
+organizationSchema.index({ "slackWorkspace.teamId": 1 }, { unique: true, sparse: true });
 
 export const Organization = model<IOrganization, OrganizationModel>(
   "Organization",

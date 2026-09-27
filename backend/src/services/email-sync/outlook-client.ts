@@ -12,10 +12,17 @@ const GRAPH_API_BASE = "https://graph.microsoft.com/v1.0/me";
 
 export interface OutlookMessage {
   id: string;
+  /** Graph's thread-equivalent — groups a message with its replies. */
+  conversationId?: string;
   receivedDateTime?: string;
   subject?: string;
   body?: { contentType?: string; content?: string };
   from?: { emailAddress?: { name?: string; address?: string } };
+  replyTo?: { emailAddress?: { name?: string; address?: string } }[];
+  /** Raw MIME headers — only populated when `$select` includes
+   *  `internetMessageHeaders`; used to read `Authentication-Results`
+   *  (Task 9, S-08), which Graph doesn't expose as its own structured field. */
+  internetMessageHeaders?: { name?: string; value?: string }[];
 }
 
 export interface OutlookListPage {
@@ -73,7 +80,7 @@ export async function getMessage(
 ): Promise<OutlookMessage | null> {
   try {
     const params = new URLSearchParams({
-      $select: "subject,body,from,receivedDateTime",
+      $select: "subject,body,from,receivedDateTime,conversationId,replyTo,internetMessageHeaders",
     });
     const data = (await connectProxyRequest(
       externalUserId,

@@ -30,6 +30,14 @@ export interface PublicPlatformConnection {
   lastVerifiedAt: Date | null;
   /** Safe message from the last failed verification (null when healthy). */
   lastError: string | null;
+  /** When the most recent SYNC RUN completed, success or failure — distinct
+   *  from lastVerifiedAt (the credential's own health check). */
+  lastSyncAt: Date | null;
+  lastSyncStatus: "success" | "error" | null;
+  /** Safe message from the most recent failed sync run (null when healthy). */
+  lastSyncError: string | null;
+  messagesScanned: number | null;
+  invoicesFound: number | null;
   /** How the connection was initiated (manual UI vs the AI assistant). */
   source: ConnectionSource;
   createdAt: Date;
@@ -54,6 +62,11 @@ export function toPublicPlatformConnection(
     hasCredential: Boolean(doc.credentialLast4),
     lastVerifiedAt: doc.lastVerifiedAt ?? null,
     lastError: doc.lastError ?? null,
+    lastSyncAt: doc.lastSyncAt ?? null,
+    lastSyncStatus: doc.lastSyncStatus ?? null,
+    lastSyncError: doc.lastSyncError ?? null,
+    messagesScanned: doc.messagesScanned ?? null,
+    invoicesFound: doc.invoicesFound ?? null,
     source: doc.source ?? "manual",
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,

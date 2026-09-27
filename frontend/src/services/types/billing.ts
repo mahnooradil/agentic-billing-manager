@@ -4,6 +4,12 @@
  */
 export type BillingStatus = "Pending" | "Paid" | "Overdue";
 
+/** How a billing record was created. For "auto_sync"/"email_sync" records,
+ *  `platform.id`/`platform.slug` below actually identify the *connection*
+ *  (PlatformConnection) it came through, not a `Platform` document — see
+ *  `backend/src/utils/billing.serializer.ts`. */
+export type BillingSource = "manual" | "auto_sync" | "email_sync";
+
 /** Minimal platform reference embedded in a billing record. */
 export interface BillingPlatformRef {
   id: string;
@@ -14,6 +20,7 @@ export interface BillingPlatformRef {
 export interface BillingRecord {
   id: string;
   platform: BillingPlatformRef;
+  source: BillingSource;
   customerName: string;
   invoiceNumber: string;
   amount: number;

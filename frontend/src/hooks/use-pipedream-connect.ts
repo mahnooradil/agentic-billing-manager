@@ -94,7 +94,18 @@ export function usePipedreamConnect(
         };
         window.addEventListener("focus", handleReturn);
         document.addEventListener("visibilitychange", handleVisibility);
-        const hardTimeout = setTimeout(finish, 45_000);
+        // Last resort: Pipedream's own onSuccess/onError didn't fire AND the
+        // window never regained focus/visibility either — that combination
+        // means the popup itself likely never opened (blocked) or hung,
+        // since even backing out of a real popup returns focus here. Silent
+        // before this fix: the button just reset to "Connect" with zero
+        // explanation, indistinguishable from nothing having happened at all.
+        const hardTimeout = setTimeout(() => {
+          onError(
+            "This is taking longer than expected — the connection window may have been blocked by your browser or closed without finishing. Please try again."
+          );
+          finish();
+        }, 45_000);
 
         cleanupRef.current.set(app.nameSlug, () => {
           window.removeEventListener("focus", handleReturn);

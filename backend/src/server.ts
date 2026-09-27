@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { createApp } from "@/app";
 import { env } from "@/config/env";
 import { connectDatabase, disconnectDatabase } from "@/config/database";
+import { syncIndexesIfEnabled, assertIndexesInSync } from "@/config/index-integrity";
 import { initRecommendationEngine } from "@/services/ai/recommendation-engine";
 import { initNotificationEngine } from "@/services/notification/notification-engine";
 import { startDueDateScheduler } from "@/services/notification/due-date-scheduler";
@@ -17,15 +18,23 @@ import { startCreditResetScheduler } from "@/services/credits/credit-reset-sched
  * Startup order:
  *   1. Environment variables are loaded (via config/env import side-effect).
  *   2. Connect to MongoDB — the app does not accept traffic until this succeeds.
- *   3. Start the Express server only after a successful database connection.
+ *   3. Index integrity (S-01) — optionally sync, then always verify every
+ *      declared index actually exists before anything touches the data.
+ *   4. Start the Express server only after all of the above succeeds.
  *
- * On a database connection failure, a clear error is logged and the process
- * exits gracefully so orchestrators (Docker/Render/etc.) can restart it.
+ * On a database connection failure — or a missing index the app's own data
+ * integrity depends on — a clear error is logged and the process exits
+ * gracefully so orchestrators (Docker/Render/etc.) can restart it.
  */
 async function startServer(): Promise<void> {
   try {
     // 1 + 2: connect to the database before starting Express.
     await connectDatabase();
+
+    // 3: index integrity — see config/index-integrity.ts. Must happen before
+    // schedulers/engines below touch any data.
+    await syncIndexesIfEnabled();
+    await assertIndexesInSync();
 
     // Wire autonomous engines to the event bus before serving traffic.
     initRecommendationEngine();
@@ -36,7 +45,7 @@ async function startServer(): Promise<void> {
     startDueDateScheduler();
     startCreditResetScheduler();
 
-    // 3: database is ready — start accepting HTTP traffic.
+    // 4: database and indexes are ready — start accepting HTTP traffic.
     const app = createApp();
     const server = app.listen(env.port, () => {
       console.log(

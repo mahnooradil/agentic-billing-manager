@@ -8,6 +8,7 @@
  */
 import { GMAIL_PROVIDER } from "@/services/email-sync/gmail-provider";
 import { OUTLOOK_PROVIDER } from "@/services/email-sync/outlook-provider";
+import type { SenderAuthResults } from "@/services/email-sync/parser";
 
 export interface EmailCandidatePage {
   messageIds: string[];
@@ -19,11 +20,23 @@ export interface EmailCandidatePage {
  *  base64 MIME tree vs Outlook's plain JSON body). */
 export interface NormalizedEmailMessage {
   id: string;
+  /** The provider's conversation/thread id (Gmail's `threadId`, Outlook's
+   *  `conversationId`) — part of the record's provenance trail, lets a user
+   *  trace a record back to its full email conversation, not just one
+   *  message. Null if the provider doesn't expose one. */
+  threadId: string | null;
   receivedAt: Date;
   subject: string | null;
   plainText: string;
   /** "Display Name <email@domain>" format — matches parser.parseSender's input. */
   fromHeader: string | null;
+  /** Same format as `fromHeader`, when the message declares one — Task 9's
+   *  Reply-To/From mismatch signal reads this alongside `fromHeader`. */
+  replyToHeader: string | null;
+  /** The receiving mail server's own SPF/DKIM/DMARC verdicts (Task 9,
+   *  S-08) — real sender-authentication evidence, not something derivable
+   *  from anything the sender itself controls. */
+  authResults: SenderAuthResults;
 }
 
 export interface EmailSyncProvider {

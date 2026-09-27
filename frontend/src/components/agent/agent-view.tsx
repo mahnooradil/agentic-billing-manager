@@ -30,9 +30,20 @@ import { ApiError } from "@/services/api/client";
 import { sendAgentMessage } from "@/services/agent/agent-chat.service";
 import { agentChatStore } from "@/services/agent/agent-chat-store";
 import { getMyCredits } from "@/services/credits/credits.service";
+import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { updateBillingRecord, deleteBillingRecord } from "@/services/billing/billing.service";
 import type { BillingStatus } from "@/services/types/billing";
+import type { CreditsData } from "@/services/types/credits";
 import type { ConnectPlatformAction, AgentAction } from "@/services/types/agent";
+
+/** Same cache key the top-level Billing page (`plan/plan-view.tsx`'s credits section)
+ *  writes to for `GET /credits`'s full
+ *  response — reused here (not a separate key) so the balance shown by
+ *  either surface seeds instantly from whichever one fetched most recently,
+ *  instead of the pill popping in late on every single Agent page visit
+ *  while every other stat-bearing panel in the app avoids that via this
+ *  same cache. */
+const CREDITS_CACHE_KEY = "credits";
 import type { Recommendation } from "@/services/types/recommendations";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useSpeechSynthesis } from "@/hooks/use-speech-synthesis";
@@ -137,8 +148,18 @@ function AgentViewInner() {
 
   // Credit balance — refetched after every turn (consumption is only known
   // server-side, after the turn completes) via a reload-key bump rather than
-  // computed locally, so it never drifts from the real ledger.
-  const [credits, setCredits] = React.useState<number | null>(null);
+  // computed locally, so it never drifts from the real ledger. Seeded from
+  // the shared page-data-cache so the pill shows a real number immediately
+  // on mount instead of popping in a beat after every visit.
+  const cachedCredits = readPageCache<{ data: CreditsData; fetchedAt: number }>(
+    CREDITS_CACHE_KEY
+  );
+  const [credits, setCredits] = React.useState<number | null>(
+    cachedCredits?.data.balance ?? null
+  );
+  // Distinguishes "genuinely failed to load" (worth a small hint) from
+  // "hasn't fetched yet" — both leave `credits` at null otherwise.
+  const [creditsError, setCreditsError] = React.useState(false);
   const [creditsReloadKey, setCreditsReloadKey] = React.useState(0);
 
   React.useEffect(() => {
@@ -147,9 +168,13 @@ function AgentViewInner() {
       try {
         const response = await getMyCredits();
         if (ignore) return;
+        writePageCache(CREDITS_CACHE_KEY, { data: response.data, fetchedAt: Date.now() });
         setCredits(response.data.balance);
+        setCreditsError(false);
       } catch {
-        // Non-critical — the balance pill just stays hidden on failure.
+        // Non-critical (chat itself still works) — but worth a small,
+        // non-blocking hint rather than a fully silent, blank pill.
+        if (!ignore) setCreditsError(true);
       }
     })();
     return () => {
@@ -294,7 +319,7 @@ function AgentViewInner() {
               <Sparkles className="size-4" />
             </span>
             <div>
-              <h1 className="font-heading text-base font-semibold">Billing Advisor</h1>
+              <h1 className="font-heading text-base font-semibold">AI Assistant</h1>
               <p className="text-xs text-muted-foreground">
                 Reads your real billing data — never guesses.
               </p>
@@ -310,6 +335,13 @@ function AgentViewInner() {
                   )}
                 >
                   {Math.max(0, credits)} credit{credits === 1 ? "" : "s"} left
+                </span>
+              ) : creditsError ? (
+                <span
+                  className="text-xs text-muted-foreground"
+                  title="Couldn't load your credit balance — chatting still works."
+                >
+                  Credits unavailable
                 </span>
               ) : null}
               {ttsSupported ? (
@@ -366,7 +398,7 @@ function AgentViewInner() {
               <div className="m-auto flex flex-col items-center gap-4">
                 <EmptyState
                   icon={Sparkles}
-                  title="Ask your Billing Agent anything"
+                  title="Ask your AI Assistant anything"
                   description="It can read your real billing and platform data, and explain how to connect new platforms — try one of these to see it in action."
                 />
                 <div className="flex flex-wrap justify-center gap-2">
@@ -413,7 +445,7 @@ function AgentViewInner() {
                         {message.action?.type === "update_billing_status" ? (
                           message.actionResult === "done" ? (
                             <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                              <Check className="size-4 text-emerald-600 dark:text-emerald-400" />
+                              <Check className="size-4 text-primary" />
                               Marked {message.action.invoiceNumber} as {message.action.newStatus}
                             </span>
                           ) : (
@@ -444,7 +476,7 @@ function AgentViewInner() {
                         {message.action?.type === "delete_billing_record" ? (
                           message.actionResult === "done" ? (
                             <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                              <Check className="size-4 text-emerald-600 dark:text-emerald-400" />
+                              <Check className="size-4 text-primary" />
                               Deleted invoice {message.action.invoiceNumber}
                             </span>
                           ) : (

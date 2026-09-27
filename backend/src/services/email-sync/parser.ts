@@ -60,12 +60,13 @@ export function extractPlainText(message: GmailMessage): string {
   return message.snippet ?? "";
 }
 
-/** Best-effort vendor display name + domain from a `From` header, used for
- *  `customerName` and to namespace the dedupe key — never a hard requirement. */
+/** Best-effort vendor display name + email + domain from a `From` header, used
+ *  for `customerName`, the dedupe key namespace, and (email) the record's
+ *  provenance trail — never a hard requirement. */
 export function parseSender(
   fromHeader: string | undefined
-): { displayName: string | null; domain: string | null } {
-  if (!fromHeader) return { displayName: null, domain: null };
+): { displayName: string | null; email: string | null; domain: string | null } {
+  if (!fromHeader) return { displayName: null, email: null, domain: null };
   const trimmed = fromHeader.trim();
   const nameMatch = /^"?([^"<]*)"?\s*<(.+)>$/.exec(trimmed);
   const displayNameRaw = nameMatch?.[1]?.trim() || null;
@@ -73,6 +74,76 @@ export function parseSender(
   const domain = /@([^\s>]+)/.exec(email)?.[1]?.toLowerCase() ?? null;
   return {
     displayName: displayNameRaw && displayNameRaw.length > 1 ? displayNameRaw : null,
+    email: email.includes("@") ? email.toLowerCase() : null,
     domain,
   };
+}
+
+/** One authentication mechanism's verdict, normalized down to the three
+ *  values that actually matter for a trust decision — the receiving mail
+ *  server's raw `Authentication-Results` header uses many more (softfail,
+ *  neutral, temperror, ...), all folded into "none" here since none of them
+ *  are an affirmative pass. */
+export type AuthVerdict = "pass" | "fail" | "none";
+
+export interface SenderAuthResults {
+  spf: AuthVerdict;
+  dkim: AuthVerdict;
+  dmarc: AuthVerdict;
+}
+
+/** Parses the receiving mail server's own `Authentication-Results` header
+ *  (Task 9, S-08) — this is the actual answer to "was this From: address
+ *  spoofed," verified by the mail server that received the message, not
+ *  something derivable from the message body/headers a sender fully
+ *  controls. Absent/unparseable → "none" for all three, treated the same
+ *  as a real auth failure by the caller (no header at all is not evidence
+ *  of legitimacy). */
+export function parseAuthenticationResults(headerValue: string | null | undefined): SenderAuthResults {
+  const verdictFor = (mechanism: "spf" | "dkim" | "dmarc"): AuthVerdict => {
+    if (!headerValue) return "none";
+    const match = new RegExp(`\\b${mechanism}=([a-z]+)`, "i").exec(headerValue);
+    const value = match?.[1]?.toLowerCase();
+    return value === "pass" || value === "fail" ? value : "none";
+  };
+  return { spf: verdictFor("spf"), dkim: verdictFor("dkim"), dmarc: verdictFor("dmarc") };
+}
+
+/** How much an extraction's own confidence drops when the sender looks
+ *  suspicious (a failed DMARC check, or a Reply-To/From mismatch) — applied
+ *  once regardless of how many suspicious signals fired (a flat penalty, not
+ *  stacked), since either signal alone is already real evidence, not a
+ *  fraction of it. */
+const SUSPICIOUS_SENDER_CONFIDENCE_PENALTY = 0.4;
+
+/** Combines an extraction's own confidence with sender-verification
+ *  evidence (Task 9) — a DMARC failure or a Reply-To/From mismatch lowers
+ *  confidence rather than rejecting the email outright, since a legitimate
+ *  vendor can genuinely have DMARC misconfigured; this is a trust signal
+ *  for the user/agent to weigh, not an automatic block. `null` in, `null`
+ *  out — an extraction with no confidence value at all has nothing to
+ *  adjust. */
+export function applySenderTrustPenalty(
+  confidence: number | null,
+  authResults: SenderAuthResults,
+  replyToMismatch: boolean
+): number | null {
+  if (confidence === null) return null;
+  const suspicious = authResults.dmarc === "fail" || replyToMismatch;
+  return suspicious ? Math.max(0, confidence - SUSPICIOUS_SENDER_CONFIDENCE_PENALTY) : confidence;
+}
+
+/** A `Reply-To` domain that differs from the `From` domain is a classic
+ *  business-email-compromise pattern (the visible sender looks legitimate;
+ *  replies — and often the actual conversation — go somewhere else
+ *  entirely). Returns false when either header is missing/unparseable,
+ *  since this signal only means something when both are actually present. */
+export function hasReplyToMismatch(
+  fromHeader: string | undefined,
+  replyToHeader: string | undefined
+): boolean {
+  const fromDomain = parseSender(fromHeader).domain;
+  const replyToDomain = parseSender(replyToHeader).domain;
+  if (!fromDomain || !replyToDomain) return false;
+  return fromDomain !== replyToDomain;
 }

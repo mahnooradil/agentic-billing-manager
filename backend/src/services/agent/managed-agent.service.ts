@@ -13,6 +13,7 @@ import { env } from "@/config/env";
 import { AppError } from "@/utils/appError";
 import { AgentSession } from "@/models/agent-session.model";
 import { executeCustomTool } from "@/services/agent/agent-tools";
+import { sanitizeForAgentContext } from "@/utils/sanitize-untrusted-text";
 import { consumeCredits } from "@/services/credits/credit-ledger.service";
 import { tokensToCredits } from "@/config/credits";
 import type { ConnectionRequirements } from "@/services/integrations/capability-resolver";
@@ -258,7 +259,13 @@ export async function sendAgentMessage(
           event.name,
           input
         );
-        resultText = JSON.stringify(result);
+        // Task 9 (S-07) — a second, independent sanitization pass right at
+        // the boundary where a tool result actually enters the model's
+        // context, on top of ai-invoice-extractor.ts's own ingest-time pass.
+        // Catches anything that reaches this point from a path the ingest
+        // sanitizer doesn't cover (a future tool, a field it doesn't touch)
+        // rather than relying on a single point of defense.
+        resultText = JSON.stringify(sanitizeForAgentContext(result));
 
         // The agent confirmed a real, live-connectable platform — surface a
         // deep link the frontend can turn into a one-click "Connect now"

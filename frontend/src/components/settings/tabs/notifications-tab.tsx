@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -20,7 +21,11 @@ import {
 } from "@/services/settings/settings.service";
 import { toUserSettings, type UserSettingsResource } from "@/services/types/settings";
 import { TextField, ToggleField } from "@/components/settings/settings-fields";
-import { createSlackLinkCode } from "@/services/slack/slack.service";
+import {
+  createSlackLinkCode,
+  getSlackInstallUrl,
+  getSlackStatus,
+} from "@/services/slack/slack.service";
 
 /** Shared with general-tab.tsx — both read the exact same /settings resource,
  *  so one cache entry serves either tab, whichever loads first. */
@@ -158,7 +163,7 @@ export function NotificationsSettingsTab() {
               control={control}
               name="recommendationAlerts"
               label="Recommendation alerts"
-              description="New recommendations from your Billing Agent."
+              description="New recommendations from your AI Assistant."
             />
             <ToggleField
               control={control}
@@ -198,29 +203,95 @@ export function NotificationsSettingsTab() {
   );
 }
 
-type SlackConnectStatus = "idle" | "loading" | "error" | "ready";
+type SlackStatusView = "loading" | "error" | "not-connected" | "connected";
+type CodeStatus = "idle" | "loading" | "ready";
 
-/** Lets the user link their Slack account to chat with the Billing Advisor
- *  Agent directly from a Slack DM — separate from the webhook field above,
- *  which only sends one-way alerts. Not part of the settings form/save
- *  button: generating a code is its own immediate action. */
+/**
+ * Two-step Slack integration, matching how this app is actually sold (each
+ * customer organization connects its OWN separate Slack workspace, never a
+ * shared one — see backend organization.model.ts's `slackWorkspace`):
+ *  1. "Add to Slack" — a workspace admin installs the app into their own
+ *     workspace via Slack's own OAuth consent screen (full-page redirect,
+ *     same pattern as Stripe Checkout).
+ *  2. Once installed, any teammate links their OWN Slack identity with a
+ *     short-lived code, DMed to the bot — separate from step 1, since
+ *     "the org connected Slack" and "this specific person can chat with it"
+ *     are different facts.
+ */
 function SlackChatConnect() {
-  const [status, setStatus] = React.useState<SlackConnectStatus>("idle");
+  const searchParams = useSearchParams();
+  const [view, setView] = React.useState<SlackStatusView>("loading");
+  const [teamName, setTeamName] = React.useState<string | null>(null);
+  const [alert, setAlert] = useAlertState();
+  const [installing, setInstalling] = React.useState(false);
+  const [codeStatus, setCodeStatus] = React.useState<CodeStatus>("idle");
   const [code, setCode] = React.useState("");
   const [expiresInMinutes, setExpiresInMinutes] = React.useState(0);
-  const [error, setError] = React.useState("");
+
+  // Slack redirects back here with ?slack=connected|error after the admin
+  // approves (or backs out of) the "Add to Slack" consent screen — folded
+  // into the SAME fetch effect (rather than a separate one reacting to
+  // `slackResult`) because two setState calls in one synchronous effect
+  // body trigger react-hooks/set-state-in-effect's cascading-render check;
+  // doing the second one (the alert) inside this async continuation, after
+  // the real status fetch, avoids that while still only ever fetching once
+  // per mount/redirect.
+  const slackResult = searchParams.get("slack");
+
+  React.useEffect(() => {
+    let ignore = false;
+    (async () => {
+      if (slackResult === "error") {
+        if (!ignore) setAlert({ type: "error", message: "Could not connect Slack — please try again." });
+        return;
+      }
+      try {
+        const response = await getSlackStatus();
+        if (ignore) return;
+        setTeamName(response.data.teamName);
+        setView(response.data.connected ? "connected" : "not-connected");
+        if (slackResult === "connected") {
+          setAlert({ type: "success", message: "Slack connected!" });
+        }
+      } catch {
+        if (!ignore) setView("error");
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slackResult]);
+
+  const handleInstall = async () => {
+    setInstalling(true);
+    setAlert(null);
+    try {
+      const response = await getSlackInstallUrl();
+      window.location.href = response.data.url;
+    } catch (err) {
+      setAlert({
+        type: "error",
+        message: err instanceof ApiError ? err.message : "Could not start the Slack install.",
+      });
+      setInstalling(false);
+    }
+  };
 
   const handleGenerateCode = async () => {
-    setStatus("loading");
-    setError("");
+    setCodeStatus("loading");
+    setAlert(null);
     try {
       const response = await createSlackLinkCode();
       setCode(response.data.code);
       setExpiresInMinutes(response.data.expiresInMinutes);
-      setStatus("ready");
+      setCodeStatus("ready");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong.");
-      setStatus("error");
+      setAlert({
+        type: "error",
+        message: err instanceof ApiError ? err.message : "Something went wrong.",
+      });
+      setCodeStatus("idle");
     }
   };
 
@@ -229,31 +300,46 @@ function SlackChatConnect() {
       <CardHeader>
         <CardTitle>Chat with the Billing Advisor on Slack</CardTitle>
         <CardDescription>
-          Link your Slack account once, then DM the bot anytime to chat with your
-          Billing Advisor Agent — same conversation as the in-app chat.
+          {view === "connected"
+            ? `Connected to ${teamName ?? "your Slack workspace"}. Link your own account below, then DM the bot anytime to chat with your Billing Advisor Agent — same conversation as the in-app chat.`
+            : "Connect your organization's Slack workspace, then link your own account to chat with the Billing Advisor Agent from a Slack DM."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {status === "ready" ? (
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">
-              Send this code to the bot in a Slack DM within {expiresInMinutes} minutes:
-            </p>
-            <p className="rounded-md border bg-muted px-3 py-2 font-mono text-lg tracking-widest">
-              {code}
-            </p>
-          </div>
-        ) : null}
-        {status === "error" ? <p className="text-sm text-destructive">{error}</p> : null}
-        <Button
-          type="button"
-          variant="outline"
-          disabled={status === "loading"}
-          onClick={() => void handleGenerateCode()}
-        >
-          {status === "loading" ? <Loader2 className="animate-spin" /> : null}
-          {status === "ready" ? "Generate a new code" : "Connect Slack"}
-        </Button>
+        {alert ? <FormAlert variant={alert.type} message={alert.message} /> : null}
+
+        {view === "loading" ? (
+          <LoadingSpinner label="Checking Slack connection…" />
+        ) : view === "error" ? (
+          <p className="text-sm text-destructive">Couldn&apos;t check your Slack connection.</p>
+        ) : view === "not-connected" ? (
+          <Button type="button" disabled={installing} onClick={() => void handleInstall()}>
+            {installing ? <Loader2 className="animate-spin" /> : null}
+            Add to Slack
+          </Button>
+        ) : (
+          <>
+            {codeStatus === "ready" ? (
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">
+                  Send this code to the bot in a Slack DM within {expiresInMinutes} minutes:
+                </p>
+                <p className="rounded-md border bg-muted px-3 py-2 font-mono text-lg tracking-widest">
+                  {code}
+                </p>
+              </div>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={codeStatus === "loading"}
+              onClick={() => void handleGenerateCode()}
+            >
+              {codeStatus === "loading" ? <Loader2 className="animate-spin" /> : null}
+              {codeStatus === "ready" ? "Generate a new code" : "Link my Slack account"}
+            </Button>
+          </>
+        )}
       </CardContent>
     </Card>
   );

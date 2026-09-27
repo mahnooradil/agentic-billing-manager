@@ -16,6 +16,8 @@ import {
   CREDIT_CYCLE_DAYS_BY_PLAN,
   TOKENS_PER_CREDIT,
 } from "@/config/credits";
+import { createCheckoutSession } from "@/services/payments/stripe-checkout.service";
+import type { CreateCreditsCheckoutInput } from "@/validators/credits.validator";
 
 const RECENT_TRANSACTIONS_LIMIT = 50;
 
@@ -38,4 +40,17 @@ export const getMyCredits = asyncHandler(async (req, res) => {
     cycleDays: CREDIT_CYCLE_DAYS_BY_PLAN[organization.planTier],
     transactions: transactions.map(toPublicCreditTransaction),
   });
+});
+
+/** POST /api/credits/checkout — starts a Stripe Checkout session to buy a
+ *  fixed credit package. Credits are granted by the webhook once Stripe
+ *  confirms payment (see stripe-checkout.service.ts), never here. */
+export const createCreditsCheckoutSession = asyncHandler(async (req, res) => {
+  const user = req.user;
+  const organization = req.organization;
+  if (!user || !organization) throw new AppError("Authentication required", 401);
+
+  const { packageId } = req.body as CreateCreditsCheckoutInput;
+  const result = await createCheckoutSession(organization, user.email, packageId);
+  sendSuccess(res, 200, "Checkout session created", result);
 });

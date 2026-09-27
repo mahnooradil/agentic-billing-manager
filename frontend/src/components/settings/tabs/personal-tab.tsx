@@ -42,11 +42,7 @@ export function PersonalSettingsTab() {
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteDialogKey, setDeleteDialogKey] = React.useState(0);
   const [importing, setImporting] = React.useState(false);
-  const [importAlert, setImportAlert] = React.useState<{
-    type: "success" | "error";
-    message: string;
-    details?: string[];
-  } | null>(null);
+  const [importAlert, setImportAlert] = useAlertState();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const {

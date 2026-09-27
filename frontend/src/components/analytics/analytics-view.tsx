@@ -25,6 +25,7 @@ import {
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { FlatStatCard } from "@/components/common/flat-stat-card";
+import { FormAlert } from "@/components/common/form-alert";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
@@ -74,7 +75,7 @@ const INSIGHT_STYLES: Record<
   { icon: LucideIcon; className: string }
 > = {
   warning: { icon: TriangleAlert, className: "text-destructive" },
-  success: { icon: CircleCheck, className: "text-emerald-600 dark:text-emerald-400" },
+  success: { icon: CircleCheck, className: "text-primary" },
   info: { icon: Info, className: "text-muted-foreground" },
 };
 
@@ -121,6 +122,10 @@ export function AnalyticsView() {
   const [advanced, setAdvanced] = React.useState<AdvancedAnalytics | null>(
     readPageCache<AdvancedAnalytics>(advancedCacheKey)
   );
+  // Distinguishes "genuinely failed to load" from "still loading" / "loaded
+  // with nothing to show" — those three all leave `advanced` at null, but
+  // only the first should tell the user anything is wrong.
+  const [advancedError, setAdvancedError] = React.useState(false);
   const [loadError, setLoadError] = React.useState("");
 
   // Bumping reloadKey re-runs the fetch effect (used by the retry button).
@@ -163,9 +168,13 @@ export function AnalyticsView() {
         if (!ignore) {
           writePageCache(advancedCacheKey, response.data.analytics);
           setAdvanced(response.data.analytics);
+          setAdvancedError(false);
         }
       } catch {
-        if (!ignore) setAdvanced(null);
+        if (!ignore) {
+          setAdvanced(null);
+          setAdvancedError(true);
+        }
       }
     })();
     return () => {
@@ -334,10 +343,10 @@ export function AnalyticsView() {
                       <TableCell className="text-right tabular-nums">
                         {formatMoney(c.total, c.currency)}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                      <TableCell className="text-right tabular-nums text-success">
                         {formatMoney(c.paid, c.currency)}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-amber-600 dark:text-amber-400">
+                      <TableCell className="text-right tabular-nums text-warning">
                         {formatMoney(c.outstanding, c.currency)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">
@@ -473,6 +482,11 @@ export function AnalyticsView() {
           {/* ── Advanced billing intelligence (F6) ── */}
           {advanced && advanced.invoiceCount > 0 ? (
             <AdvancedSections advanced={advanced} />
+          ) : advancedError ? (
+            <FormAlert
+              variant="error"
+              message="Couldn't load advanced billing intelligence — the rest of this page is unaffected."
+            />
           ) : null}
         </div>
       ) : null}
@@ -639,7 +653,7 @@ function AdvancedSections({ advanced }: { advanced: AdvancedAnalytics }) {
                 {duplicateSubscriptions.map((d, index) => (
                   <TableRow key={`${d.platform}-${d.month}-${index}`}>
                     <TableCell className="flex items-center gap-2 font-medium">
-                      <Copy className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                      <Copy className="size-3.5 shrink-0 text-primary" />
                       {d.platform}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
@@ -744,8 +758,8 @@ function AdvancedSections({ advanced }: { advanced: AdvancedAnalytics }) {
 type InsightTone = "warning" | "success" | "danger";
 
 const INSIGHT_TONES: Record<InsightTone, string> = {
-  warning: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  success: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  warning: "bg-secondary text-foreground",
+  success: "bg-primary/10 text-primary",
   danger: "bg-destructive/10 text-destructive",
 };
 
@@ -805,9 +819,7 @@ function GrowthCard({
   const up = (growth.changePercent ?? 0) >= 0;
   const Icon = up ? ArrowUpRight : ArrowDownRight;
   const tone = up ? "success" : "danger";
-  const color = up
-    ? "text-emerald-600 dark:text-emerald-400"
-    : "text-destructive";
+  const color = up ? "text-primary" : "text-destructive";
   return (
     <Card>
       <div className="flex items-center gap-3.5 p-5">

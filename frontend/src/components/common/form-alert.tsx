@@ -25,7 +25,7 @@ export function FormAlert({
       className={cn(
         "flex gap-2 rounded-lg border p-3 text-sm",
         variant === "success"
-          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+          ? "border-primary/30 bg-primary/10 text-primary"
           : "border-destructive/30 bg-destructive/10 text-destructive",
         className
       )}

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { AuthContext, type AuthContextValue } from "@/context/auth-context";
 import { authStore } from "@/services/auth/auth-store";
+import { logout as logoutRequest } from "@/services/auth/auth.service";
 import { setUnauthorizedHandler } from "@/services/api/unauthorized-handler";
 import { agentChatStore } from "@/services/agent/agent-chat-store";
 import { invalidatePageCache } from "@/lib/page-data-cache";
@@ -57,6 +58,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = React.useCallback(() => {
+    // Best-effort: revoke THIS device's session server-side so it stops
+    // showing as "active" in the Security tab right away, instead of
+    // lingering until its token naturally expires. Fired while the token is
+    // still in the store (so the request is authenticated) but never
+    // awaited — an already-expired/invalid token (e.g. this being called
+    // from the central 401 handler) just 401s again harmlessly, and must
+    // never block the actual local sign-out below.
+    void logoutRequest().catch(() => {});
+
     authStore.clearSession();
     agentChatStore.reset();
     invalidatePageCache();

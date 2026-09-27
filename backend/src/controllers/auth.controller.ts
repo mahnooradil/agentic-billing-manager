@@ -4,8 +4,11 @@
  * email (register flow only, since it collects a name) creates the account;
  * verifying a known email just logs it in. There is no password anywhere.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 
+import { OAuth2Client } from "google-auth-library";
+
+import { env } from "@/config/env";
 import { asyncHandler } from "@/utils/asyncHandler";
 import { AppError } from "@/utils/appError";
 import { sendSuccess } from "@/utils/apiResponse";
@@ -41,6 +44,7 @@ import type {
   RequestEmailChangeInput,
   VerifyEmailChangeInput,
   SwitchOrganizationInput,
+  GoogleSignInInput,
 } from "@/validators/auth.validator";
 
 /** Minimum time between two codes for the same email (avoids spamming Resend). */
@@ -64,7 +68,10 @@ async function issueOtp(email: string, fullName?: string): Promise<void> {
     }
   }
 
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  // crypto.randomInt, not Math.random — the OTP is the entire credential in
+  // this passwordless app, so it must come from a CSPRNG, not a predictable
+  // PRNG whose state could be recovered from self-issued codes (S-02).
+  const code = String(randomInt(100000, 1000000));
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60_000);
 
   await Otp.findOneAndUpdate(
@@ -92,25 +99,70 @@ async function consumeOtp(email: string, code: string): Promise<void> {
     );
   }
 
-  if (otp.attempts >= OTP_MAX_ATTEMPTS) {
+  if (hashCode(code) === otp.codeHash) {
     await otp.deleteOne();
+    return;
+  }
+
+  // Atomic increment (S-03 fix) — the previous `otp.attempts += 1; await
+  // otp.save()` was a read-modify-write: every concurrent wrong guess read
+  // the same starting value, so N concurrent guesses all passed the limit
+  // check and all wrote `attempts = 1`, making the 5-attempt ceiling
+  // bypassable by concurrency alone. This `findOneAndUpdate` with
+  // `attempts: { $lt: OTP_MAX_ATTEMPTS }` in the filter makes the
+  // check-and-increment one atomic database operation — at most
+  // OTP_MAX_ATTEMPTS concurrent guesses can ever succeed in incrementing,
+  // no matter how many arrive at once.
+  const updated = await Otp.findOneAndUpdate(
+    { _id: otp._id, attempts: { $lt: OTP_MAX_ATTEMPTS } },
+    { $inc: { attempts: 1 } },
+    { new: true }
+  );
+
+  if (!updated || updated.attempts >= OTP_MAX_ATTEMPTS) {
+    await Otp.deleteOne({ _id: otp._id });
     throw new AppError(
       "Too many incorrect attempts. Please request a new code.",
       400
     );
   }
 
-  if (hashCode(code) !== otp.codeHash) {
-    otp.attempts += 1;
-    await otp.save();
-    const remaining = OTP_MAX_ATTEMPTS - otp.attempts;
-    throw new AppError(
-      `Incorrect code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`,
-      400
-    );
+  const remaining = OTP_MAX_ATTEMPTS - updated.attempts;
+  throw new AppError(
+    `Incorrect code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`,
+    400
+  );
+}
+
+/**
+ * Finds the account for `email`, or creates one — shared by `verifyOtp` and
+ * `googleSignIn` (both single-step "prove this email, then get in" flows
+ * that need the exact same new-account bootstrap: personal workspace +
+ * starting credits, or joining a live invitation instead when one exists).
+ */
+async function findOrCreateUser(
+  email: string,
+  fullNameForNewAccount: string
+): Promise<{ user: UserDocument; isNewUser: boolean }> {
+  let user = await User.findOne({ email });
+  if (user) return { user, isNewUser: false };
+
+  user = await User.create({ fullName: fullNameForNewAccount, email });
+
+  // A live invitation for this email joins that organization (with the
+  // invited role) instead of bootstrapping a fresh personal one.
+  const joined = await consumeInvitationForNewSignup(user._id, email);
+  if (!joined) {
+    // Signup credit grant — a real ledger entry (services/credits/), not a
+    // bare schema default, so the balance is explainable from day one.
+    // Only for a BRAND NEW personal workspace — an org joined via
+    // invitation already has its own credit history/allowance, so there's
+    // nothing to "start" here.
+    const { organization } = await createPersonalOrganization(user._id, user.fullName);
+    await grantCredits(organization._id, STARTING_CREDITS, "signup_grant", "grant", user._id);
   }
 
-  await otp.deleteOne();
+  return { user, isNewUser: true };
 }
 
 /** Creates a session for a freshly-issued token and signs it with the session's jti. */
@@ -141,20 +193,32 @@ export const requestRegisterOtp = asyncHandler(async (req, res) => {
   sendSuccess(res, 200, "Verification code sent", null);
 });
 
-/** POST /api/auth/login/request-otp — start signing in to an existing account. */
+/**
+ * POST /api/auth/login/request-otp — start signing in to an existing account.
+ *
+ * Uniform response regardless of whether the account exists (S-13) — the
+ * previous explicit 404 ("No account found...") let anyone enumerate which
+ * emails have accounts. Now: if the account exists, a real code is issued;
+ * if not, this is a silent no-op (no Otp record, no email) — but the
+ * response is identical either way, so the two cases are indistinguishable
+ * from the outside. A verify-otp attempt against a non-existent account's
+ * email correctly fails as "expired or wasn't found," the same message a
+ * genuinely wrong/expired code produces.
+ */
 export const requestLoginOtp = asyncHandler(async (req, res) => {
   const { email } = req.body as RequestLoginOtpInput;
 
   const existingUser = await User.findOne({ email });
-  if (!existingUser) {
-    throw new AppError(
-      "No account found with this email. Please sign up first.",
-      404
-    );
+  if (existingUser) {
+    await issueOtp(email);
   }
 
-  await issueOtp(email);
-  sendSuccess(res, 200, "Verification code sent", null);
+  sendSuccess(
+    res,
+    200,
+    "If an account exists for this email, a verification code has been sent.",
+    null
+  );
 });
 
 /**
@@ -177,26 +241,49 @@ export const verifyOtp = asyncHandler(async (req, res) => {
 
   await consumeOtp(email, code);
 
-  let user = await User.findOne({ email });
-  let isNewUser = false;
-  if (!user) {
-    user = await User.create({ fullName: fullNameFromOtp ?? email, email });
-    isNewUser = true;
+  const { user, isNewUser } = await findOrCreateUser(email, fullNameFromOtp ?? email);
+  const token = await issueSession(user, req);
 
-    // A live invitation for this email joins that organization (with the
-    // invited role) instead of bootstrapping a fresh personal one.
-    const joined = await consumeInvitationForNewSignup(user._id, email);
-    if (!joined) {
-      // Signup credit grant — a real ledger entry (services/credits/), not a
-      // bare schema default, so the balance is explainable from day one.
-      // Only for a BRAND NEW personal workspace — an org joined via
-      // invitation already has its own credit history/allowance, so there's
-      // nothing to "start" here.
-      const { organization } = await createPersonalOrganization(user._id, user.fullName);
-      await grantCredits(organization._id, STARTING_CREDITS, "signup_grant", "grant", user._id);
-    }
+  sendSuccess(res, 200, isNewUser ? "Account created" : "Login successful", {
+    token,
+    user: toPublicUser(user),
+  });
+});
+
+/**
+ * POST /api/auth/google — "Continue with Google". Verifies the ID token
+ * Google Identity Services hands the frontend after a successful sign-in,
+ * then reuses the exact same find-or-create-account path as `verifyOtp` —
+ * an unknown email creates a personal workspace, a known one just logs in.
+ * No password, no OTP: Google has already proven the email for us.
+ */
+export const googleSignIn = asyncHandler(async (req, res) => {
+  if (!env.googleClientId) {
+    throw new AppError("Google sign-in isn't configured on this server.", 503);
   }
 
+  const { credential } = req.body as GoogleSignInInput;
+
+  const client = new OAuth2Client(env.googleClientId);
+  let payload;
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: env.googleClientId,
+    });
+    payload = ticket.getPayload();
+  } catch {
+    throw new AppError("Could not verify this Google sign-in. Please try again.", 401);
+  }
+
+  if (!payload?.email || !payload.email_verified) {
+    throw new AppError("This Google account's email address isn't verified.", 401);
+  }
+
+  const { user, isNewUser } = await findOrCreateUser(
+    payload.email,
+    payload.name ?? payload.email
+  );
   const token = await issueSession(user, req);
 
   sendSuccess(res, 200, isNewUser ? "Account created" : "Login successful", {
@@ -289,6 +376,31 @@ export const switchOrganization = asyncHandler(async (req, res) => {
   sendSuccess(res, 200, "Switched organization", {
     organization: toPublicOrganization(organization, membership.role),
   });
+});
+
+/**
+ * POST /api/auth/logout — revokes THIS device's own session, so it stops
+ * showing as an active session (Security tab) the moment the user signs
+ * out, instead of lingering there until its token naturally expires. Every
+ * `verifyOtp`/`googleSignIn` call mints a brand new Session row — without
+ * this endpoint, logging out never told the backend, so old sessions just
+ * piled up looking "active" forever.
+ */
+export const logout = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new AppError("Authentication required", 401);
+  }
+
+  if (req.sessionJti) {
+    await Session.updateOne(
+      { jti: req.sessionJti, revokedAt: { $exists: false } },
+      { $set: { revokedAt: new Date() } }
+    );
+    invalidateCachedAuth(user._id.toString());
+  }
+
+  sendSuccess(res, 200, "Signed out", null);
 });
 
 /**
