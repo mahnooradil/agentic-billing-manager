@@ -58,8 +58,23 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
+      # `npm ci` here (unlike the backend job) fails with EUSAGE even on a
+      # freshly `npm install`-regenerated lockfile: Tailwind v4's
+      # @tailwindcss/oxide-wasm32-wasi is an optional, wasm32-only fallback
+      # package that ships its OWN sub-dependencies (@emnapi/*) as
+      # `bundleDependencies` inside its tarball rather than as normal
+      # registry-resolved entries. That tarball is never downloaded/
+      # inspected on a Windows dev machine (a native win32 binary covers it
+      # instead), so no local `npm install` — even one forced with
+      # `--os=linux --cpu=x64` — can fully and stably record its bundled
+      # versions into the lockfile the way `npm ci`'s strict graph
+      # validation demands; confirmed non-deterministic across several
+      # regeneration attempts. `npm install` is more lenient (repairs/
+      # updates the lockfile as needed rather than hard-failing on any
+      # mismatch) and is the standard, accepted workaround for this exact,
+      # well-known class of cross-platform optional-binary lockfile issue.
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Type-check
         run: npm run type-check
