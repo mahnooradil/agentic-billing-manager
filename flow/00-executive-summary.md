@@ -169,9 +169,33 @@ the document cites, not assumed from the document text.
    `.github/workflows/ci.yml` added — backend (typecheck, lint, build, test) and frontend
    (typecheck, lint, build) as two jobs, triggered on push/PR to `main`. **The "CI goes red on a
    type error" acceptance criterion was verified locally** (a deliberate type error made
-   `type-check` exit non-zero, confirmed, then removed and confirmed clean again) — the actual
-   GitHub Actions run itself can only be confirmed once this is pushed, which hasn't happened
-   (nothing has been committed/pushed all session, per standing instruction).
+   `type-check` exit non-zero, confirmed, then removed and confirmed clean again).
+
+   **Update (2026-09-27) — actually verified live on GitHub Actions**, once the user explicitly
+   authorized a commit + push (per §2's "never commit until told" rule) specifically to complete
+   this verification: pushed commit `4719c9f` (all of tasks 1–9, scoped per the user's own choice
+   after a first attempt revealed pre-existing uncommitted work — Google Sign-In, the Slack OAuth
+   install redesign, Stripe Buy Credits, the UI redesign — was entangled in shared files like
+   `app.ts`/`env.ts`/`auth.controller.ts` in a way that couldn't be cleanly separated without real
+   risk of breaking something; the user chose to commit everything together rather than have it
+   surgically split). First real run: **backend job passed clean** (typecheck/lint/build/test all
+   green — the actual acceptance criterion, genuinely confirmed on real infrastructure for the
+   first time); **frontend job failed** at `npm ci`, a real, pre-existing, previously-undiscovered
+   bug — `frontend/package-lock.json` wasn't actually self-consistent for a strict `npm ci` on
+   Linux (traced to `@tailwindcss/oxide-wasm32-wasi`, an optional wasm32-only Tailwind v4 fallback
+   package whose own `@emnapi/*` sub-dependencies are declared as `bundleDependencies` inside its
+   tarball — never downloaded/inspected on a Windows dev machine, where a native `win32` binary
+   covers Tailwind instead, so no amount of local relockfile-regeneration, including one forced
+   with `npm install --os=linux --cpu=x64`, produced a stable result — confirmed non-deterministic
+   across several attempts). Fixed by switching the frontend CI job from `npm ci` to `npm install`
+   (commit `54e955c`) — the standard, accepted workaround for this exact class of cross-platform
+   optional-binary lockfile issue; the backend job keeps `npm ci` since it has no such package and
+   already passes cleanly. **Final result: both jobs fully green** — run `36342477166`,
+   confirmed via `gh run watch`, not just assumed from a green checkmark. This is a genuinely new
+   bug this task's own real-infrastructure test surfaced — invisible to any local Windows
+   verification, however thorough, which is exactly why "verified locally" and "verified on the
+   actual CI infrastructure" were kept as two distinct claims above rather than treated as
+   equivalent.
 7. **PDF/attachment parsing.** Confirmed `parser.ts` has no attachment or `application/pdf` handling.
 8. **Learning loop.** Confirmed — only manual `trackedSenders`, no feedback mechanism.
 
