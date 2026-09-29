@@ -52,6 +52,7 @@ import "@/models/user.model";
 import "@/models/organization.model";
 import "@/models/vendor.model";
 import "@/models/billing-event.model";
+import "@/models/subscription.model";
 
 interface UniqueCheck {
   modelName: string;
@@ -148,6 +149,16 @@ const UNIQUE_CHECKS: UniqueCheck[] = [
     modelName: "Vendor",
     label: "Vendor {organization, dedupeKey}",
     groupFields: { organization: "$organization", dedupeKey: "$dedupeKey" },
+  },
+  {
+    modelName: "Subscription",
+    label: "Subscription.organization",
+    groupFields: { organization: "$organization" },
+  },
+  {
+    modelName: "Subscription",
+    label: "Subscription.stripeSubscriptionId",
+    groupFields: { stripeSubscriptionId: "$stripeSubscriptionId" },
   },
 ];
 
@@ -248,6 +259,7 @@ const ALL_MODEL_NAMES = [
   "Organization",
   "Vendor",
   "BillingEvent",
+  "Subscription",
 ];
 
 async function main(): Promise<void> {

@@ -11,6 +11,8 @@ import { warmCatalogCache } from "@/services/integrations/pipedream";
 import { startBillingSyncScheduler } from "@/services/billing-sync/scheduler";
 import { startEmailSyncScheduler } from "@/services/email-sync/scheduler";
 import { startCreditResetScheduler } from "@/services/credits/credit-reset-scheduler";
+import { startCreditReconciliationScheduler } from "@/services/credits/credit-reconciliation-scheduler";
+import { assertNoLiveStripeKeyOutsideProduction } from "@/services/payments/stripe-subscription.service";
 
 /**
  * Server bootstrap / entry point.
@@ -28,6 +30,11 @@ import { startCreditResetScheduler } from "@/services/credits/credit-reset-sched
  */
 async function startServer(): Promise<void> {
   try {
+    // 0: refuse to boot at all with a live Stripe key outside production
+    // (Task 10) — a pure config check, no database needed, so it runs
+    // before anything else has a chance to touch real money by mistake.
+    assertNoLiveStripeKeyOutsideProduction();
+
     // 1 + 2: connect to the database before starting Express.
     await connectDatabase();
 
@@ -44,6 +51,7 @@ async function startServer(): Promise<void> {
     startEmailSyncScheduler();
     startDueDateScheduler();
     startCreditResetScheduler();
+    startCreditReconciliationScheduler();
 
     // 4: database and indexes are ready — start accepting HTTP traffic.
     const app = createApp();

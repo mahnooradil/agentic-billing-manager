@@ -76,3 +76,19 @@ export const PLANS: Record<PlanTier, PlanDefinition> = {
 export function getPlan(tier: PlanTier): PlanDefinition {
   return PLANS[tier];
 }
+
+/** Task 10 — maps a Stripe recurring Price id to the plan tier it
+ *  represents, so a `customer.subscription.*` webhook (which only ever
+ *  carries a Price id, never "Pro"/"Business" directly) can be turned back
+ *  into a `PlanTier`. Built lazily (not at module load) so this file has no
+ *  hard dependency on `env` being fully initialized first, and stays a
+ *  plain lookup — `services/payments/stripe-subscription.service.ts` is
+ *  the only caller. */
+export function planTierForStripePrice(
+  priceId: string,
+  prices: { pro: string; business: string }
+): PlanTier | null {
+  if (prices.pro && priceId === prices.pro) return "Pro";
+  if (prices.business && priceId === prices.business) return "Business";
+  return null;
+}

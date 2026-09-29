@@ -11,6 +11,10 @@ import {
   verifyWebhookEvent,
   handleCheckoutCompleted,
 } from "@/services/payments/stripe-checkout.service";
+import {
+  applySubscriptionEvent,
+  notifySubscriptionPaymentFailed,
+} from "@/services/payments/stripe-subscription.service";
 
 /** POST /api/stripe/webhook — body is the RAW request bytes (see app.ts). */
 export const stripeWebhook = asyncHandler(async (req, res) => {
@@ -34,6 +38,21 @@ export const stripeWebhook = asyncHandler(async (req, res) => {
     void handleCheckoutCompleted(event).catch(() => {
       // Best-effort — nothing left to respond to; a missed grant here would
       // need a manual reconciliation, same as any other webhook failure.
+    });
+  } else if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    void applySubscriptionEvent(event).catch(() => {
+      // Best-effort — nothing left to respond to; a missed update here
+      // would need a manual reconciliation, same as any other webhook
+      // failure. Stripe's own dashboard remains the source of truth to
+      // reconcile against.
+    });
+  } else if (event.type === "invoice.payment_failed") {
+    void notifySubscriptionPaymentFailed(event).catch(() => {
+      // Best-effort — see the function's own docstring.
     });
   }
 });

@@ -19,7 +19,7 @@ import { useAlertState } from "@/hooks/use-alert-state";
 import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { usePreferences } from "@/services/preferences/preferences-store";
 import { ApiError } from "@/services/api/client";
-import { getMyPlan, updateMyPlan } from "@/services/plan/plan.service";
+import { getMyPlan, updateMyPlan, createPlanCheckoutSession } from "@/services/plan/plan.service";
 import { getMyCredits } from "@/services/credits/credits.service";
 import type { PlanData, PlanDefinition } from "@/services/types/plan";
 import type { CreditsData } from "@/services/types/credits";
@@ -87,10 +87,11 @@ function creditsCycleLabel(cycleDays: number): string {
 }
 
 /** The workspace's OWN plan for using this app — current tier, real usage
- *  against its limits, and every tier available to switch to. No payment
- *  processor is wired up for plan switching itself yet, so switching tiers
- *  here is free and immediate (buying credits, below, IS a real Stripe
- *  Checkout flow). */
+ *  against its limits, and every tier available to switch to. Downgrading
+ *  to Free is self-service and immediate; switching to a PAID tier (Pro/
+ *  Business) starts a real Stripe Checkout session instead (same pattern
+ *  as the credits "Buy more credits" flow below) — the tier itself only
+ *  actually switches once Stripe confirms the subscription via webhook. */
 function PlanSection() {
   const cached = readPageCache<PlanData>(PLAN_CACHE_KEY);
   const [status, setStatus] = React.useState<"loading" | "error" | "ready">(
@@ -101,6 +102,14 @@ function PlanSection() {
   const [switchingTo, setSwitchingTo] = React.useState<string | null>(null);
   const [alert, setAlert] = useAlertState();
   const [reloadKey, setReloadKey] = React.useState(0);
+  // Deferred to an effect (not assigned directly in the click handler) for
+  // the same react-hooks/immutability reason BuyCreditsDialog's identical
+  // redirect is — see that component's own comment.
+  const [checkoutRedirectUrl, setCheckoutRedirectUrl] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (checkoutRedirectUrl) window.location.href = checkoutRedirectUrl;
+  }, [checkoutRedirectUrl]);
 
   React.useEffect(() => {
     let ignore = false;
@@ -126,15 +135,24 @@ function PlanSection() {
     setAlert(null);
     setSwitchingTo(plan.tier);
     try {
-      await updateMyPlan({ tier: plan.tier });
-      setAlert({ type: "success", message: `Switched to the ${plan.displayName} plan.` });
-      setReloadKey((key) => key + 1);
+      if (plan.tier === "Free") {
+        await updateMyPlan({ tier: "Free" });
+        setAlert({ type: "success", message: "Switched to the Free plan." });
+        setReloadKey((key) => key + 1);
+        setSwitchingTo(null);
+        return;
+      }
+
+      // A paid tier is never granted directly — start real Stripe Checkout
+      // and let the redirect happen; the plan switches once the webhook
+      // confirms payment, same as buying credits.
+      const response = await createPlanCheckoutSession(plan.tier);
+      setCheckoutRedirectUrl(response.data.url);
     } catch (error) {
       setAlert({
         type: "error",
         message: error instanceof ApiError ? error.message : "Could not switch plans.",
       });
-    } finally {
       setSwitchingTo(null);
     }
   };

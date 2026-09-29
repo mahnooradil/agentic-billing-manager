@@ -60,12 +60,20 @@ export const env = {
   // must exactly match one of the Redirect URLs configured on the Slack App.
   slackOauthRedirectUri:
     process.env.SLACK_OAUTH_REDIRECT_URI ?? "",
-  // Stripe (Buy Credits) — lets a workspace purchase additional Billing
-  // Advisor credits via Stripe Checkout (see services/payments/). Unset
-  // means the feature reports "not configured" (never faked), same
-  // convention as every other optional integration above.
+  // Stripe (Buy Credits + paid plan subscriptions) — lets a workspace
+  // purchase additional Billing Advisor credits, or subscribe to a paid
+  // plan tier, via Stripe Checkout (see services/payments/). Unset means
+  // the feature reports "not configured" (never faked), same convention as
+  // every other optional integration above.
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+  // The Stripe Price ids for the two paid plan tiers (Task 10) — Free has
+  // no Price, it's simply the absence of an active subscription. Set these
+  // to the recurring (subscription-mode) Prices created in the Stripe
+  // Dashboard/API for this product; unset means plan-tier checkout reports
+  // "not configured" the same way an unset stripeSecretKey does.
+  stripePricePro: process.env.STRIPE_PRICE_PRO ?? "",
+  stripePriceBusiness: process.env.STRIPE_PRICE_BUSINESS ?? "",
   // "Continue with Google" sign-in — verifies the ID token Google Identity
   // Services hands the frontend (see controllers/auth.controller.ts's
   // `googleSignIn`); no client secret is needed for ID-token verification,

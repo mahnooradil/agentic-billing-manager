@@ -95,14 +95,103 @@ the document cites, not assumed from the document text.
    is the exact data-layer guarantee the fix depends on (proven directly, above) plus a careful,
    documented line-by-line trace of the loop logic against GM-004/005/006/010b/018's exact scenarios.
    If a real test inbox becomes available, this is the one remaining thing worth confirming live.
-4. **No revenue path / plan-tier payment gate.** `plan.controller.ts`'s `updateMyPlan` still does
-   `organization.planTier = tier` with no payment check — any owner/admin can self-upgrade to
-   Business for free. **Verified still true.**
-   **Status note:** a *separate*, uncommitted "buy credit top-ups via Stripe" flow already exists
-   in the working tree (`stripe-checkout.service.ts`, `stripe-webhook.controller.ts`,
-   `credit-packages.ts`, plus a frontend `buy-credits-dialog.tsx`) — this covers buying *extra*
-   credits, not gating the *plan tier* itself. The user has said they will give separate instruction
-   on what to do with this in-progress Stripe work — **do not touch it until told to.**
+4. ✅ **DONE (2026-09-29) — No revenue path / plan-tier payment gate (roadmap task #10, "Stripe,
+   minimum production-grade").** Explicitly authorized by the user ("chalo phir Task 10 shuru karo").
+
+   **Scope confirmed before writing anything**: the already-committed credit-top-up flow
+   (`stripe-checkout.service.ts` §6) was re-verified as its own separate, already-~90%-complete
+   piece (raw-body signature verification, `StripeProcessedEvent` dedup ledger, ack-fast-then-
+   process — all confirmed still correct) — task #10's actual acceptance criteria (per
+   `docs/audit/04` and `flow/07-pricing-credits-stripe.md`'s own gap analysis) is specifically
+   about the **subscription/plan-tier gate (§5)**, which had zero code behind it: no `Subscription`
+   model, no `customer.subscription.*`/`invoice.*` handling, no out-of-order tolerance, no live-key
+   guard, no reconciliation job, and `updateMyPlan` completely unconnected to Stripe. This is what
+   was actually built.
+
+   **Built:**
+   - New `models/subscription.model.ts` — one record per organization (unique on both
+     `organization` and `stripeSubscriptionId`), mirroring Stripe's own `status` vocabulary verbatim
+     rather than remapping it, plus `lastEventAt` (the out-of-order guard) and `cancelAtPeriodEnd`.
+   - `config/plans.ts` gained `planTierForStripePrice()`; `config/env.ts` gained
+     `stripePricePro`/`stripePriceBusiness` (unset ⇒ "not configured", same convention as every
+     other optional integration).
+   - New `services/payments/stripe-subscription.service.ts` — `createSubscriptionCheckoutSession`
+     (mode: "subscription", the org id carried in `subscription_data.metadata` so applying an event
+     never needs a separate customer-id lookup); `applySubscriptionEvent` (the ONE place `planTier`
+     is ever written after this task — created/updated/deleted, idempotent via the same
+     `StripeProcessedEvent` ledger the credit-purchase flow already uses, and explicitly tolerant of
+     out-of-order delivery: an event whose own `created` timestamp is not newer than the stored
+     `lastEventAt` is ignored outright, satisfying that exact acceptance criterion); a lapsed
+     payment (`past_due`/`unpaid`) drops the org to Free **immediately** rather than silently
+     keeping paid features during a billing problem, while the `Subscription` record itself is kept
+     so a successful retry resumes the tier; an unrecognized Price id (e.g. the Stripe product was
+     reconfigured) always reverts to Free rather than trusting an unknown tier;
+     `cancelActiveSubscription` (called from a self-service downgrade, so the customer actually
+     stops being billed instead of this app silently disagreeing with Stripe about their tier);
+     `notifySubscriptionPaymentFailed` (a user-facing warning the moment a charge fails, ahead of
+     the tier actually dropping); `assertNoLiveStripeKeyOutsideProduction` (refuses to boot with a
+     `sk_live_` key when `NODE_ENV !== "production"` — a real safeguard against accidentally
+     charging a real card from a dev/staging box, wired into `server.ts` as the very first startup
+     check, before even the database connects).
+   - `stripe-webhook.controller.ts` gained the three `customer.subscription.*` cases plus
+     `invoice.payment_failed`, alongside (not replacing) the existing `checkout.session.completed`
+     handler.
+   - `plan.controller.ts`'s `updateMyPlan` (PUT) now REJECTS any tier other than `"Free"` outright
+     (400) — a paid tier is only ever reachable through the new `createPlanCheckout`
+     (POST `/api/plan/checkout`), which never writes `planTier` itself, only ever returns a Stripe
+     Checkout URL. This is the literal acceptance criterion ("plan tier writable ONLY by the webhook
+     handler... PUT /api/plan restricted to downgrade-to-Free or removed").
+   - New `services/credits/credit-reconciliation-scheduler.ts` — the roadmap's own explicitly-named
+     nightly job (`sum(CreditTransaction.amount) === creditsBalance`), running every 24h (+ once 5
+     minutes after boot). Detection-only, deliberately never auto-corrects a drifted balance — see
+     the file's own docstring for why guessing which side is wrong would risk making a real
+     discrepancy worse; a mismatch is logged loudly (`console.error`, matching this session's S-17
+     "never a silent catch" convention) for an operator to investigate.
+   - Frontend: `plan-view.tsx`'s tier-switch buttons now branch — Free still calls `PUT /api/plan`
+     directly (self-service, unchanged UX); Pro/Business now call the new
+     `createPlanCheckoutSession()` and redirect to the real Stripe Checkout URL, exact same
+     redirect-via-effect pattern `BuyCreditsDialog` already used for buying credits — this was a
+     REQUIRED fix, not optional polish: without it, clicking "Switch to Pro" in the existing UI
+     would have started hitting the now-400-rejecting endpoint the moment this shipped.
+
+   **Tested — 21 new tests, 108 total now passing:**
+   - `stripe-subscription.test.ts` (13) — the roadmap's own named scenario matrix, hand-built
+     `Stripe.Event`-shaped fixtures (no live Stripe account exists in this environment — confirmed
+     `STRIPE_SECRET_KEY` unset — so these exercise `applySubscriptionEvent`/
+     `notifySubscriptionPaymentFailed` directly against already-parsed events, the same shape the
+     webhook controller hands them post-signature-verification): new subscription, upgrade,
+     downgrade (Stripe's own price/period-end change trusted as-is, no local proration math),
+     cancel-at-period-end (tier kept until the period actually ends), immediate cancel, payment
+     failure + successful retry resuming the tier, duplicate webhook (idempotent), out-of-order
+     webhook (an older event delivered late never regresses newer state), an unrecognized Price id,
+     plus the live-key-outside-production guard's three cases.
+   - `credit-reconciliation.test.ts` (3) — no drift, a real detected drift (asserted against the
+     actual logged payload, not just "something was logged"), and multiple orgs where only the
+     genuinely drifted one is reported.
+   - `plan-checkout.test.ts` (5) — real HTTP tests (supertest) proving `PUT /api/plan` genuinely
+     rejects a self-upgrade attempt (400) while still allowing a Free downgrade (200, and confirmed
+     to cancel an existing active `Subscription` record's entitlement locally too), `POST /api/plan/
+     checkout` correctly reports "not configured" in this Stripe-less environment (503), and a
+     `member`-role user is correctly forbidden (403) from either endpoint.
+
+   Backend `tsc`/`lint`/`build` clean; 0 test files leaked into `dist/`. Frontend `tsc`/`lint`/`build`
+   (full production build, 15 routes) also clean after the required `plan-view.tsx` fix. Live
+   database: `Subscription`'s declared indexes already existed (auto-built by a dev-server process
+   still connected to Atlas from earlier in this session) — confirmed via `sync-indexes.ts`'s
+   check-mode, nothing to apply.
+
+   **Honest limitations — genuinely cannot be verified further in this environment:**
+   - No Stripe account/test keys are configured at all (`STRIPE_SECRET_KEY` unset) — every scenario
+     above is verified through hand-built event fixtures reflecting real Stripe payload shapes, never
+     against an actual live (even test-mode) Stripe webhook delivery, actual Checkout redirect, or a
+     real signature-verified request. This is the same class of limitation already disclosed for
+     Task 9's live adversarial-model test — flagged, not silently assumed working.
+   - "Refund" (the roadmap's 9th named test scenario) is **not implemented** — no `charge.refunded`
+     handling exists for either this subscription flow or the pre-existing credit-purchase flow.
+     Disclosed as a real, deliberate gap rather than silently dropped from the matrix.
+   - The live-key-outside-production guard and the reconciliation job's own *scheduling* (vs. their
+     underlying logic, both fully tested) run on real timers in production — never exercised end-to-
+     end against the real clock, only against the extracted, directly-callable logic.
 5. ✅ **DONE (2026-09-26) — schema + wiring only, see scope note below.** **Nothing was verifiable —
    no provenance.** `billing.model.ts`'s `IBilling` gained a full provenance trail, all optional/
    additive (old records simply lack these until re-synced — no backfill migration needed):

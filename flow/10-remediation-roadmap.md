@@ -149,8 +149,22 @@ already found:
    an account-level constraint, not a code issue. What's verified is the request-shape tests above;
    the model's own behavior against a live adversarial email is unconfirmed until the account has
    credit again — flagged honestly rather than assumed.
-10. **Stripe, minimum production-grade** — needs #1, #4. Tests: CR-019…024 + the 15-row matrix in
-    `flow/07-pricing-credits-stripe.md`. **On hold — see note below.**
+10. ✅ **DONE (2026-09-29) — Stripe, minimum production-grade.** Full detail in
+    `flow/00-executive-summary.md` item #4: new `Subscription` model + `stripe-subscription.service.ts`
+    (Checkout in subscription mode, webhook-only `planTier` writes, out-of-order tolerance via
+    `lastEventAt`, immediate Free-drop on a lapsed payment, live-key-outside-production guard);
+    `updateMyPlan` now rejects any non-Free tier (400) — a paid tier is reachable only through the new
+    `POST /api/plan/checkout`; a nightly credit-ledger reconciliation job
+    (`credit-reconciliation-scheduler.ts`); frontend `plan-view.tsx` updated to route paid-tier
+    switches through real Stripe Checkout (a required fix, not polish — the old code would have hit
+    the newly-400-rejecting endpoint otherwise). 21 new tests (108 total) covering the roadmap's own
+    named scenario matrix via hand-built Stripe event fixtures — **no live Stripe account exists in
+    this environment**, so nothing here was verified against an actual live webhook delivery or
+    Checkout redirect, only against realistic fixtures; "refund" (the matrix's 9th scenario) was not
+    implemented, disclosed as a real gap. Both explicit user pre-conditions were honored: only
+    proceeded on the user's own explicit go-ahead ("chalo phir Task 10 shuru karo"), and built on top
+    of — not instead of — the already-~90%-complete credit-top-up flow per `flow/07`'s gap analysis,
+    which was re-verified rather than redone.
 
 ---
 
@@ -159,11 +173,11 @@ already found:
 ### Stripe (task 10 / WP-9) — explicit conflict with the canonical roadmap, resolved in the user's favor
 
 The roadmap's own Gantt has WP-9 starting on day 31, in parallel with WP-4/5 on a second engineer.
-**This is overridden by the user's explicit instruction** ("Stripe wala kaam mujhe yaad hai... wo
-bataun kya karna") — nothing in that track proceeds until they give specific instruction, regardless
-of what the canonical roadmap's own timing would otherwise suggest. When they do give that
-instruction, `flow/07-pricing-credits-stripe.md`'s gap analysis (the credit top-up flow is ~90% done;
-only the subscription/plan-tier piece is unbuilt) is what to resume from.
+**This was overridden by the user's explicit instruction** to wait ("Stripe wala kaam mujhe yaad
+hai... wo bataun kya karna") until they gave specific instruction — which they did on 2026-09-29
+("chalo phir Task 10 shuru karo"), at which point `flow/07-pricing-credits-stripe.md`'s gap analysis
+(the credit top-up flow ~90% done; only the subscription/plan-tier piece unbuilt) was resumed from
+exactly as this document anticipated. See task #10 above for what was actually built.
 
 ### The two "extra" items (not from the 12 documents) — where they'd slot in if picked up
 
