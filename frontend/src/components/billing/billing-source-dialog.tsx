@@ -158,7 +158,12 @@ export function BillingSourceDialog({ record, open, onOpenChange }: BillingSourc
               ) : null}
               {gmailLink ? (
                 <div className="space-y-1.5">
-                  <Button variant="outline" size="sm" render={<a href={gmailLink} target="_blank" rel="noopener noreferrer" />}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    nativeButton={false}
+                    render={<a href={gmailLink} target="_blank" rel="noopener noreferrer" />}
+                  >
                     <ExternalLink />
                     View in Gmail
                   </Button>

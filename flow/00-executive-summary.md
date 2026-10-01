@@ -1019,6 +1019,33 @@ the document cites, not assumed from the document text.
       consecutive full runs green. Backend and frontend `tsc`/`lint`/`build` clean (full production
       build).
 
+19. ✅ **DONE (2026-10-01) — Fix: Base UI console error on the "View in Gmail" button.** User-reported
+    (real browser console, not caught by `tsc`/`lint`/`build` since this is a Base UI runtime
+    assertion, not a type error): *"A component that acts as a button expected a native `<button>`
+    because the `nativeButton` prop is true. Rendering a non-`<button>` removes native button
+    semantics..."* — `billing-source-dialog.tsx`'s Gmail-link `Button` used `render={<a .../>}`
+    (needed so it's a real clickable `<a href>`, not a `<button>` faking a link) without telling Base
+    UI's `Button` that the rendered element isn't a native button. Fixed with `nativeButton={false}`
+    (confirmed the correct prop/value by reading `@base-ui/react`'s own `NativeButtonProps` type, not
+    guessed). Swept the rest of the frontend for the same pattern (`Button` + `render={<a .../>}`) —
+    this was the only occurrence. Frontend `tsc`/`lint`/`build` clean (full production build).
+
+20. **Investigated, not a bug** — user noticed some Billing rows' "Where this record came from" dialog
+    and status-explanation tooltip (item #17) show full detail while others show almost nothing.
+    Queried the live database directly rather than guessing: of 20 `email_sync` records, only 3
+    (all created within the same few seconds on 2026-09-11) carry `senderEmail`/`subject`/
+    `extractionConfidence`/`evidence`/`senderAuthResult` — the other 17 (Shopify/GitHub/Spotify/
+    Netflix/Sigma Tech, created in tight clusters on 2026-08-25, 2026-09-07/08, 2026-09-15) have none
+    of those fields at all, and lack any `BillingEvent` history (so no `derivedStatusExplanation`
+    either) — consistent with these being test/seed records created directly (bypassing the real
+    email-sync + AI-extraction pipeline) during this project's own earlier task-verification work,
+    not real synced invoices. **Not a code defect**: the UI is correctly showing exactly what each
+    record actually has — additive/optional provenance fields were always designed to be absent on a
+    record that never went through the real pipeline (same precedent as the Vendor/BillingEvent
+    backfills being optional, not retroactive). **Offered to the user**: delete this leftover test
+    data from the live database so the Billing page only reflects real, intentional records — awaiting
+    their decision, not done unilaterally.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed
