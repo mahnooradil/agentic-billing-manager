@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import type Stripe from "stripe";
 
 import { env } from "@/config/env";
@@ -17,14 +17,17 @@ const PRICE_BUSINESS = "price_test_business";
 /**
  * Task 10's own acceptance test matrix: new subscription, upgrade,
  * downgrade with proration, cancel-at-period-end, immediate cancel,
- * payment failure, duplicate webhook, out-of-order webhook. Every event is
- * a realistic, hand-built `Stripe.Event`-shaped fixture — no live Stripe
- * account exists in this environment (confirmed: `STRIPE_SECRET_KEY` is
- * unset), so `applySubscriptionEvent`/`notifySubscriptionPaymentFailed` are
- * exercised directly against already-parsed events, the same object shape
- * the webhook controller hands them after signature verification — that
- * verification step itself is Stripe SDK code, not ours, and isn't
- * re-tested here.
+ * payment failure, duplicate webhook, out-of-order webhook. Every event
+ * here is a realistic, hand-built `Stripe.Event`-shaped fixture —
+ * `applySubscriptionEvent`/`notifySubscriptionPaymentFailed` are exercised
+ * directly against already-parsed events, the same object shape the
+ * webhook controller hands them after signature verification, rather than
+ * through a real webhook delivery; that verification step itself is Stripe
+ * SDK code, not ours, and isn't re-tested here. (A real Stripe sandbox was
+ * later configured in `backend/.env` for a genuine live end-to-end test —
+ * see `flow/00-executive-summary.md` — but this file intentionally keeps
+ * using fixtures: deterministic, offline, and not dependent on any
+ * specific developer's local Stripe setup existing at all.)
  *
  * "refund" (the matrix's 9th scenario) is NOT covered — no `charge.
  * refunded`/subscription-refund handling exists in this codebase yet for
@@ -32,15 +35,32 @@ const PRICE_BUSINESS = "price_test_business";
  * deliberate gap, not silently skipped.
  */
 describe("Stripe subscription webhook handling (Task 10)", () => {
+  // `env` is a module-level singleton shared across every test FILE in the
+  // same vitest worker — mutating its properties directly (required here
+  // since `isSubscriptionCheckoutConfigured()` reads them live) leaks into
+  // every test that runs afterward in that worker unless explicitly
+  // restored. `vi.stubEnv`/`vi.unstubAllEnvs` only cover `process.env`
+  // itself, not these already-read-and-cached object properties — a real
+  // cross-file test-isolation bug caught by plan-checkout.test.ts's
+  // "not configured" case starting to fail once file execution order
+  // shifted. Save and restore the exact originals instead.
+  const original = {
+    stripeSecretKey: env.stripeSecretKey,
+    stripePricePro: env.stripePricePro,
+    stripePriceBusiness: env.stripePriceBusiness,
+  };
+
   beforeAll(() => {
-    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_fake_for_tests");
     (env as unknown as { stripeSecretKey: string }).stripeSecretKey = "sk_test_fake_for_tests";
     (env as unknown as { stripePricePro: string }).stripePricePro = PRICE_PRO;
     (env as unknown as { stripePriceBusiness: string }).stripePriceBusiness = PRICE_BUSINESS;
   });
 
   afterAll(() => {
-    vi.unstubAllEnvs();
+    (env as unknown as { stripeSecretKey: string }).stripeSecretKey = original.stripeSecretKey;
+    (env as unknown as { stripePricePro: string }).stripePricePro = original.stripePricePro;
+    (env as unknown as { stripePriceBusiness: string }).stripePriceBusiness =
+      original.stripePriceBusiness;
   });
 
   async function createOrg() {

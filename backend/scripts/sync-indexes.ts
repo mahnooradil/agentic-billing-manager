@@ -69,7 +69,11 @@ interface UniqueCheck {
 // call exactly, including partial filters, so the duplicate check tests the
 // same condition MongoDB itself would enforce.
 const UNIQUE_CHECKS: UniqueCheck[] = [
-  { modelName: "AgentSession", label: "AgentSession.user", groupFields: { user: "$user" } },
+  {
+    modelName: "AgentSession",
+    label: "AgentSession {user, organization} (WP-7 — was user-only)",
+    groupFields: { user: "$user", organization: "$organization" },
+  },
   { modelName: "Invitation", label: "Invitation.token", groupFields: { token: "$token" } },
   {
     modelName: "Invitation",

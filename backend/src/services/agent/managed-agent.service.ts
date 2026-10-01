@@ -70,6 +70,24 @@ export interface AgentReply {
   action?: AgentAction;
 }
 
+/**
+ * WP-7 fix — the tool-call loop in `sendAgentMessage` previously had no
+ * bound at all: a model that kept calling tools (a genuine bug on
+ * Anthropic's side, a confused reasoning loop, or a future tool with a
+ * surprising result shape it reacts badly to) could run indefinitely,
+ * burning real tokens/credits on a SINGLE user turn with nothing to stop
+ * it. Two tiers: at `MAX_TOOL_ITERATIONS_SOFT`, the agent is told (via an
+ * error tool result, the same pattern already used to decline an
+ * irrelevant tool call) that it's hit the limit and should wrap up with
+ * whatever it has — giving it a real chance to produce a normal, useful
+ * reply instead of being cut off mid-thought. `MAX_TOOL_ITERATIONS_HARD`
+ * is the actual guarantee: if the model ignores that and keeps calling
+ * tools anyway, the loop is forced to stop regardless, so there is always
+ * a real ceiling no model behavior can exceed.
+ */
+const MAX_TOOL_ITERATIONS_SOFT = 8;
+const MAX_TOOL_ITERATIONS_HARD = 12;
+
 let client: Anthropic | null = null;
 
 /** Lazily constructs the Anthropic client — never at import time. */
@@ -85,12 +103,17 @@ function getClient(): Anthropic {
 }
 
 /**
- * Returns a live session ID for this user — reusing the stored one if it's
- * still usable, otherwise creating a fresh session and persisting its ID.
+ * Returns a live session ID for this (user, organization) pair — reusing
+ * the stored one if it's still usable, otherwise creating a fresh session
+ * and persisting its ID. See agent-session.model.ts's docstring for why
+ * this is scoped by organization, not just user.
  */
-async function getOrCreateSessionId(userId: Types.ObjectId | string): Promise<string> {
+async function getOrCreateSessionId(
+  userId: Types.ObjectId | string,
+  organizationId: Types.ObjectId | string
+): Promise<string> {
   const anthropic = getClient();
-  const existing = await AgentSession.findOne({ user: userId });
+  const existing = await AgentSession.findOne({ user: userId, organization: organizationId });
 
   if (existing) {
     try {
@@ -105,11 +128,11 @@ async function getOrCreateSessionId(userId: Types.ObjectId | string): Promise<st
   const session = await anthropic.beta.sessions.create({
     agent: env.anthropicAgentId,
     environment_id: env.anthropicEnvironmentId,
-    title: `Billing Advisor — user ${userId.toString()}`,
+    title: `Billing Advisor — user ${userId.toString()} — org ${organizationId.toString()}`,
   });
 
   await AgentSession.findOneAndUpdate(
-    { user: userId },
+    { user: userId, organization: organizationId },
     { sessionId: session.id },
     { upsert: true }
   );
@@ -118,13 +141,19 @@ async function getOrCreateSessionId(userId: Types.ObjectId | string): Promise<st
 }
 
 /**
- * Ends the user's current agent conversation ("New Chat") — archives the
- * Managed Agents session (tidy cleanup, not required for correctness) and
- * drops the local pointer, so the next message starts a brand-new session
- * with no memory of the old conversation.
+ * Ends the user's current agent conversation for ONE organization
+ * ("New Chat", or a deliberate fresh start on workspace switch — see
+ * auth.controller.ts's `switchOrganization`) — archives the Managed
+ * Agents session (tidy cleanup, not required for correctness) and drops
+ * the local pointer, so the next message in THIS organization starts a
+ * brand-new session. Other organizations' sessions are untouched — each
+ * has its own row (see agent-session.model.ts).
  */
-export async function resetAgentSession(userId: Types.ObjectId | string): Promise<void> {
-  const existing = await AgentSession.findOne({ user: userId });
+export async function resetAgentSession(
+  userId: Types.ObjectId | string,
+  organizationId: Types.ObjectId | string
+): Promise<void> {
+  const existing = await AgentSession.findOne({ user: userId, organization: organizationId });
   if (!existing) return;
 
   try {
@@ -135,7 +164,31 @@ export async function resetAgentSession(userId: Types.ObjectId | string): Promis
     // the local pointer removal below is what actually matters.
   }
 
-  await AgentSession.deleteOne({ user: userId });
+  await AgentSession.deleteOne({ _id: existing._id });
+}
+
+/**
+ * Ends EVERY one of a user's agent conversations, across every
+ * organization — used only by account deletion (auth.controller.ts),
+ * where the whole account (and so every organization's conversation with
+ * it) is going away, unlike a workspace switch or "New Chat" which only
+ * ever touch one organization's session.
+ */
+export async function resetAllAgentSessionsForUser(userId: Types.ObjectId | string): Promise<void> {
+  const sessions = await AgentSession.find({ user: userId });
+  if (sessions.length === 0) return;
+
+  const anthropic = getClient();
+  await Promise.all(
+    sessions.map((s) =>
+      anthropic.beta.sessions.archive(s.sessionId).catch(() => {
+        // Already gone/archived, or unreachable — the deleteMany below is
+        // what actually matters for correctness.
+      })
+    )
+  );
+
+  await AgentSession.deleteMany({ user: userId });
 }
 
 /**
@@ -231,7 +284,7 @@ export async function sendAgentMessage(
   text: string
 ): Promise<AgentReply> {
   const anthropic = getClient();
-  const sessionId = await getOrCreateSessionId(userId);
+  const sessionId = await getOrCreateSessionId(userId, organizationId);
 
   const stream = await anthropic.beta.sessions.events.stream(sessionId);
   await anthropic.beta.sessions.events.send(sessionId, {
@@ -242,12 +295,45 @@ export async function sendAgentMessage(
   let action: AgentAction | undefined;
   let inputTokens = 0;
   let outputTokens = 0;
+  let toolIterations = 0;
   for await (const event of stream) {
     if (event.type === "agent.message") {
       for (const block of event.content) {
         if (block.type === "text") reply += block.text;
       }
     } else if (event.type === "agent.custom_tool_use") {
+      toolIterations++;
+
+      // WP-7 — the hard ceiling: stop reading the stream entirely rather
+      // than send yet another tool result, regardless of what the model
+      // does next. See MAX_TOOL_ITERATIONS_HARD's own docstring.
+      if (toolIterations > MAX_TOOL_ITERATIONS_HARD) {
+        break;
+      }
+
+      // The soft ceiling: tell the model it's out of room, the same
+      // decline pattern runAgentPrompt already uses for an irrelevant tool
+      // call, so it gets a real chance to produce a normal closing reply
+      // instead of just being cut off.
+      if (toolIterations > MAX_TOOL_ITERATIONS_SOFT) {
+        await anthropic.beta.sessions.events.send(sessionId, {
+          events: [
+            {
+              type: "user.custom_tool_result",
+              custom_tool_use_id: event.id,
+              content: [
+                {
+                  type: "text",
+                  text: "Tool call limit reached for this turn. Stop calling tools and reply now with whatever you've already found, noting that the answer may be incomplete.",
+                },
+              ],
+              is_error: true,
+            },
+          ],
+        });
+        continue;
+      }
+
       // A registered read-only/metadata-only tool — run it locally and hand
       // the result straight back so the session can continue.
       let resultText: string;

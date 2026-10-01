@@ -28,7 +28,7 @@ import { Session, type SessionDocument } from "@/models/session.model";
 import { SupportRequest } from "@/models/support-request.model";
 import { CreditTransaction } from "@/models/credit-transaction.model";
 import { sendOtpEmail } from "@/services/email/resend";
-import { resetAgentSession } from "@/services/agent/managed-agent.service";
+import { resetAgentSession, resetAllAgentSessionsForUser } from "@/services/agent/managed-agent.service";
 import { grantCredits } from "@/services/credits/credit-ledger.service";
 import { STARTING_CREDITS } from "@/config/credits";
 import { Membership } from "@/models/membership.model";
@@ -358,12 +358,13 @@ export const switchOrganization = asyncHandler(async (req, res) => {
     throw new AppError("This organization no longer exists.", 404);
   }
 
-  // The Billing Advisor Agent's session is per-USER, not per-organization —
-  // without this, its conversation memory would carry on across the switch
-  // and could blend one workspace's data into a reply given in another.
-  // Archiving it here means the very next chat message starts a clean
-  // session already scoped to the newly active organization.
-  await resetAgentSession(user._id).catch(() => {
+  // Each organization now has its own Agent Session row (WP-7 — see
+  // agent-session.model.ts), so a switch can no longer blend one
+  // workspace's conversation into another's reply even if this call
+  // failed. Kept anyway as the deliberate UX choice it always was: a
+  // workspace switch starts a clean chat in the newly active organization
+  // rather than resuming wherever that org's conversation last left off.
+  await resetAgentSession(user._id, membership.organization).catch(() => {
     // Best-effort — a stale/unreachable agent session must not block the switch.
   });
 
@@ -491,9 +492,10 @@ export const deleteAccount = asyncHandler(async (req, res) => {
     );
   }
 
-  // Archives the Managed Agents session server-side before the local
-  // pointer (and everything else) is wiped below.
-  await resetAgentSession(user._id).catch(() => {
+  // Archives EVERY one of this user's Managed Agents sessions (one per
+  // organization — WP-7) server-side before the local pointers (and
+  // everything else) are wiped below.
+  await resetAllAgentSessionsForUser(user._id).catch(() => {
     // Best-effort — a stale/unreachable agent session must not block deletion.
   });
 

@@ -15,22 +15,36 @@ already tracked.
 
 ### Agent orchestration (§4 of this document) — none of this was in doc 00
 
-1. **No `MAX_ITERATIONS` anywhere in `managed-agent.service.ts`.** Confirmed by direct search — no
-   match at all. The tool-call loop can run unbounded.
-2. **`void consumeCredits(...)` is fire-and-forget, and it happens in *two* separate places**
-   (`managed-agent.service.ts:208` and `:346`) — confirmed. A crash between either point and the
-   ledger write means that usage is free.
-3. **Tool results are raw-`JSON.stringify`'d into the agent's context**
-   (`managed-agent.service.ts:261`, confirmed) — vendor names/invoice numbers pulled from email
-   reach the model as literal, unescaped text. Second-order prompt-injection surface.
-4. **`AgentSession` has a unique index on `user` only** (`agent-session.model.ts:34`, comment reads
-   "one active agent session per user") — confirmed keyed by user, not `(user, organization)`.
+1. ✅ **DONE (2026-10-01, WP-7) — No `MAX_ITERATIONS` anywhere in `managed-agent.service.ts`.**
+   Confirmed by direct search before fixing — no match at all, the tool-call loop could run
+   unbounded. Fixed with a two-tier cap (`MAX_TOOL_ITERATIONS_SOFT = 8`, matching the roadmap's own
+   suggested value, `MAX_TOOL_ITERATIONS_HARD = 12`): past the soft limit, the agent is told via an
+   error tool result to wrap up with what it has (a real chance at a normal reply, not an abrupt
+   cutoff); past the hard limit, the loop stops reading the stream at all regardless of what the
+   model does next — a real ceiling no model behavior can exceed. Full detail in
+   `flow/00-executive-summary.md` item #9c.
+2. **`void consumeCredits(...)` fire-and-forget in two places** — re-examined, not a bug: the
+   code's own comment ("actual cost is only known once it's done") is correct — token usage is
+   genuinely unknowable until the turn completes, so deferred, best-effort billing here is the
+   deliberate design, not an oversight. Left unchanged.
+3. ✅ **DONE (Task 9, 2026-09-27) — Tool results are raw-`JSON.stringify`'d into the agent's
+   context.** Already fixed before this WP-7 pass even started — `sanitizeForAgentContext()` now
+   runs on every tool result before it's stringified. Confirmed still in place while reading this
+   file during WP-7.
+4. ✅ **DONE (2026-10-01, WP-7) — `AgentSession` had a unique index on `user` only.** Re-keyed to a
+   compound `{user, organization}` unique index — see `flow/00-executive-summary.md` item #9c for
+   the full change (model, service functions, every call site, the live-DB index migration).
 5. **`getOrganizationIdForUser(userId)` is a genuinely separate, independent tenancy-resolution
-   path** from `req.organization` — and it is **not only used by the agent**. Confirmed it is also
-   called directly inside `notification-engine.ts:160`. This is a wider pattern than document 01's
-   diagram implied (it only drew this for the agent) — any module using this helper instead of the
-   already-resolved `req.organization` has the same "two sources of truth for one authorization
-   decision" seam. Worth checking for other call sites when this is actually fixed, not just the
+   path** from `req.organization`, also used outside the agent (`notification-engine.ts:160`,
+   recommendation-engine.ts, and every agent tool). **Deliberately NOT touched in this pass** — on
+   inspection, every real call site is a background job or an agent-tool call that only ever
+   receives a bare `userId` string, with no HTTP request (and so no `req.organization`) in scope at
+   all; this isn't two competing sources of truth so much as the only available one in those
+   contexts. The theoretical risk CLAUDE.md §10.6 flags (a concurrent org-switch race causing a
+   mid-request divergence) would need threading `organizationId` through every agent tool's
+   signature to close — a materially larger, more invasive change than this pass's two concrete,
+   already-confirmed bugs, for a risk explicitly described there as "not yet broken." Left as an
+   explicitly deferred item, not silently dropped.
    agent's.
 
 ### Credit metering (§7) — new specifics beyond doc 00's "annual not monthly" bug

@@ -3,6 +3,7 @@ import { Types } from "mongoose";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "@/app";
+import { env } from "@/config/env";
 import { generateToken } from "@/utils/jwt";
 import { User } from "@/models/user.model";
 import { Organization } from "@/models/organization.model";
@@ -77,23 +78,39 @@ describe("PUT /api/plan / POST /api/plan/checkout (Task 10)", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ tier: "Free" });
 
-    // Succeeds locally even though there's no real Stripe account to reach
-    // (cancelActiveSubscription is best-effort — see its own docstring);
-    // the organization's own tier is what this test actually asserts.
+    // cancelActiveSubscription is best-effort (see its own docstring) — this
+    // test doesn't depend on whether a real Stripe account is reachable
+    // (it may or may not be, depending on local .env); the organization's
+    // own tier update is what's actually asserted here regardless.
     expect(response.status).toBe(200);
     const reloaded = await Organization.findById(organization._id);
     expect(reloaded?.planTier).toBe("Free");
   });
 
-  it("POST /api/plan/checkout reports 'not configured' when Stripe isn't set up (this environment has no Stripe keys)", async () => {
+  it("POST /api/plan/checkout reports 'not configured' when Stripe isn't set up", async () => {
     const { token } = await seedAuthedOwner();
 
-    const response = await request(app)
-      .post("/api/plan/checkout")
-      .set("Authorization", `Bearer ${token}`)
-      .send({ tier: "Pro" });
+    // Deliberately force the "unconfigured" state for this one test rather
+    // than relying on the real backend/.env lacking Stripe keys — that
+    // assumption broke the moment a real Stripe sandbox was configured
+    // there for live testing (Task 10/WP-7 session), which is exactly the
+    // kind of ambient-environment dependency a test should never have.
+    // `env`'s properties are mutated directly (not via a `process.env`
+    // stub) because `isSubscriptionCheckoutConfigured()` reads the already-
+    // constructed `env` object live — restored immediately after so this
+    // doesn't leak into any other test in the same file/worker.
+    const original = { stripePricePro: env.stripePricePro };
+    (env as unknown as { stripePricePro: string }).stripePricePro = "";
+    try {
+      const response = await request(app)
+        .post("/api/plan/checkout")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ tier: "Pro" });
 
-    expect(response.status).toBe(503);
+      expect(response.status).toBe(503);
+    } finally {
+      (env as unknown as { stripePricePro: string }).stripePricePro = original.stripePricePro;
+    }
   });
 
   it("a member (not owner/admin) cannot change the plan", async () => {

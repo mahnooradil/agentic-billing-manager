@@ -32,13 +32,16 @@ export const agentChat = asyncHandler(async (req, res) => {
   });
 });
 
-/** DELETE /api/agent/chat — ends the current conversation ("New Chat"). */
+/** DELETE /api/agent/chat — ends the current conversation ("New Chat") for
+ *  the currently active organization only (WP-7 — each organization has
+ *  its own session; see agent-session.model.ts). */
 export const resetAgentChat = asyncHandler(async (req, res) => {
   const user = req.user;
-  if (!user) {
+  const organization = req.organization;
+  if (!user || !organization) {
     throw new AppError("Authentication required", 401);
   }
 
-  await resetAgentSession(user._id);
+  await resetAgentSession(user._id, organization._id);
   sendSuccess(res, 200, "Conversation reset", null);
 });
