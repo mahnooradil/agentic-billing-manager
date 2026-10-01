@@ -56,7 +56,21 @@ export const importBillingSchema = z.object({
   csv: z.string().min(1, "The CSV file is empty"),
 });
 
+/**
+ * GET /billing query params — WP-3 (CLAUDE.md Sec10.3): the endpoint used to
+ * run `Billing.find({organization})` with no `.limit()` at all. `limit`
+ * defaults to 2000 (above every current plan tier's billing-record cap
+ * except Business's "unlimited" — see config/plans.ts — so this changes
+ * nothing for any real account today) and is hard-capped at 5000 regardless
+ * of what a caller requests, closing the literal unbounded-query risk.
+ */
+export const listBillingQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).optional().default(1),
+  limit: z.coerce.number().int().min(1).max(5000).optional().default(2000),
+});
+
 export type CreateBillingInput = z.infer<typeof createBillingSchema>;
 export type UpdateBillingInput = z.infer<typeof updateBillingSchema>;
 export type ImportBillingRowInput = z.infer<typeof importBillingRowSchema>;
 export type ImportBillingInput = z.infer<typeof importBillingSchema>;
+export type ListBillingQuery = z.infer<typeof listBillingQuerySchema>;

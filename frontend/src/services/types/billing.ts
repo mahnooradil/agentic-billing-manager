@@ -50,9 +50,20 @@ export interface CreateBillingPayload {
 /** Request payload for updating a billing record (any subset). */
 export type UpdateBillingPayload = Partial<CreateBillingPayload>;
 
+/** WP-3 — `GET /api/billing` is now paginated server-side (a safety cap, not
+ *  a UI feature yet: the default `limit` is well above any current account's
+ *  record count, so this is additive information, not a behavior change). */
+export interface BillingPagination {
+  page: number;
+  limit: number;
+  totalRecords: number;
+  totalPages: number;
+}
+
 /** Response `data` shapes returned by the billing endpoints. */
 export interface BillingListData {
   billingRecords: BillingRecord[];
+  pagination: BillingPagination;
 }
 
 export interface BillingData {
@@ -63,13 +74,21 @@ export interface BillingDeletedData {
   id: string;
 }
 
-/** Aggregate billing statistics for the billing dashboard. */
+/** One currency's Paid-invoice total — see `BillingStats.revenueByCurrency`. */
+export interface BillingRevenueByCurrency {
+  currency: string;
+  total: number;
+}
+
+/** Aggregate billing statistics for the billing dashboard. WP-3 (CLAUDE.md
+ *  Sec10.3) — revenue is per-currency, never added together across
+ *  currencies as one bare number; sorted highest-first. */
 export interface BillingStats {
   totalRecords: number;
   paidRecords: number;
   pendingRecords: number;
   overdueRecords: number;
-  totalRevenue: number;
+  revenueByCurrency: BillingRevenueByCurrency[];
 }
 
 export interface BillingStatsData {

@@ -14,6 +14,19 @@ interface BillingStatsGridProps {
  * scan at a glance.
  */
 export function BillingStatsGrid({ stats }: BillingStatsGridProps) {
+  // WP-3 — revenue is per-currency now (never one bare number added across
+  // currencies). The highest-total currency headlines the card; if more than
+  // one currency has Paid revenue, the hint says so explicitly instead of
+  // silently hiding the rest.
+  const primaryRevenue = stats.revenueByCurrency[0] ?? null;
+  const otherCurrencyCount = Math.max(0, stats.revenueByCurrency.length - 1);
+  const revenueHint =
+    otherCurrencyCount > 0
+      ? `Paid invoices in ${primaryRevenue?.currency} + ${otherCurrencyCount} more ${
+          otherCurrencyCount === 1 ? "currency" : "currencies"
+        }`
+      : "Sum of Paid invoices";
+
   const cards: {
     label: string;
     value: string;
@@ -50,11 +63,11 @@ export function BillingStatsGrid({ stats }: BillingStatsGridProps) {
       hint: "Past due, unpaid",
     },
     {
-      label: "Total Revenue",
-      value: formatNumber(stats.totalRevenue),
+      label: primaryRevenue ? `Total Revenue (${primaryRevenue.currency})` : "Total Revenue",
+      value: formatNumber(primaryRevenue?.total ?? 0),
       icon: Wallet,
       tone: "primary",
-      hint: "Sum of Paid invoices, all currencies",
+      hint: revenueHint,
     },
   ];
 

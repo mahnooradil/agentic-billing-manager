@@ -26,13 +26,20 @@ import {
   assertBillingRecordLimit,
   getRemainingBillingRecordCapacity,
 } from "@/utils/plan-limits";
-import { importBillingRowSchema } from "@/validators/billing.validator";
+import { importBillingRowSchema, listBillingQuerySchema } from "@/validators/billing.validator";
 import { recordBillingEvent } from "@/services/billing/billing-event-recorder.service";
 import type {
   CreateBillingInput,
   UpdateBillingInput,
   ImportBillingInput,
 } from "@/validators/billing.validator";
+
+/** Hard ceiling for `/billing/export` — unlike the list endpoint this is
+ *  meant to return everything, so there's no page/limit query param, just a
+ *  safety bound well above any current plan tier's record count (see
+ *  config/plans.ts) so it only ever bites a scale this product doesn't have
+ *  customers at yet, per CLAUDE.md Sec10.3's "unbounded list/export" finding. */
+const EXPORT_SAFETY_LIMIT = 20_000;
 
 /** Loads a billing record by id, scoped to its organization, or throws a 404. */
 async function findBillingOr404(
@@ -67,20 +74,37 @@ async function assertPlatformExists(
   }
 }
 
-/** GET /api/billing — list the organization's billing records (newest billing date first). */
+/**
+ * GET /api/billing — list the organization's billing records (newest billing
+ * date first). WP-3 (CLAUDE.md Sec10.3) — this used to run with no
+ * `.limit()` at all, so it's now paginated: `page`/`limit` query params
+ * (defaults below make this a no-op for every real account today), plus a
+ * `totalRecords` count so a future UI can show "N of M" honestly even before
+ * a full server-side-pagination table exists.
+ */
 export const listBillingRecords = asyncHandler(async (req, res) => {
   const organization = req.organization;
   if (!organization) {
     throw new AppError("Authentication required", 401);
   }
 
-  const records = await Billing.find({ organization: organization._id })
-    .populate("platform", "name slug")
-    .populate("platformConnection", "displayName platform")
-    .populate("vendor", "name domain")
-    .sort({ billingDate: -1, createdAt: -1 });
+  const { page, limit } = listBillingQuerySchema.parse(req.query);
+  const filter = { organization: organization._id };
+
+  const [records, totalRecords] = await Promise.all([
+    Billing.find(filter)
+      .populate("platform", "name slug")
+      .populate("platformConnection", "displayName platform")
+      .populate("vendor", "name domain")
+      .sort({ billingDate: -1, createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Billing.countDocuments(filter),
+  ]);
+
   sendSuccess(res, 200, "Billing records retrieved", {
     billingRecords: records.map(toPublicBilling),
+    pagination: { page, limit, totalRecords, totalPages: Math.max(1, Math.ceil(totalRecords / limit)) },
   });
 });
 
@@ -95,7 +119,8 @@ export const exportBillingRecords = asyncHandler(async (req, res) => {
     .populate("platform", "name slug")
     .populate("platformConnection", "displayName platform")
     .populate("vendor", "name domain")
-    .sort({ billingDate: -1, createdAt: -1 });
+    .sort({ billingDate: -1, createdAt: -1 })
+    .limit(EXPORT_SAFETY_LIMIT);
 
   const csv = toCsv(
     ["Platform", "Customer", "Invoice Number", "Amount", "Currency", "Billing Date", "Status", "Source"],
@@ -270,14 +295,21 @@ export const getBillingStats = asyncHandler(async (req, res) => {
     Billing.countDocuments({ organization: organization._id, status: "Paid" }),
     Billing.countDocuments({ organization: organization._id, status: "Pending" }),
     Billing.countDocuments({ organization: organization._id, status: "Overdue" }),
-    Billing.aggregate<{ _id: null; revenue: number }>([
+    Billing.aggregate<{ _id: string; revenue: number }>([
       { $match: { organization: organization._id, status: "Paid" } },
-      { $group: { _id: null, revenue: { $sum: "$amount" } } },
+      { $group: { _id: "$currency", revenue: { $sum: "$amount" } } },
+      { $sort: { revenue: -1 } },
     ]),
   ]);
 
-  // Sum of paid invoice amounts. Note: raw sum across whatever currencies exist.
-  const totalRevenue = revenueRows[0]?.revenue ?? 0;
+  // WP-3 (CLAUDE.md Sec10.3) — Paid amounts are summed PER CURRENCY, never
+  // added together as one bare number (USD + EUR + PKR is not a meaningful
+  // sum). Sorted highest-first so the first entry is the natural "primary"
+  // currency to headline, same convention `analytics.engine.ts` already uses.
+  const revenueByCurrency = revenueRows.map((row) => ({
+    currency: row._id,
+    total: row.revenue,
+  }));
 
   sendSuccess(res, 200, "Billing statistics retrieved", {
     stats: {
@@ -285,7 +317,7 @@ export const getBillingStats = asyncHandler(async (req, res) => {
       paidRecords,
       pendingRecords,
       overdueRecords,
-      totalRevenue,
+      revenueByCurrency,
     },
   });
 });

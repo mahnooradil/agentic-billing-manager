@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { Error as MongooseError } from "mongoose";
 import { JsonWebTokenError } from "jsonwebtoken";
+import { ZodError } from "zod";
 
 import { isProduction } from "@/config/env";
 import { AppError } from "@/utils/appError";
@@ -43,6 +44,25 @@ function normalizeError(err: unknown): { statusCode: number; body: ApiError } {
         message: err.message,
         ...(err.errors ? { errors: err.errors } : {}),
       },
+    };
+  }
+
+  // WP-3 — a schema's own `.parse(req.query)` (the established pattern for
+  // GET query-param validation: analytics/notification/recommendation/billing
+  // controllers all call it directly, unlike the `validate` middleware's
+  // `safeParse` for request bodies) throws a raw ZodError on failure. This
+  // was previously unhandled here, so any bad query param on those endpoints
+  // fell through to the 500 branch below instead of a proper 400 — fixed
+  // once, centrally, rather than wrapping every call site in its own
+  // safeParse/AppError boilerplate.
+  if (err instanceof ZodError) {
+    const errors = err.issues.map((issue) => {
+      const field = issue.path.join(".");
+      return field ? `${field}: ${issue.message}` : issue.message;
+    });
+    return {
+      statusCode: 400,
+      body: { success: false, message: "Validation failed", errors },
     };
   }
 

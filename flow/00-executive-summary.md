@@ -726,6 +726,81 @@ the document cites, not assumed from the document text.
     against the exact 12× margin regression this fix was careful to avoid, not just a one-time
     check. `tsc`/`lint`/`build` clean.
 
+13. ✅ **DONE (2026-10-01) — WP-3: Analytics correctness** (`flow/10-remediation-roadmap.md`'s WP-3,
+    citing `flow/02` items 19/20/21 and `flow/08` item 42). Three findings, all confirmed still
+    present in live code before fixing, none touching the already-correct `analytics.engine.ts` (that
+    file groups by currency properly — the audit's own §9 note folded its primary-currency-only
+    *comparative* views into this same bucket, but that's a presentation choice, not a bug; only
+    `billing.controller.ts`'s stats and the dashboard's headline were actually wrong).
+    - **Mixed-currency `totalRevenue` sum (item 19), confirmed and fixed.** `getBillingStats` used
+      to `$group: {_id: null}` and sum Paid amounts across every currency as one bare number (USD +
+      EUR + PKR). Now groups by `$currency`, sorted highest-first, returned as
+      `revenueByCurrency: [{currency, total}]` — `totalRevenue` is gone, not kept alongside it (both
+      backend and frontend own this shape, no external consumer exists). `billing-stats.tsx`'s "Total
+      Revenue" card now headlines the primary currency explicitly in its own label (`"Total Revenue
+      (USD)"` instead of a bare, misleading "Total Revenue") and says "+ N more currencies" in its
+      hint when more exist, instead of silently adding them in.
+    - **Dashboard headline (item 42, flow/08), fixed as a small patch rather than deferred to the
+      larger dashboard-hierarchy rework (flow/08 item 47) that note said it'd "naturally" resolve
+      with** — `overview-view.tsx`'s `primaryTotals = analytics.totalsByCurrency[0]` still only shows
+      the single largest currency; now its hint explicitly says "+ N more currencies (see Analytics)"
+      when others exist, instead of presenting the figure as the whole picture. The full dashboard
+      hierarchy redesign (item 47) remains explicitly out of scope — this is the "small, isolated"
+      half of that note, not the larger one.
+    - **Unbounded `GET /api/billing`/`/billing/export` (item 20), confirmed and fixed.** Both
+      endpoints ran `Billing.find({organization})` with no `.limit()` at all. `GET /api/billing` now
+      takes `page`/`limit` query params (zod-validated, hard-capped at 5000) and returns a
+      `pagination: {page, limit, totalRecords, totalPages}` block; the default `limit` (2000) is
+      chosen to be a complete no-op for every real account today (above even Pro's 1,000-record plan
+      limit — see `config/plans.ts` — Business is the only "unlimited" tier and isn't near this scale
+      yet). **Deliberately did NOT rebuild the Billing page's table into a server-side-driven
+      search/filter/sort/pagination UI** — `flow/02` item 20 itself describes that as "already noted
+      in doc 01's list" as its own, larger, separate piece of work, not something to fold in
+      silently; `billing-view.tsx` keeps its existing client-side pipeline unchanged, now just
+      operating over a safety-capped (not literally unbounded) server response. `/billing/export`
+      keeps returning everything (that's the feature), now with a 20,000-row hard ceiling
+      (`EXPORT_SAFETY_LIMIT`) instead of none at all.
+    - **Missing `dueDate` index + compound indexes (item 21), confirmed and fixed.** Read
+      `billing.model.ts` directly: `billingDate` and `status` each had their OWN single-field index,
+      `dueDate` had none at all — confirmed exactly as the audit describes (`autoMarkOverdue`'s
+      cross-tenant scan, `services/notification/notification-engine.ts`, had nothing to use).
+      Replaced the two single-field indexes with `{organization, billingDate}` and
+      `{organization, status}` (every real query is organization-scoped first — see the file's own
+      docstring — so a compound serves those queries strictly better), and added a dedicated
+      single-field `dueDate` index specifically for the two background jobs that query across EVERY
+      organization at once with no `organization` filter at all. Applied live via
+      `scripts/sync-indexes.ts --apply`: the two old single-field indexes showed up as "extra (not in
+      schema)" after the model change (they'd already been auto-built by the dev server's own
+      `autoIndex` during this session) and were cleanly dropped by the same `--apply` run that
+      confirmed the new ones existed; re-checked clean afterward (`declared=9 actual=9`, zero
+      missing, zero extra).
+    - **Found and fixed one real pre-existing bug while adding tests for this**: the central
+      `errorHandler.ts` had no `ZodError` branch at all — `analytics.controller.ts`,
+      `notification.controller.ts`, and `recommendation.controller.ts` (and now `billing.controller.ts`)
+      all validate GET query params via a schema's own `.parse(req.query)` (distinct from the
+      `validate` middleware's `safeParse` used for request bodies), and a failing `.parse()` was
+      falling through to the catch-all 500 branch instead of a 400 — invisible until a test actually
+      asserted on it. Fixed once, centrally (a `ZodError` branch mapping to the same
+      `{message, errors[]}` shape the `validate` middleware already produces for bodies), which
+      incidentally also fixes the same latent bug on those three other endpoints, not just billing's
+      new one.
+
+    **Tested** — 2 new test files, 4 new tests (130 total backend tests now passing, two consecutive
+    full runs): `billing-stats-pagination.test.ts` (real HTTP routes via supertest, not just the
+    functions) proves Paid amounts in USD and EUR stay separate and sorted (150/30, never "180"),
+    that `/billing?limit=2&page=1` and `page=2` return distinct 2-record pages with correct
+    `pagination` metadata, that a limit above the 5000 ceiling is rejected with 400 (not silently
+    clamped or allowed through), and that no query params at all still returns every current record
+    (today's behavior, unchanged); `errorHandler.test.ts` proves a `ZodError` maps to 400 with
+    field-level messages. Backend `tsc`/`lint`/`build` clean; frontend `tsc`/`lint`/`build` clean
+    (full production build, not just typecheck).
+
+    **Honest scope note:** the larger frontend rework (true server-side search/filter/sort/pagination
+    replacing `billing-view.tsx`'s current client-side pipeline) is explicitly NOT done — `flow/02`
+    itself frames that as a separate, bigger piece of work this task's "small, isolated" framing was
+    never meant to include. The full dashboard-hierarchy redesign (flow/08 item 47) is also not done,
+    same reasoning. Neither is a silently-dropped gap — both are named, tracked, separate items.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

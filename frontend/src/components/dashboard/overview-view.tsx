@@ -156,6 +156,14 @@ export function OverviewView() {
   };
 
   const primaryTotals = analytics?.totalsByCurrency[0] ?? null;
+  // Item 42 (flow/08 Sec_UI, CLAUDE.md Sec10.3) — the headline figure only
+  // ever reflects the single largest currency; when others exist too, say so
+  // explicitly instead of silently excluding them from the number shown.
+  const otherCurrencyCount = Math.max(0, (analytics?.totalsByCurrency.length ?? 0) - 1);
+  const totalSpendHint =
+    otherCurrencyCount > 0
+      ? `Last 6 months · + ${otherCurrencyCount} more ${otherCurrencyCount === 1 ? "currency" : "currencies"} (see Analytics)`
+      : "Last 6 months";
 
   return (
     <PageWrapper>
@@ -209,7 +217,7 @@ export function OverviewView() {
               <FlatStatCard
                 label={`Total spend (${primaryTotals.currency})`}
                 value={formatNumber(primaryTotals.total)}
-                hint="Last 6 months"
+                hint={totalSpendHint}
                 icon={Wallet}
                 tone="primary"
               />

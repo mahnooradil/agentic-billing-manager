@@ -234,11 +234,19 @@ const billingSchema = new Schema<IBilling, BillingModel>(
     billingDate: {
       type: Date,
       required: [true, "Billing date is required"],
-      // Indexed to support analytics range filters and monthly-trend grouping.
-      index: true,
+      // No single-field index here — every real query filters by organization
+      // first (see the compound index below), so a bare billingDate index
+      // would never be the one actually used.
     },
     dueDate: {
       type: Date,
+      // WP-3 (CLAUDE.md Sec10.3, flow/02 item 21) — `runDueDateNotifications`
+      // and `autoMarkOverdue` (services/notification/notification-engine.ts)
+      // both query `dueDate` across EVERY organization at once (no
+      // `organization` filter — they're cross-tenant background jobs, not a
+      // per-request read), so this is the one Billing index that's
+      // deliberately NOT organization-prefixed.
+      index: true,
     },
     status: {
       type: String,
@@ -247,8 +255,7 @@ const billingSchema = new Schema<IBilling, BillingModel>(
         message: "Status must be Pending, Paid, or Overdue",
       },
       default: "Pending",
-      // Indexed to support analytics status breakdowns and paid/outstanding sums.
-      index: true,
+      // No single-field index here — see the compound index below.
     },
     notes: {
       type: String,
@@ -375,5 +382,15 @@ billingSchema.index(
     },
   }
 );
+
+// WP-3 (CLAUDE.md Sec10.3, flow/02 item 21) — every real query here is
+// scoped by organization first (the universal tenant filter — see this
+// file's own docstring), so these replace what used to be bare single-field
+// `billingDate`/`status` indexes: a query like "this org's billing in the
+// last 6 months, newest first" or "this org's Paid/Pending/Overdue counts"
+// could previously only ever use ONE of {organization} or {billingDate}/
+// {status} per query, never both together.
+billingSchema.index({ organization: 1, billingDate: -1 });
+billingSchema.index({ organization: 1, status: 1 });
 
 export const Billing = model<IBilling, BillingModel>("Billing", billingSchema);
