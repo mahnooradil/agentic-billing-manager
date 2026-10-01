@@ -842,6 +842,48 @@ the document cites, not assumed from the document text.
     the database (`notes` field confirmed still unset after the rejected PUT). `tsc`/`lint`/`build`
     clean.
 
+15. ✅ **DONE (2026-10-01) — WP-7's "config in repo" item** (`flow/04-ai-agent-and-memory-audit.md`
+    D9 / item 31, `flow/10` WP-7 row). This was supposed to be small and mechanical — "run the
+    existing `scripts/sync-agent-config.ts` and commit the result" — but a live, read-only
+    `agents.retrieve()` call against the real Billing Advisor Agent (management-API metadata, not an
+    inference call, so unaffected by the ongoing Anthropic credit-balance issue blocking Task 9) found
+    the script had drifted badly from reality, plus one genuinely concerning unintended finding:
+    - **Script was stale**: 3 live tools (`search_billing_records`, `propose_update_billing_status`,
+      `propose_delete_billing_record` — added to the Console directly on 2026-08-26 per CLAUDE.md's
+      phase log) were completely absent from the script's hardcoded `tools` array; `get_analytics_summary`'s
+      real schema accepts `from`/`to` (added the same day) but the script still declared an empty
+      schema. Had this stale script been run as-is, it would have **deleted those 3 tools and that
+      schema from the live agent** — a real, confirmed destructive risk, not a hypothetical one. Caught
+      by reading the live config FIRST and diffing against the file, before ever calling `.update()`.
+    - **Unintended finding: Anthropic's built-in `agent_toolset_20260401` (bash/read/write/edit/glob/
+      grep/web_fetch/web_search, `always_allow`) was enabled on the live agent**, despite the script's
+      own original comment stating it deliberately never included it ("dead weight for a billing
+      advisor"). `agents.versions.list()` was pulled to investigate before touching anything: v9 has
+      no toolset and its 4 tools match EXACTLY what an earlier run of this same script would have
+      produced; v10 — the very next version, same 4 tools, nothing added — has the toolset back. The
+      only explanation consistent with that pattern is the Console's own agent-editor UI defaulting
+      the toolset bundle back to enabled on a save that didn't deliberately include it, not a
+      considered decision to grant a billing-advisor chatbot bash/file-system/web access in a managed
+      sandbox outside this app's own tool dispatcher (`agent-tools.ts` has no case for any built-in-
+      toolset action — it would never have been invoked through this app's own code either way).
+      **Surfaced to the user explicitly before touching it** (not silently fixed either direction,
+      given it changes live agent permissions) — user's instruction: "jo tumhe behtar aur theek
+      decision lagta hai wo karo" (do whatever you think is the right call).
+    - **Fixed**: `sync-agent-config.ts` rewritten to exactly mirror the live config (system prompt,
+      all 7 real tools with their real schemas) pulled directly from `agents.retrieve()` — not
+      reconstructed from memory — with the toolset bundle omitted. Ran the corrected script
+      (`agent.version` 11 → 12); independently re-fetched the live config afterward (a second, separate
+      `retrieve()` call, not just trusting the update call's own echoed response) and confirmed:
+      `agent_toolset_20260401` absent, all 7 custom tools present with matching schemas including
+      `get_analytics_summary`'s `from`/`to`.
+    - **Honest scope note**: this is a Console-side configuration correction, not an application code
+      change — no backend request-path file changed, so there's no new unit test for it (there's
+      nothing in this repo's own runtime to test; the script itself is the artifact, now accurate and
+      committed). Not verified against a real inference call (the agent actually using its tools) due
+      to the ongoing Anthropic credit-balance block on Task 9 — only the config-level state was
+      confirmed, via two independent read-only `retrieve()` calls. `tsc`/`lint`/`build` clean (`scripts/`
+      explicitly linted too, since `npm run lint` only targets `src` by default).
+
 ---
 
 ## Verified as already working — no action needed, just confirmed
