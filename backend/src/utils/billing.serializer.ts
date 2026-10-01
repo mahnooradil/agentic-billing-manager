@@ -33,6 +33,10 @@ export interface PublicBilling {
   dueDate?: Date;
   status: BillingStatus;
   notes?: string;
+  /** WP-5 (CLAUDE.md Sec10.5 "no trust UX") — set whenever a human edits
+   *  this record directly (Billing page or the agent's confirm button). See
+   *  billing.model.ts's own docstring for the full reasoning. */
+  manuallyEditedAt?: Date;
   /** Provenance trail — populated for email_sync records only. See
    *  billing.model.ts's IBilling for the full reasoning per field. */
   sourceMessageId?: string;
@@ -99,6 +103,7 @@ export function toPublicBilling(billing: BillingDocument): PublicBilling {
     dueDate: billing.dueDate,
     status: billing.status,
     notes: billing.notes,
+    manuallyEditedAt: billing.manuallyEditedAt,
     sourceMessageId: billing.sourceMessageId,
     sourceThreadId: billing.sourceThreadId,
     senderEmail: billing.senderEmail,

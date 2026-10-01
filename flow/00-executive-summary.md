@@ -931,6 +931,69 @@ the document cites, not assumed from the document text.
     ciphertext"`-shaped payload is explicitly rejected, not silently accepted; `assertEncryptionKeyConfigured()`
     throws when unset and passes once set. `tsc`/`lint`/`build` clean.
 
+17. ✅ **DONE (2026-10-01) — WP-5: Trust surfaces (first pass — Billing table badges + source
+    detail)** (`flow/10` WP-5, citing `flow/08` §6 / items 45/46/47). The full §6 list has 8 items;
+    confirmed which were already satisfied, which fit a safe first pass, and which are genuinely
+    separate/larger work, rather than building all 8 at once:
+    - **Already done elsewhere, confirmed not re-built**: "per-connection freshness" and "a persistent
+      Reconnect banner on failed syncs" — both already live on `automation-view.tsx` (the sync-
+      observability work from an earlier task). Re-verified by reading the component directly rather
+      than assumed.
+    - **Explicitly deferred, not silently dropped**: "duplicate flags with a merge action" — this
+      needs new duplicate-detection logic and a real decision about what "merge" does to two financial
+      records (an irreversible-ish operation), not a safe same-pass addition; flow/08 itself calls the
+      onboarding "confirm detected vendors" flow (item 45) and the full dashboard hierarchy (item 47)
+      "larger" work with their own dependencies — both left for a separate pass.
+    - **Built this pass** — the other 5 items, all surfacing data that already existed on the wire but
+      was never shown anywhere (confirmed via `billing.serializer.ts`: every provenance field was
+      already serialized; `frontend/src/services/types/billing.ts`'s `BillingRecord` type simply never
+      declared them, so they were silently dropped on arrival):
+      1. **Origin badge** — "You added" / "From email" / "Synced from X", based on `source`.
+      2. **Confidence shown only when low** — a documented `LOW_CONFIDENCE_THRESHOLD = 0.7` constant
+         (no prior threshold existed anywhere in the codebase to reuse), flagged only for `email_sync`
+         records (the only source with a real extraction step).
+      3. **"View source email"** — a detail dialog (`billing-source-dialog.tsx`) showing sender,
+         subject, received date, extraction confidence, SPF/DKIM/DMARC result, a Reply-To mismatch
+         warning, and the stored evidence excerpts. A real Gmail deep link
+         (`mail.google.com/mail/u/0/#all/<messageId>`) is shown when the connection is Gmail — no
+         equally reliable deep-link format exists for Outlook/Graph, so no link is attempted there;
+         the same metadata/evidence is shown regardless, which was judged to honestly satisfy "let the
+         user verify where this came from" without betting on an unverified external URL format.
+      4. **Status explanation** — Task 8's `derivedStatusExplanation` ("A human manually set this
+         status directly…", "A payment confirmation was observed…", etc.) shown as a tooltip on the
+         status badge and in the detail dialog — genuinely new UI for data that's existed since Task 8
+         but was "not consumed by any UI yet" per that task's own docstring.
+      5. **Manual-edit attribution** — `manuallyEditedAt` (added to `billing.serializer.ts`'s
+         `PublicBilling` in this same pass — it existed on the model but was never serialized) shown
+         as a small pencil icon + tooltip on records a human has since overridden.
+    - **A real, precisely-scoped timing gap found and documented while testing, not silently
+      papered over**: `derivedStatusExplanation` on the `PUT /api/billing/:id` response itself is
+      STALE immediately after a status-correcting edit — `recordBillingEvent` writes the recomputed
+      value straight to MongoDB AFTER `toPublicBilling(billing)` already serialized the in-memory
+      document from before that write. Confirmed via a live HTTP round-trip (PUT showed the pre-
+      correction explanation; an immediate follow-up GET showed the correct one) before writing the
+      regression test. **Harmless in the actual app**: `billing-view.tsx`'s `handleSaved` always calls
+      `reload()` after a successful save, which re-fetches the full list via a fresh `GET` — by the
+      time that fires, the DB write has already landed, so the tooltip a user actually sees is always
+      correct. Documented precisely in `billing-user-correction.test.ts` rather than asserted away.
+    - Frontend-only addition beyond the plan: `BillingVendorRef` surfaced too (the resolved real-
+      vendor identity, Task 7) in the detail dialog, since it was sitting right next to the other
+      provenance fields in the same serializer gap.
+
+    **Tested** — live, end-to-end against the real running dev server and database (not a synthetic
+    unit test alone): seeded a real `email_sync` record with a deliberately low confidence (0.55),
+    sender/subject/evidence fields, and a Gmail `sourceMessageId`; confirmed via real `GET`/`PUT`
+    HTTP calls through a real auth token that every new field round-trips correctly, including the
+    exact timing gap above (data cleaned up after). Also extended `billing-user-correction.test.ts`
+    (already exercising the real `PUT` route) with assertions for `manuallyEditedAt` and — via the
+    now-added follow-up `GET` — `derivedStatusExplanation`'s correct post-correction text (137 total
+    backend tests, two consecutive full runs green). Backend and frontend `tsc`/`lint`/`build` clean
+    (a full Next.js production build, not just typecheck). **No frontend unit tests exist for this
+    project at all** (confirmed — zero `.test.tsx` files, no test script in `package.json`), consistent
+    with the project's established frontend verification pattern (tsc/lint/build + live checks); a
+    real browser click-through remains the user's own manual step, as with every prior frontend change
+    in this project.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

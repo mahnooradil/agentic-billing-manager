@@ -78,6 +78,18 @@ describe("PUT /api/billing/:id records a user_correction event", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.data.billingRecord.status).toBe("Overdue");
+    // WP-5 trust surfaces (CLAUDE.md Sec10.5) — a "manual edit" badge needs
+    // manuallyEditedAt, which IS fresh on this same response (set before
+    // `.save()`, in-memory).
+    expect(response.body.data.billingRecord.manuallyEditedAt).toBeDefined();
+    // `derivedStatusExplanation` is NOT fresh on this same response —
+    // `recordBillingEvent` below writes the recomputed value straight to
+    // MongoDB, after `toPublicBilling(billing)` already serialized the
+    // in-memory doc from before that write. Harmless in the real app
+    // (billing-view.tsx reloads the full list via a fresh GET after every
+    // save), but worth asserting precisely rather than assuming — confirmed
+    // via a real follow-up GET below, same pattern this test already uses
+    // for `derivedStatus` itself.
 
     const events = await BillingEvent.find({ billing: billing._id, type: "user_correction" });
     expect(events).toHaveLength(1);
@@ -93,6 +105,15 @@ describe("PUT /api/billing/:id records a user_correction event", () => {
     // otherwise still read "paid" from the earlier synced event.
     expect(reloaded?.derivedStatus).toBe("overdue");
     expect(reloaded?.derivedStatusBasis).toBe("user");
+
+    // A fresh GET — same request pattern billing-view.tsx's reload() uses —
+    // DOES carry the correct, post-correction explanation.
+    const refetched = await request(app)
+      .get(`/api/billing/${billing._id.toString()}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(refetched.body.data.billingRecord.derivedStatusExplanation).toContain(
+      "manually set this status"
+    );
   });
 
   it("saving the SAME status again does not create a duplicate user_correction event", async () => {

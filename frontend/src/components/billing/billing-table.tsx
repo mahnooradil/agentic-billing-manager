@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -12,10 +13,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatMoney, formatDate } from "@/lib/format";
 import { usePreferences } from "@/services/preferences/preferences-store";
 import type { BillingRecord } from "@/services/types/billing";
 import { BillingStatusBadge } from "./billing-status-badge";
+import { BillingProvenanceBadge } from "./billing-provenance-badge";
+import { BillingSourceDialog } from "./billing-source-dialog";
 
 interface BillingTableProps {
   records: BillingRecord[];
@@ -27,6 +31,8 @@ interface BillingTableProps {
  *  presentation for financial/invoice data, in place of a card grid. */
 export function BillingTable({ records, onEdit, onDelete }: BillingTableProps) {
   const { general } = usePreferences();
+  // WP-5 — which record's provenance dialog is open, if any.
+  const [sourceDialogTarget, setSourceDialogTarget] = React.useState<BillingRecord | null>(null);
 
   return (
     <Card className="overflow-hidden p-0">
@@ -34,6 +40,7 @@ export function BillingTable({ records, onEdit, onDelete }: BillingTableProps) {
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead>Platform</TableHead>
+            <TableHead>Source</TableHead>
             <TableHead>Customer</TableHead>
             <TableHead>Invoice</TableHead>
             <TableHead className="text-right">Amount</TableHead>
@@ -56,6 +63,12 @@ export function BillingTable({ records, onEdit, onDelete }: BillingTableProps) {
                   </span>
                 </div>
               </TableCell>
+              <TableCell>
+                <BillingProvenanceBadge
+                  record={record}
+                  onClick={() => setSourceDialogTarget(record)}
+                />
+              </TableCell>
               <TableCell className="text-muted-foreground">
                 {record.customerName}
               </TableCell>
@@ -72,7 +85,16 @@ export function BillingTable({ records, onEdit, onDelete }: BillingTableProps) {
                 {record.dueDate ? formatDate(record.dueDate, general) : "—"}
               </TableCell>
               <TableCell>
-                <BillingStatusBadge status={record.status} />
+                {record.derivedStatusExplanation ? (
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="inline-flex" />}>
+                      <BillingStatusBadge status={record.status} />
+                    </TooltipTrigger>
+                    <TooltipContent>{record.derivedStatusExplanation}</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <BillingStatusBadge status={record.status} />
+                )}
               </TableCell>
               <TableCell>
                 <div className="flex justify-end gap-1">
@@ -99,6 +121,13 @@ export function BillingTable({ records, onEdit, onDelete }: BillingTableProps) {
           ))}
         </TableBody>
       </Table>
+      <BillingSourceDialog
+        record={sourceDialogTarget}
+        open={sourceDialogTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setSourceDialogTarget(null);
+        }}
+      />
     </Card>
   );
 }

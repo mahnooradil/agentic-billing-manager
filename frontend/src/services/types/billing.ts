@@ -17,6 +17,13 @@ export interface BillingPlatformRef {
   slug: string;
 }
 
+/** The real vendor identity (Task 7), when resolved. */
+export interface BillingVendorRef {
+  id: string;
+  name: string;
+  domain?: string;
+}
+
 export interface BillingRecord {
   id: string;
   platform: BillingPlatformRef;
@@ -33,6 +40,29 @@ export interface BillingRecord {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+
+  /** WP-5 (CLAUDE.md Sec10.5 "no trust UX") — provenance fields, all already
+   *  sent by the backend (`billing.serializer.ts`) but never surfaced in any
+   *  UI before this. Populated only for the source they're relevant to —
+   *  see billing.model.ts's own docstring for the full per-field reasoning. */
+  manuallyEditedAt?: string;
+  sourceMessageId?: string;
+  sourceThreadId?: string;
+  senderEmail?: string;
+  senderDomain?: string;
+  receivedAt?: string;
+  subject?: string;
+  extractionConfidence?: number;
+  extractionModel?: string;
+  extractedAt?: string;
+  evidence?: string[];
+  senderAuthResult?: "pass" | "fail" | "none";
+  senderReplyToMismatch?: boolean;
+  vendor?: BillingVendorRef | null;
+  derivedStatus?: string;
+  derivedStatusConfidence?: number;
+  derivedStatusBasis?: string;
+  derivedStatusExplanation?: string;
 }
 
 /** Request payload for creating a billing record. */
