@@ -1046,6 +1046,58 @@ the document cites, not assumed from the document text.
     data from the live database so the Billing page only reflects real, intentional records — awaiting
     their decision, not done unilaterally.
 
+21. ✅ **DONE (2026-10-01) — Test-data cleanup + a real root cause found for "umair habib's workspace
+    shows no real synced data."** User approved item #20's cleanup offer and separately asked for a
+    full live re-check of WP-5 across both real workspaces ("sahi tarah dono workspaces mein — koi
+    issue na rahe, kal ko app users ne use karni hai").
+    - **Cleanup**: the exact 20 synthetic records from item #20 (re-verified by exact `externalId`
+      match, 20 of 20, before deleting — a broad regex-based first attempt was correctly blocked by
+      the session's own safety tooling as an unverifiable deletion scope) deleted from the live
+      database, along with their 5 associated `BillingEvent` rows.
+    - **Root cause found for umair habib's workspace** (`6a8dd73b84823bd89649d33d`): its Gmail
+      connection's `lastSyncStatus` was `"error"` with only a safe, generic stored message. Manually
+      re-triggered a real sync to capture the live failure (not guessed): Gmail's own API returned
+      `400 {"error":"Auth provision owner mismatch"}` through Pipedream's Connect proxy. Fetching that
+      exact Pipedream account (`apn_vMh5eMb`) directly confirmed it **no longer exists** in the
+      configured Pipedream project (`404 record not found`) — the account is orphaned/stale on
+      Pipedream's own side. Cross-checked mahnoor adil's workspace's Gmail connection
+      (`apn_arhYrJe`) the same way: it resolves cleanly (`200`, `external_id` matches `connection.user`
+      exactly, `healthy: true`). **This is not a code bug and not caused by any work in this session**
+      — it's a stale third-party OAuth link specific to one workspace's one connection. **The fix is
+      the existing Reconnect flow** (Platforms/Automation page) — re-authorizing creates a fresh
+      Pipedream account link. Not something fixable from the backend; flagged to the user as the next
+      action on their side, not attempted here.
+    - **A real, separate bug found AND fixed while diagnosing the above**: `connectProxyRequest`
+      (`services/integrations/pipedream.ts`) discarded the provider's actual error response body on
+      any failure, logging only the bare HTTP status — every failure at a given status code was
+      indistinguishable from every other ("invalid search query" vs. "token needs reconnecting" vs.
+      "insufficient OAuth scope" vs. the actual "Auth provision owner mismatch" all looked identical:
+      `returned an error (400)`). Fixed: the response body is now read and logged server-side (never
+      exposed to the end user — the safe generic `AppError` message is unchanged) on every proxy
+      failure, for both the 129 billing-sync adapters and both email-sync providers, since they all
+      share this one function. This is exactly what made the real cause above diagnosable instead of
+      guessed.
+    - **Confirms WP-5's own code is correct, not buggy**: with the test data gone, both real
+      workspaces now correctly show zero `email_sync` Billing records (mahnoor adil's connection is
+      healthy but found 0 new matching messages on its last real run; umair habib's is broken as
+      above) — the trust-surface badges/dialog have nothing to misrender because there is currently no
+      real synced data in either workspace, not because the UI is malfunctioning. The actual
+      badge/dialog rendering logic was already proven correct end-to-end against synthetic data with
+      full provenance fields (item #17's live test) — that code path is unchanged by anything in this
+      item.
+
+    **Tested** — 1 new test (`pipedream-proxy-error.test.ts`, mocks `fetch` for both the token-mint
+    and proxy calls): confirms a `400` response's body is captured and logged, reproducing the exact
+    real failure found live (`"Auth provision owner mismatch"`) as a permanent regression guard — 140
+    total backend tests, two consecutive full runs green. `tsc`/`lint`/`build` clean.
+
+    **Honest scope note**: WP-5's trust-surface UI cannot be live-verified against REAL synced email
+    data in either workspace until umair habib's workspace is reconnected (and/or mahnoor adil's
+    inbox actually receives a new matching invoice email within the search window) — this item
+    diagnosed and explained why no real data exists to test against right now, rather than being able
+    to complete that specific live check. The synthetic-data live test from item #17 remains the
+    evidence that the rendering code itself is correct.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

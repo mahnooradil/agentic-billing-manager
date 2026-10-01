@@ -422,6 +422,16 @@ export async function connectProxyRequest(
     },
   });
   if (!res.ok) {
+    // The user-facing message stays generic/safe (never leak a raw provider
+    // error to the UI) — but the body is genuinely useful server-side
+    // diagnosis (e.g. distinguishing "invalid search query" from "token
+    // needs reconnecting" from "insufficient OAuth scope"), and was
+    // previously discarded entirely, leaving every failure indistinguishable
+    // from every other at the same status code.
+    const body = await res.text().catch(() => "");
+    console.error(
+      `[pipedream] connectProxyRequest ${init.method ?? "GET"} ${targetUrl} -> ${res.status}: ${body.slice(0, 500)}`
+    );
     throw new AppError(
       `The connected platform's API returned an error (${res.status}).`,
       502
