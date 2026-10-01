@@ -60,12 +60,22 @@ export function BillingSourceDialog({ record, open, onOpenChange }: BillingSourc
         ? `Synced automatically from ${record.platform.name}'s own billing data`
         : "Found in a connected email inbox";
 
-  // Gmail message ids open reliably at this URL; Outlook/Graph has no
-  // equally reliable deep-link format, so no link is attempted for it — the
-  // metadata and evidence below are shown instead either way.
+  // `?authuser=<email>` targets the EXACT connected mailbox by address —
+  // the earlier `/mail/u/0/` form instead opened whichever Google account
+  // happened to be account index 0 in the browser, which is often a
+  // different account than the one actually connected (a real bug a user
+  // hit: "us email p gya hai jahan maine browser khola hua hai", not the
+  // connected inbox). Omitted entirely (not falling back to the unreliable
+  // index-based form) when the connection's own address isn't known. No
+  // equally reliable deep-link format exists for Outlook/Graph, so no link
+  // is attempted for it either way — the metadata/evidence below stand on
+  // their own regardless of provider.
   const gmailLink =
-    record.source === "email_sync" && record.platform.slug === "gmail" && record.sourceMessageId
-      ? `https://mail.google.com/mail/u/0/#all/${record.sourceMessageId}`
+    record.source === "email_sync" &&
+    record.platform.slug === "gmail" &&
+    record.sourceMessageId &&
+    record.platform.accountIdentifier
+      ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(record.platform.accountIdentifier)}#all/${record.sourceMessageId}`
       : null;
 
   return (
@@ -147,10 +157,16 @@ export function BillingSourceDialog({ record, open, onOpenChange }: BillingSourc
                 </Field>
               ) : null}
               {gmailLink ? (
-                <Button variant="outline" size="sm" render={<a href={gmailLink} target="_blank" rel="noopener noreferrer" />}>
-                  <ExternalLink />
-                  View in Gmail
-                </Button>
+                <div className="space-y-1.5">
+                  <Button variant="outline" size="sm" render={<a href={gmailLink} target="_blank" rel="noopener noreferrer" />}>
+                    <ExternalLink />
+                    View in Gmail
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Opens in {record.platform.accountIdentifier} — if your browser is signed into
+                    more than one Google account, Gmail may still ask you to pick that one.
+                  </p>
+                </div>
               ) : null}
             </>
           ) : null}

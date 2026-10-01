@@ -15,6 +15,10 @@ export interface BillingPlatformRef {
   id: string;
   name: string;
   slug: string;
+  /** The connected inbox's own email address (email_sync only) — see
+   *  `backend/src/utils/billing.serializer.ts` for why this is distinct
+   *  from `senderEmail`. */
+  accountIdentifier?: string;
 }
 
 /** The real vendor identity (Task 7), when resolved. */

@@ -994,6 +994,31 @@ the document cites, not assumed from the document text.
     real browser click-through remains the user's own manual step, as with every prior frontend change
     in this project.
 
+18. ✅ **DONE (2026-10-01) — Fix: "View in Gmail" opened the wrong Google account.** User-reported,
+    found on the very first real browser click-through of item #17's new detail dialog: the link used
+    `mail.google.com/mail/u/0/#all/<messageId>` — `/u/0/` addresses a Google account by its INDEX in
+    the browser's currently signed-in accounts, not by which account is actually connected to this
+    app. For anyone signed into more than one Google account (the reporting user included), this opens
+    whichever account happens to be first in the browser, not the inbox the invoice actually came
+    from.
+    - **Fix**: `mail.google.com/mail/?authuser=<email>#all/<messageId>` — `authuser` targets the
+      account by its real address, not a browser-session-dependent index. The connected inbox's own
+      address (`PlatformConnection.accountIdentifier`) was never sent to the frontend at all
+      previously — added to `billing.controller.ts`'s `platformConnection` populate (all three read
+      sites: single-record, list, export) and to `billing.serializer.ts`'s `PublicBillingPlatform` as
+      a new `accountIdentifier` field, clearly distinguished in its own docstring from `senderEmail`
+      (who sent the invoice — a different thing from which inbox received it).
+    - The link is now omitted entirely — not silently falling back to the old unreliable `/u/0/`
+      form — whenever the connection's own address isn't known, same honesty principle already applied
+      to Outlook (no link attempted there either, metadata/evidence stand on their own). The dialog
+      also now states which account the link opens, since even an `authuser`-correct link can still
+      prompt an account picker if the browser's sessions are unusual.
+    - **Tested** — 2 new tests (`billing-source-link.test.ts`, real HTTP via supertest): confirms
+      `platform.accountIdentifier` reaches the wire correctly through both the single-record
+      (`GET /api/billing/:id`) and list (`GET /api/billing`) routes — 139 total backend tests, two
+      consecutive full runs green. Backend and frontend `tsc`/`lint`/`build` clean (full production
+      build).
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

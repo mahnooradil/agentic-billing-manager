@@ -19,6 +19,13 @@ export interface PublicBillingPlatform {
   id: string;
   name: string;
   slug: string;
+  /** The connected inbox's OWN email address (email_sync only — e.g.
+   *  "inbox@example.com") — distinct from `senderEmail` below, which is
+   *  whoever SENT the invoice email, not the mailbox that received it. Lets
+   *  a "View source email" link target the exact Google/Microsoft account
+   *  the record actually came from, instead of whichever account happens to
+   *  be active in the browser. */
+  accountIdentifier?: string;
 }
 
 export interface PublicBilling {
@@ -88,6 +95,7 @@ export function toPublicBilling(billing: BillingDocument): PublicBilling {
           // connection = one vendor for auto_sync, so already the same).
           name: vendorDoc?.name ?? billing.vendorName ?? connection.displayName,
           slug: connection.platform,
+          accountIdentifier: connection.accountIdentifier || undefined,
         }
       : { id: "", name: "Unknown platform", slug: "" };
 

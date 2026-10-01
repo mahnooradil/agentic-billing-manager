@@ -51,7 +51,7 @@ async function findBillingOr404(
   }
   const billing = await Billing.findOne({ _id: id, organization: organizationId })
     .populate("platform", "name slug")
-    .populate("platformConnection", "displayName platform")
+    .populate("platformConnection", "displayName platform accountIdentifier")
     .populate("vendor", "name domain");
   if (!billing) {
     throw new AppError("Billing record not found", 404);
@@ -94,7 +94,7 @@ export const listBillingRecords = asyncHandler(async (req, res) => {
   const [records, totalRecords] = await Promise.all([
     Billing.find(filter)
       .populate("platform", "name slug")
-      .populate("platformConnection", "displayName platform")
+      .populate("platformConnection", "displayName platform accountIdentifier")
       .populate("vendor", "name domain")
       .sort({ billingDate: -1, createdAt: -1 })
       .skip((page - 1) * limit)
@@ -117,7 +117,7 @@ export const exportBillingRecords = asyncHandler(async (req, res) => {
 
   const records = await Billing.find({ organization: organization._id })
     .populate("platform", "name slug")
-    .populate("platformConnection", "displayName platform")
+    .populate("platformConnection", "displayName platform accountIdentifier")
     .populate("vendor", "name domain")
     .sort({ billingDate: -1, createdAt: -1 })
     .limit(EXPORT_SAFETY_LIMIT);
