@@ -169,8 +169,12 @@ const IMPORT_COLUMNS = [
 export const importBillingRecords = asyncHandler(async (req, res) => {
   const user = req.user;
   const organization = req.organization;
-  if (!user || !organization) {
+  const membership = req.membership;
+  if (!user || !organization || !membership) {
     throw new AppError("Authentication required", 401);
+  }
+  if (membership.role === "member") {
+    throw new AppError("Only an owner or admin can import billing records.", 403);
   }
 
   const { csv } = req.body as ImportBillingInput;
@@ -335,12 +339,16 @@ export const getBillingRecord = asyncHandler(async (req, res) => {
   });
 });
 
-/** POST /api/billing — create a billing record. */
+/** POST /api/billing — create a billing record (owner/admin only). */
 export const createBillingRecord = asyncHandler(async (req, res) => {
   const user = req.user;
   const organization = req.organization;
-  if (!user || !organization) {
+  const membership = req.membership;
+  if (!user || !organization || !membership) {
     throw new AppError("Authentication required", 401);
+  }
+  if (membership.role === "member") {
+    throw new AppError("Only an owner or admin can create billing records.", 403);
   }
 
   const body = req.body as CreateBillingInput;
@@ -364,12 +372,16 @@ export const createBillingRecord = asyncHandler(async (req, res) => {
   });
 });
 
-/** PUT /api/billing/:id — update a billing record. */
+/** PUT /api/billing/:id — update a billing record (owner/admin only). */
 export const updateBillingRecord = asyncHandler(async (req, res) => {
   const user = req.user;
   const organization = req.organization;
-  if (!user || !organization) {
+  const membership = req.membership;
+  if (!user || !organization || !membership) {
     throw new AppError("Authentication required", 401);
+  }
+  if (membership.role === "member") {
+    throw new AppError("Only an owner or admin can edit billing records.", 403);
   }
 
   const body = req.body as UpdateBillingInput;
@@ -419,12 +431,16 @@ export const updateBillingRecord = asyncHandler(async (req, res) => {
   });
 });
 
-/** DELETE /api/billing/:id — remove a billing record. */
+/** DELETE /api/billing/:id — remove a billing record (owner/admin only). */
 export const deleteBillingRecord = asyncHandler(async (req, res) => {
   const user = req.user;
   const organization = req.organization;
-  if (!user || !organization) {
+  const membership = req.membership;
+  if (!user || !organization || !membership) {
     throw new AppError("Authentication required", 401);
+  }
+  if (membership.role === "member") {
+    throw new AppError("Only an owner or admin can delete billing records.", 403);
   }
 
   const billing = await findBillingOr404(req.params.id as string, organization._id);

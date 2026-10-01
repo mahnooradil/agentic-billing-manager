@@ -785,7 +785,7 @@ the document cites, not assumed from the document text.
       incidentally also fixes the same latent bug on those three other endpoints, not just billing's
       new one.
 
-    **Tested** — 2 new test files, 4 new tests (130 total backend tests now passing, two consecutive
+    **Tested** — 2 new test files, 4 new tests (126 total backend tests now passing, two consecutive
     full runs): `billing-stats-pagination.test.ts` (real HTTP routes via supertest, not just the
     functions) proves Paid amounts in USD and EUR stay separate and sorted (150/30, never "180"),
     that `/billing?limit=2&page=1` and `page=2` return distinct 2-record pages with correct
@@ -800,6 +800,47 @@ the document cites, not assumed from the document text.
     itself frames that as a separate, bigger piece of work this task's "small, isolated" framing was
     never meant to include. The full dashboard-hierarchy redesign (flow/08 item 47) is also not done,
     same reasoning. Neither is a silently-dropped gap — both are named, tracked, separate items.
+
+    **Correction to this item's own earlier test count:** this item originally said "130 total" —
+    wrong by exactly the 4 tests item #14 below adds; the real total at the point WP-3 landed was
+    126. Caught while adding #14's own tests and fixed here rather than left standing.
+
+14. ✅ **DONE (2026-10-01) — RBAC on billing mutations** (`flow/02` item 18, CLAUDE.md §10.6 S-13).
+    Confirmed still present exactly as described before fixing: zero `role ===`/`membership.role`
+    checks anywhere in `billing.controller.ts` — any `member` (not just `owner`/`admin`) could create,
+    edit, delete, or bulk-import any financial record in the organization. `req.membership` is already
+    populated on every authenticated request by `auth.middleware.ts` (no extra lookup needed), so this
+    is the exact same `if (membership.role === "member") throw new AppError(..., 403)` pattern
+    `plan.controller.ts` already uses for `updateMyPlan`/`createPlanCheckout` — not a new convention,
+    reused one already established elsewhere in the codebase.
+    - Gated: `createBillingRecord` (POST), `updateBillingRecord` (PUT), `deleteBillingRecord`
+      (DELETE), `importBillingRecords` (POST, bulk CSV create).
+    - **Deliberately NOT gated**: `listBillingRecords`, `getBillingRecord`, `getBillingStats`,
+      `exportBillingRecords` — this is an edit/delete restriction, not a visibility one; every member
+      still needs to SEE the organization's billing data, per the audit's own framing ("can create,
+      edit, or delete" — reads were never the complaint).
+    - The Billing Advisor Agent's write-adjacent tools (`propose_update_billing_status`/
+      `propose_delete_billing_record`) never write directly — the chat UI's confirm button calls these
+      SAME `PUT`/`DELETE /api/billing/:id` routes, so a member asking the agent to change a record's
+      status now gets the identical 403 the Billing page's own edit form would give them. No special-
+      casing needed for the agent path.
+    - **Honest scope note — frontend NOT updated.** `billing-view.tsx`'s "New billing record"/Edit/
+      Delete buttons are still shown to every role; a `member` clicking one now gets a correct, clear
+      403 message (`"Only an owner or admin can create billing records."` etc. — confirmed the existing
+      `BillingFormDialog`/`DeleteBillingDialog` already surface the real `ApiError.message`, not a
+      generic one, so no frontend code was strictly required for this to work correctly) rather than
+      the button being pre-emptively hidden. `team-tab.tsx` has an existing `canManage` pattern
+      (`organization?.role === "owner" || "admin"`) that a future pass could reuse to hide these
+      buttons for members — deferred rather than silently added, since it needs an extra organization-
+      role fetch `billing-view.tsx` doesn't currently make, and the backend is the real security
+      boundary regardless (CLAUDE.md's own stated principle — client-side gating is UX-only).
+
+    **Tested** — new `billing-rbac.test.ts` (4 new tests, 130 total now passing, two consecutive full
+    runs): a `member` is rejected (403) creating, updating, deleting, and bulk-importing; an `admin`
+    (not just `owner`) succeeds, proving this isn't accidentally owner-only; a `member` can still list
+    and read the same record it's blocked from editing, and the blocked update never actually reached
+    the database (`notes` field confirmed still unset after the rejected PUT). `tsc`/`lint`/`build`
+    clean.
 
 ---
 
