@@ -16,6 +16,7 @@ interface ZeroBounceCreditsResponse {
 export const zerobounceBillingAdapter: BillingSyncAdapter = {
   platform: "zerobounce",
   label: "ZeroBounce",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

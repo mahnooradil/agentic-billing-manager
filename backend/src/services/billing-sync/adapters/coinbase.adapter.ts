@@ -24,6 +24,7 @@ interface CoinbaseAccountsResponse {
 export const coinbaseBillingAdapter: BillingSyncAdapter = {
   platform: "coinbase",
   label: "Coinbase",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

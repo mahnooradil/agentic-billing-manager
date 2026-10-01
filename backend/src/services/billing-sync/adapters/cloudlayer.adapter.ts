@@ -18,6 +18,7 @@ interface CloudlayerAccountResponse {
 export const cloudlayerBillingAdapter: BillingSyncAdapter = {
   platform: "cloudlayer",
   label: "Cloudlayer.io",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -18,6 +18,7 @@ interface OpenRouterKeyResponse {
 export const openrouterBillingAdapter: BillingSyncAdapter = {
   platform: "openrouter",
   label: "OpenRouter",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

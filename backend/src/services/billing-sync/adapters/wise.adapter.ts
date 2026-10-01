@@ -22,6 +22,7 @@ interface WiseBalance {
 export const wiseBillingAdapter: BillingSyncAdapter = {
   platform: "wise",
   label: "Wise",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

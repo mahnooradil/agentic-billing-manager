@@ -15,6 +15,7 @@ interface CoinGeckoKeyResponse {
 export const coingeckoBillingAdapter: BillingSyncAdapter = {
   platform: "coingecko",
   label: "CoinGecko",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

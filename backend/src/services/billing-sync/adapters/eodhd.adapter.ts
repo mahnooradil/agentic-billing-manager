@@ -17,6 +17,7 @@ interface EodhdUserResponse {
 export const eodhdBillingAdapter: BillingSyncAdapter = {
   platform: "eodhd_apis",
   label: "EODHD APIs",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

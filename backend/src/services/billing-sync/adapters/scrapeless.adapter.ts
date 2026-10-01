@@ -19,6 +19,7 @@ interface ScrapelessMeResponse {
 export const scrapelessBillingAdapter: BillingSyncAdapter = {
   platform: "scrapeless",
   label: "Scrapeless",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

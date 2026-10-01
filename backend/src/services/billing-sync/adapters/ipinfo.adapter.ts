@@ -24,6 +24,7 @@ interface IpinfoMeResponse {
 export const ipinfoBillingAdapter: BillingSyncAdapter = {
   platform: "ipinfo_io",
   label: "IPinfo.io",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

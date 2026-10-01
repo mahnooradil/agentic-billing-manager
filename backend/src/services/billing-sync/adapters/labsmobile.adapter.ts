@@ -18,6 +18,7 @@ interface LabsMobileBalanceResponse {
 export const labsmobileBillingAdapter: BillingSyncAdapter = {
   platform: "labsmobile",
   label: "LabsMobile",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -612,6 +612,62 @@ the document cites, not assumed from the document text.
 
    Backend `tsc`/`lint`/`build` clean throughout.
 
+9d. ✅ **DONE (2026-10-01) — Billing-sync adapter split: `Billing` (real invoices) vs. `UsageAccrual`
+   (month-to-date usage/balance)**, closing the gap explicitly flagged as "not wired" in task #8 above
+   and in CLAUDE.md §10.3's adapter census. The audit's own static census said 124 of the 129
+   `billing-sync/adapters/*.adapter.ts` files hardcode `status: "Pending"` forever and 122 stamp
+   `billingDate` as the sync timestamp rather than a real billing date — meaning month-to-date usage
+   data was being written into `Billing` as permanently-pending rows that could never actually clear,
+   polluting "outstanding"/"overdue" totals and (when a platform was connected via both billing-sync
+   and email-sync) double-counting the same real spend under two different `platformConnection`s.
+
+   **What was built:**
+   - `billing-sync/types.ts` gained `BillingSyncRecordKind = "invoice" | "usage_accrual"` and every
+     `BillingSyncAdapter` now declares a `kind`.
+   - A grep-based static census was run across all 129 adapter files independently (not by re-reading
+     the audit's own numbers) and cross-checked against it: the result was exactly 124 `usage_accrual`
+     + 5 `invoice` — matching the audit's own independently-derived count, treated as real
+     cross-validation rather than just trusting either source blindly. The 5 real-invoice adapters:
+     `gocardless`, `heroku`, `mongodb`, `northflank`, `snapchat_marketing` (the last one's registered
+     `platform` slug uses an underscore, not the hyphen its filename uses — caught and fixed via the
+     adapter's own source, not assumed).
+   - New `UsageAccrual` model (`organization`, `user`, `platformConnection`, `externalId`, `amount`,
+     `currency`, `snapshotAt` — deliberately not named `billingDate`, to make it impossible to
+     mistake a usage snapshot for a real invoice due date — `notes`), unique on
+     `{organization, platformConnection, externalId}`, same idempotent-upsert shape as `Billing`.
+   - `billing-sync/sync-engine.ts`'s `syncConnectionBilling` now branches on `adapter.kind`: `invoice`
+     keeps the exact existing `Billing`-write path (vendor resolution included, untouched); the new
+     `usage_accrual` branch writes to `UsageAccrual` instead — no `customerName`/vendor fields, since a
+     usage snapshot has no "who it was billed to" in the invoice sense.
+   - Live database checked before writing any migration: `Billing.countDocuments({source: "auto_sync"})`
+     was 0, so **no backfill/migration was needed** — this is a forward-only fix, confirmed rather than
+     assumed. `scripts/sync-indexes.ts` updated with `UsageAccrual`'s unique-constraint check; run
+     against the live Atlas database in check mode — the new compound index had already been created by
+     the dev server's own `autoIndex` (non-production) during this session's testing, so there was
+     nothing left to `--apply`, confirmed via a clean "Nothing to apply" dry-run rather than assumed.
+
+   **Tested** — 2 new test files, 6 new tests (119 total backend tests now passing, confirmed via two
+   full consecutive runs for stability): `adapter-census.test.ts` asserts every one of the 129
+   registered adapters declares a `kind`, that exactly the 5 named adapters are `invoice`, and that
+   every other one is `usage_accrual` — a standing guard, not a one-time fact, so a future adapter
+   added without a `kind` or a classification drift fails loudly. `sync-engine-usage-accrual.test.ts`
+   (mocking `connectProxyRequest` via `vi.hoisted()`, needed here specifically because this file's
+   import chain pulls in all 129 adapter modules through `registry.ts`, unlike the simpler single-
+   package mocks used elsewhere in this session) proves the actual routing end-to-end: a
+   `usage_accrual` adapter (vultr) writes only to `UsageAccrual` and never to `Billing`; an `invoice`
+   adapter (heroku) writes only to `Billing` and never to `UsageAccrual`; re-syncing a `usage_accrual`
+   connection updates the same row (amount changes from 10 to 25) instead of duplicating it. Backend
+   `tsc`/`lint`/`build` clean.
+
+   **Honest scope note — what this does NOT cover:** no frontend UI surfaces `UsageAccrual` data at
+   all yet (no page, no dashboard card, no analytics inclusion) — this task was scoped to the backend
+   domain-model split only, consistent with how Task 7 (Vendor model) and Task 8 (`BillingEvent`) were
+   each scoped backend-first with their own UI work left for `flow/10-remediation-roadmap.md`'s WP-5
+   (trust surfaces). The deeper `Billing` reshape CLAUDE.md §10.3 also describes (provenance-driven
+   `deriveStatus()` becoming the real `status`, not just `derivedStatus*` alongside it) remains a
+   separate, already-tracked, not-yet-actioned decision — this task only stopped usage data from being
+   misfiled into `Billing` in the first place, it did not change anything about `Billing` itself.
+
 ### Documentation drift (from "a note on the documentation")
 
 11. ✅ **DONE (2026-10-01) — Documentation drift.** `docs/ARCHITECTURE.md` rewritten against what's

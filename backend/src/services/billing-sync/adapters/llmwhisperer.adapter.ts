@@ -19,6 +19,7 @@ interface LlmWhispererUsageInfoResponse {
 export const llmwhispererBillingAdapter: BillingSyncAdapter = {
   platform: "llmwhisperer",
   label: "LLMWhisperer",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

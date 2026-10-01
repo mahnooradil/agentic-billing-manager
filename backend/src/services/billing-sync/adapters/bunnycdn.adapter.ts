@@ -18,6 +18,7 @@ interface BunnyBillingResponse {
 export const bunnycdnBillingAdapter: BillingSyncAdapter = {
   platform: "bunnycdn",
   label: "BunnyCDN",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

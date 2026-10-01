@@ -24,6 +24,7 @@ interface DatadogEstimatedCostResponse {
 export const datadogBillingAdapter: BillingSyncAdapter = {
   platform: "datadog",
   label: "Datadog",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

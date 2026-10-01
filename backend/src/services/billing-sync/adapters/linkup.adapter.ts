@@ -19,6 +19,7 @@ interface LinkupCreditsBalanceResponse {
 export const linkupBillingAdapter: BillingSyncAdapter = {
   platform: "linkup",
   label: "Linkup",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

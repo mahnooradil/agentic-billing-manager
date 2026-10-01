@@ -21,6 +21,7 @@ interface GitHubUsageResponse {
 export const githubBillingAdapter: BillingSyncAdapter = {
   platform: "github",
   label: "GitHub",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

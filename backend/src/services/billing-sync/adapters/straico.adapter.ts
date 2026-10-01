@@ -15,6 +15,7 @@ interface StraicoUserResponse {
 export const straicoBillingAdapter: BillingSyncAdapter = {
   platform: "straico",
   label: "Straico",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -17,6 +17,7 @@ interface ScrapingBeeUsageResponse {
 export const scrapingbeeBillingAdapter: BillingSyncAdapter = {
   platform: "scrapingbee",
   label: "ScrapingBee",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -18,6 +18,7 @@ interface CrawlbaseAccountResponse {
 export const crawlbaseBillingAdapter: BillingSyncAdapter = {
   platform: "crawlbase",
   label: "Crawlbase",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

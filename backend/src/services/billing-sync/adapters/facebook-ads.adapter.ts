@@ -25,6 +25,7 @@ interface FacebookAdAccountsResponse {
 export const facebookAdsBillingAdapter: BillingSyncAdapter = {
   platform: "facebook_ads",
   label: "Meta Ads",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

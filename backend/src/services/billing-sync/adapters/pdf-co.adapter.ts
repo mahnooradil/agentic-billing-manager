@@ -19,6 +19,7 @@ interface PdfCoCreditBalanceResponse {
 export const pdfCoBillingAdapter: BillingSyncAdapter = {
   platform: "pdf_co",
   label: "PDF.co",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

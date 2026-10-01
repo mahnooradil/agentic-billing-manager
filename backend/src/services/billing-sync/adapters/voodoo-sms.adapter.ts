@@ -18,6 +18,7 @@ interface VoodooSmsCreditResponse {
 export const voodooSmsBillingAdapter: BillingSyncAdapter = {
   platform: "voodoo_sms",
   label: "Voodoo SMS",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

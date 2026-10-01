@@ -19,6 +19,7 @@ interface EzTextingCreditsResponse {
 export const ezTextingBillingAdapter: BillingSyncAdapter = {
   platform: "ez_texting",
   label: "EZ Texting",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

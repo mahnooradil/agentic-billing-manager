@@ -18,6 +18,7 @@ interface StreamWishAccountResponse {
 export const streamwishBillingAdapter: BillingSyncAdapter = {
   platform: "streamwish",
   label: "StreamWish",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

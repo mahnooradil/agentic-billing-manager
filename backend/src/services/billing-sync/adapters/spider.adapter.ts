@@ -18,6 +18,7 @@ interface SpiderCreditsResponse {
 export const spiderBillingAdapter: BillingSyncAdapter = {
   platform: "spider",
   label: "Spider",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

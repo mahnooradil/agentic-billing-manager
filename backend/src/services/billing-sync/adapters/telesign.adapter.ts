@@ -20,6 +20,7 @@ interface TelesignAccountResponse {
 export const telesignBillingAdapter: BillingSyncAdapter = {
   platform: "telesign",
   label: "Telesign",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

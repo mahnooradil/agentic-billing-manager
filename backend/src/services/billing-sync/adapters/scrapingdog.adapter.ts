@@ -19,6 +19,7 @@ interface ScrapingdogAccountResponse {
 export const scrapingdogBillingAdapter: BillingSyncAdapter = {
   platform: "scrapingdog",
   label: "Scrapingdog",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

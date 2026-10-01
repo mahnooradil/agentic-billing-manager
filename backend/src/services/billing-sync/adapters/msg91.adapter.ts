@@ -20,6 +20,7 @@ interface Msg91BalanceResponse {
 export const msg91BillingAdapter: BillingSyncAdapter = {
   platform: "msg91",
   label: "MSG91",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -19,6 +19,7 @@ interface GtmetrixStatusResponse {
 export const gtmetrixBillingAdapter: BillingSyncAdapter = {
   platform: "gtmetrix",
   label: "GTmetrix",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

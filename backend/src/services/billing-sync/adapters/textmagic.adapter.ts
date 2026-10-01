@@ -17,6 +17,7 @@ interface TextMagicUserResponse {
 export const textmagicBillingAdapter: BillingSyncAdapter = {
   platform: "textmagic",
   label: "TextMagic",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

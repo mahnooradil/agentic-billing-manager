@@ -32,6 +32,7 @@ interface ScalewayConsumptionsResponse {
 export const scalewayBillingAdapter: BillingSyncAdapter = {
   platform: "scaleway",
   label: "Scaleway",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

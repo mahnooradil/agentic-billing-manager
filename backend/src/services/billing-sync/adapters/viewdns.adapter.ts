@@ -19,6 +19,7 @@ interface ViewDnsAccountResponse {
 export const viewdnsBillingAdapter: BillingSyncAdapter = {
   platform: "viewdns_info",
   label: "ViewDNS.info",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

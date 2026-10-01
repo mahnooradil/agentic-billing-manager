@@ -15,6 +15,7 @@ interface CloudConvertUserResponse {
 export const cloudconvertBillingAdapter: BillingSyncAdapter = {
   platform: "cloud_convert",
   label: "CloudConvert",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

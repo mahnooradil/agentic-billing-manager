@@ -15,6 +15,7 @@ interface ZadarmaBalanceResponse {
 export const zadarmaBillingAdapter: BillingSyncAdapter = {
   platform: "zadarma",
   label: "Zadarma",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

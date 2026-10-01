@@ -15,6 +15,7 @@ interface HelloSignAccountResponse {
 export const hellosignBillingAdapter: BillingSyncAdapter = {
   platform: "hellosign",
   label: "Dropbox Sign (HelloSign)",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

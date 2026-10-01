@@ -19,6 +19,7 @@ interface Click2MailCreditResponse {
 export const click2mailBillingAdapter: BillingSyncAdapter = {
   platform: "click2mail2",
   label: "Click2Mail",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -19,6 +19,7 @@ interface GenderApiIoStatisticResponse {
 export const genderapiIoBillingAdapter: BillingSyncAdapter = {
   platform: "genderapi_io",
   label: "GenderAPI.io",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -15,6 +15,7 @@ interface PushoverLimitsResponse {
 export const pushoverBillingAdapter: BillingSyncAdapter = {
   platform: "pushover",
   label: "Pushover",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

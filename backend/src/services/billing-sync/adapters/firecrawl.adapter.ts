@@ -18,6 +18,7 @@ interface FireCrawlCreditUsageResponse {
 export const firecrawlBillingAdapter: BillingSyncAdapter = {
   platform: "firecrawl",
   label: "FireCrawl",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

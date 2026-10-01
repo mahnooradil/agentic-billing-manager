@@ -16,6 +16,7 @@ interface SendGridUserCreditsResponse {
 export const sendgridBillingAdapter: BillingSyncAdapter = {
   platform: "sendgrid",
   label: "Twilio SendGrid",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

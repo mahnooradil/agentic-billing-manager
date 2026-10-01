@@ -15,6 +15,7 @@ interface CurrencyApiStatusResponse {
 export const currencyapiBillingAdapter: BillingSyncAdapter = {
   platform: "currencyapi",
   label: "currencyapi",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

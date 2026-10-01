@@ -19,6 +19,7 @@ interface TemplatedAccountResponse {
 export const templatedBillingAdapter: BillingSyncAdapter = {
   platform: "templated",
   label: "Templated",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

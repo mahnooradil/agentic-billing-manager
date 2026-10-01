@@ -19,6 +19,7 @@ interface D7NetworksBalanceResponse {
 export const d7networksBillingAdapter: BillingSyncAdapter = {
   platform: "d7_networks",
   label: "D7 Networks",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

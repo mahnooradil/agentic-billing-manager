@@ -18,6 +18,7 @@ interface HttpSmsBillingUsageResponse {
 export const httpsmsBillingAdapter: BillingSyncAdapter = {
   platform: "httpsms",
   label: "httpSMS",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

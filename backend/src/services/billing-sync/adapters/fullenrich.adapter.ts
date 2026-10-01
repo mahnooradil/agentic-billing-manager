@@ -19,6 +19,7 @@ interface FullEnrichCreditsResponse {
 export const fullenrichBillingAdapter: BillingSyncAdapter = {
   platform: "fullenrich",
   label: "FullEnrich",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

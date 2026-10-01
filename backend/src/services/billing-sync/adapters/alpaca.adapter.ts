@@ -16,6 +16,7 @@ interface AlpacaAccountResponse {
 export const alpacaBillingAdapter: BillingSyncAdapter = {
   platform: "alpaca",
   label: "Alpaca",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

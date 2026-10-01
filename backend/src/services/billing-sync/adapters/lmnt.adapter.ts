@@ -19,6 +19,7 @@ interface LmntAccountResponse {
 export const lmntBillingAdapter: BillingSyncAdapter = {
   platform: "lmnt",
   label: "LMNT",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -15,6 +15,7 @@ interface RemoveBgAccountResponse {
 export const removebgBillingAdapter: BillingSyncAdapter = {
   platform: "remove_bg",
   label: "remove.bg",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

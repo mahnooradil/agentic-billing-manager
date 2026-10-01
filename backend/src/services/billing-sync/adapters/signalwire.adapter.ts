@@ -25,6 +25,7 @@ interface SignalWireBalanceResponse {
 export const signalwireBillingAdapter: BillingSyncAdapter = {
   platform: "signalwire",
   label: "SignalWire",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

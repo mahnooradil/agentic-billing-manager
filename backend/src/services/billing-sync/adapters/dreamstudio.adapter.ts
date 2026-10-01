@@ -15,6 +15,7 @@ interface DreamStudioBalanceResponse {
 export const dreamstudioBillingAdapter: BillingSyncAdapter = {
   platform: "dreamstudio",
   label: "DreamStudio (Stability AI)",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

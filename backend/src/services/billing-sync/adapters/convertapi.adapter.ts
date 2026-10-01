@@ -17,6 +17,7 @@ interface ConvertApiUserResponse {
 export const convertapiBillingAdapter: BillingSyncAdapter = {
   platform: "convertapi",
   label: "ConvertAPI",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

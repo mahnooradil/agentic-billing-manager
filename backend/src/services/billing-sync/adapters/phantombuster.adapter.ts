@@ -19,6 +19,7 @@ interface PhantomBusterResourcesResponse {
 export const phantombusterBillingAdapter: BillingSyncAdapter = {
   platform: "phantombuster",
   label: "PhantomBuster",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

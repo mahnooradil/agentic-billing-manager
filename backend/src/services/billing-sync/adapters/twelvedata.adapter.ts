@@ -17,6 +17,7 @@ interface TwelveDataApiUsageResponse {
 export const twelvedataBillingAdapter: BillingSyncAdapter = {
   platform: "twelve_data",
   label: "Twelve Data",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

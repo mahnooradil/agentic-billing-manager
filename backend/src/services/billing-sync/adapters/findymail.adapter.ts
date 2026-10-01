@@ -18,6 +18,7 @@ interface FindymailCreditsResponse {
 export const findymailBillingAdapter: BillingSyncAdapter = {
   platform: "findymail",
   label: "Findymail",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

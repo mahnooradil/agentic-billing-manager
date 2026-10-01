@@ -38,6 +38,7 @@ function statusFor(status: string | undefined): "Pending" | "Paid" | "Overdue" {
 export const snapchatMarketingBillingAdapter: BillingSyncAdapter = {
   platform: "snapchat_marketing",
   label: "Snapchat Marketing",
+  kind: "invoice",
 
   async fetchRecords(
     externalUserId,

@@ -29,6 +29,7 @@ interface TwilioUsageResponse {
 export const twilioBillingAdapter: BillingSyncAdapter = {
   platform: "twilio",
   label: "Twilio",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

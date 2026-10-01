@@ -20,6 +20,7 @@ interface VerifaliaCreditsBalanceResponse {
 export const verifaliaBillingAdapter: BillingSyncAdapter = {
   platform: "verifalia",
   label: "Verifalia",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -15,6 +15,7 @@ interface OpenExchangeRatesUsageResponse {
 export const openexchangeratesBillingAdapter: BillingSyncAdapter = {
   platform: "open_exchange_rates",
   label: "Open Exchange Rates",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

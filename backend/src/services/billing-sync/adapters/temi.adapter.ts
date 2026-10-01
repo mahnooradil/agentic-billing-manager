@@ -16,6 +16,7 @@ interface TemiAccountResponse {
 export const temiBillingAdapter: BillingSyncAdapter = {
   platform: "temi",
   label: "Temi",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

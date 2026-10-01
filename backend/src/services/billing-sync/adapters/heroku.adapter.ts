@@ -28,6 +28,7 @@ function statusFor(state: number | undefined): "Pending" | "Paid" | "Overdue" {
 export const herokuBillingAdapter: BillingSyncAdapter = {
   platform: "heroku",
   label: "Heroku",
+  kind: "invoice",
 
   async fetchRecords(
     externalUserId,

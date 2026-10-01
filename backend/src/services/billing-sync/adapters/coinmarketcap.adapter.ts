@@ -19,6 +19,7 @@ interface CoinMarketCapKeyInfoResponse {
 export const coinmarketcapBillingAdapter: BillingSyncAdapter = {
   platform: "coinmarketcap",
   label: "CoinMarketCap",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

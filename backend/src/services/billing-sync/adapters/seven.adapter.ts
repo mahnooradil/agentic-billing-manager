@@ -18,6 +18,7 @@ interface SevenBalanceResponse {
 export const sevenBillingAdapter: BillingSyncAdapter = {
   platform: "seven",
   label: "Seven",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

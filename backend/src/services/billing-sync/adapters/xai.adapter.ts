@@ -19,6 +19,7 @@ interface XaiPrepaidBalanceResponse {
 export const xaiBillingAdapter: BillingSyncAdapter = {
   platform: "x_ai",
   label: "xAI",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

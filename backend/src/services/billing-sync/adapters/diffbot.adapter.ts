@@ -18,6 +18,7 @@ interface DiffbotAccountResponse {
 export const diffbotBillingAdapter: BillingSyncAdapter = {
   platform: "diffbot",
   label: "Diffbot",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

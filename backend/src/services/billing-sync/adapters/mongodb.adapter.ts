@@ -38,6 +38,7 @@ function statusFor(statusName: string | undefined): "Pending" | "Paid" | "Overdu
 export const mongodbBillingAdapter: BillingSyncAdapter = {
   platform: "mongodb",
   label: "MongoDB Atlas",
+  kind: "invoice",
 
   async fetchRecords(
     externalUserId,

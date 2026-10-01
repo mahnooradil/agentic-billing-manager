@@ -18,6 +18,7 @@ interface DigitalOceanBalanceResponse {
 export const digitaloceanBillingAdapter: BillingSyncAdapter = {
   platform: "digital_ocean",
   label: "DigitalOcean",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -17,6 +17,7 @@ interface AirwallexBalance {
 export const airwallexBillingAdapter: BillingSyncAdapter = {
   platform: "airwallex",
   label: "Airwallex",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

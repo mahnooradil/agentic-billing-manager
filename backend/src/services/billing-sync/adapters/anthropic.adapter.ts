@@ -27,6 +27,7 @@ interface AnthropicCostReportResponse {
 export const anthropicBillingAdapter: BillingSyncAdapter = {
   platform: "anthropic",
   label: "Anthropic",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

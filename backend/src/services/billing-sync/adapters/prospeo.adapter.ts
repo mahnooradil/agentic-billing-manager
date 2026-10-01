@@ -19,6 +19,7 @@ interface ProspeoAccountInformationResponse {
 export const prospeoBillingAdapter: BillingSyncAdapter = {
   platform: "prospeo",
   label: "Prospeo",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

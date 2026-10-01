@@ -18,6 +18,7 @@ interface PcloudUserInfoResponse {
 export const pcloudBillingAdapter: BillingSyncAdapter = {
   platform: "pcloud",
   label: "pCloud",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

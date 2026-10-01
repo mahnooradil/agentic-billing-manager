@@ -19,6 +19,7 @@ interface ScrapingAntUsageResponse {
 export const scrapingantBillingAdapter: BillingSyncAdapter = {
   platform: "scrapingant",
   label: "ScrapingAnt",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

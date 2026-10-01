@@ -17,6 +17,7 @@ interface SmsApiProfileResponse {
 export const smsapiBillingAdapter: BillingSyncAdapter = {
   platform: "smsapi",
   label: "SMSAPI",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

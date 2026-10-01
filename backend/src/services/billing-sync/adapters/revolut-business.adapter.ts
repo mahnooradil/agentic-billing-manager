@@ -17,6 +17,7 @@ interface RevolutAccount {
 export const revolutBusinessBillingAdapter: BillingSyncAdapter = {
   platform: "revolut_business",
   label: "Revolut Business",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

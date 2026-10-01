@@ -53,6 +53,7 @@ import "@/models/organization.model";
 import "@/models/vendor.model";
 import "@/models/billing-event.model";
 import "@/models/subscription.model";
+import "@/models/usage-accrual.model";
 
 interface UniqueCheck {
   modelName: string;
@@ -164,6 +165,15 @@ const UNIQUE_CHECKS: UniqueCheck[] = [
     label: "Subscription.stripeSubscriptionId",
     groupFields: { stripeSubscriptionId: "$stripeSubscriptionId" },
   },
+  {
+    modelName: "UsageAccrual",
+    label: "UsageAccrual {organization, platformConnection, externalId}",
+    groupFields: {
+      organization: "$organization",
+      platformConnection: "$platformConnection",
+      externalId: "$externalId",
+    },
+  },
 ];
 
 interface DuplicateGroup {
@@ -264,6 +274,7 @@ const ALL_MODEL_NAMES = [
   "Vendor",
   "BillingEvent",
   "Subscription",
+  "UsageAccrual",
 ];
 
 async function main(): Promise<void> {

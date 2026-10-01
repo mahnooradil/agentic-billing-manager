@@ -18,6 +18,7 @@ interface OctopushBalanceResponse {
 export const octopushBillingAdapter: BillingSyncAdapter = {
   platform: "octopush_sms",
   label: "Octopush SMS",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

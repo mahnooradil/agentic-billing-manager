@@ -19,6 +19,7 @@ interface TextRazorAccountResponse {
 export const textrazorBillingAdapter: BillingSyncAdapter = {
   platform: "textrazor",
   label: "TextRazor",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

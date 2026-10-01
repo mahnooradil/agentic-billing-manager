@@ -17,6 +17,7 @@ interface StannpBalanceResponse {
 export const stannpBillingAdapter: BillingSyncAdapter = {
   platform: "stannp",
   label: "Stannp",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

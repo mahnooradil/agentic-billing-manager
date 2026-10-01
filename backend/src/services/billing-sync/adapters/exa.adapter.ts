@@ -25,6 +25,7 @@ interface ExaUsageResponse {
 export const exaBillingAdapter: BillingSyncAdapter = {
   platform: "exa",
   label: "Exa",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

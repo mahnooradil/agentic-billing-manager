@@ -19,6 +19,7 @@ interface InterzoidRemainingCreditsResponse {
 export const interzoidBillingAdapter: BillingSyncAdapter = {
   platform: "interzoid",
   label: "Interzoid",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

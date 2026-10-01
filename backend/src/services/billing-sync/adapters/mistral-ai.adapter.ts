@@ -19,6 +19,7 @@ interface MistralAdminUsageResponse {
 export const mistralAiBillingAdapter: BillingSyncAdapter = {
   platform: "mistral_ai",
   label: "Mistral AI",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -18,6 +18,7 @@ interface MoceanBalanceResponse {
 export const moceanBillingAdapter: BillingSyncAdapter = {
   platform: "mocean_api",
   label: "Mocean API",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -19,6 +19,7 @@ interface MobivateWalletResponse {
 export const mobivateBillingAdapter: BillingSyncAdapter = {
   platform: "mobivate",
   label: "Mobivate",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

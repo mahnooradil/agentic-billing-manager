@@ -23,6 +23,7 @@ interface VercelChargesResponse {
 export const vercelBillingAdapter: BillingSyncAdapter = {
   platform: "vercel_token_auth",
   label: "Vercel",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

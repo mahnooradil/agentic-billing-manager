@@ -23,6 +23,7 @@ interface RebrandlyAccountResponse {
 export const rebrandlyBillingAdapter: BillingSyncAdapter = {
   platform: "rebrandly",
   label: "Rebrandly",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

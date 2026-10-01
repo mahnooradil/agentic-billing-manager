@@ -27,6 +27,7 @@ interface MollieBalancesResponse {
 export const mollieBillingAdapter: BillingSyncAdapter = {
   platform: "mollie",
   label: "Mollie",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

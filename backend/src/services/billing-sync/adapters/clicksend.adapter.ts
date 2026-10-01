@@ -18,6 +18,7 @@ interface ClickSendAccountResponse {
 export const clicksendBillingAdapter: BillingSyncAdapter = {
   platform: "clicksend",
   label: "ClickSend",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

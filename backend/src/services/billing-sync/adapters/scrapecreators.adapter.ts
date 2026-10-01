@@ -19,6 +19,7 @@ interface ScrapeCreatorsCreditBalanceResponse {
 export const scrapecreatorsBillingAdapter: BillingSyncAdapter = {
   platform: "scrapecreators",
   label: "ScrapeCreators",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

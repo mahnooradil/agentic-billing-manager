@@ -25,6 +25,7 @@ interface OpenAiCostsResponse {
 export const openaiBillingAdapter: BillingSyncAdapter = {
   platform: "openai",
   label: "OpenAI",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

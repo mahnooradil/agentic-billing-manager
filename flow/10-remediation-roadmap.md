@@ -17,7 +17,7 @@ reconciliation of everything scattered across the other nine files into one plac
 | 1 | Production integrity & auth hardening | 1.5 | none | Index migration, OTP fixes, rate limiting, `trust proxy`, session/OTP TTLs, CI setup (`flow/00` #1–2, `flow/02` items 15/16-ish, `flow/03` items 24/27-29) |
 | 2 | Ingestion cost & completeness | 1.5 | WP-1 | `ProcessedMessage` store, watermark-advance fix, reconnect fix, `lastSyncError` surfaced (`flow/00` #3, `flow/02` item 6/16, `flow/05` items 34/37) |
 | 3 | Analytics correctness | 0.8 | WP-1, ∥ WP-2 | Remove mixed-currency sum, compound indexes, server-side pagination (`flow/02` items 19/20/21, `flow/08` item 42) |
-| 4 | **Domain model rebuild** | 3.0 | WP-1 | `Vendor`, `BillingEvent`, `UsageAccrual`, reshaped `Billing`, `deriveStatus()` (`flow/05`'s full target schema + state machine) — **highest risk, time-box with a mid-point review** |
+| 4 | **Domain model rebuild** | 3.0 | WP-1 | ⚠️ **Mostly done.** `Vendor` + `BillingEvent` + `deriveStatus()` done 2026-09-26 (tasks #7/#8 below). `UsageAccrual` model + the 129 billing-sync adapters' `Billing`-vs-`UsageAccrual` split done 2026-09-30/2026-10-01 — see `flow/00-executive-summary.md` item #9d. **Still not done:** the actual cut-over of `derivedStatus` to become the real `status` field (shipped behind a flag on purpose, task #8's own explicit scope boundary), and all frontend trust-surface UI (WP-5) — `UsageAccrual` has no UI at all yet. |
 | 5 | Trust surfaces | 1.5 | WP-4 | Origin badges, confidence, "view source email," new dashboard hierarchy (`flow/08` items 45/46/47) |
 | 6 | Recall: attachments & providers | 2.5 | WP-2, WP-4 | PDF parsing, direct Gmail/Outlook OAuth (`flow/05` item 38) — **same reasoning already applied to the Slack redesign** (`flow/extra-01`) |
 | 7 | Agent architecture | 2.0 | WP-4, ∥ WP-6 | ⚠️ **Partially done (2026-10-01)** — `MAX_ITERATIONS=8` (two-tier, soft+hard) and `AgentSession` re-keyed to `(user, organization)` are both ✅ done, see `flow/00-executive-summary.md` item #9c. Intent router and the `getOrganizationIdForUser` consolidation are explicitly **not** done — deferred with reasoning in `flow/01` item #5 (deliberately kept separate from `req.organization` since every real call site has no HTTP request in scope at all). Config-in-repo: unaddressed. |
@@ -128,7 +128,8 @@ already found:
    (ProcessedMessage + the existing chronological-commit sort), not part of this task's own scope. Live
    database indexes applied. **Not done** (explicitly out of scope, not a gap): no backfill for existing
    legacy records (fabricating history would be guessing, not evidence); `billing-sync/sync-engine.ts`
-   (129 adapters) not wired (separate, already-tracked `Billing`-vs-`UsageAccrual` issue); the actual
+   (129 adapters) not wired (separate, already-tracked `Billing`-vs-`UsageAccrual` issue — **this gap
+   is now closed, see item #9d in `flow/00-executive-summary.md`, done 2026-10-01**); the actual
    cut-over to making `derivedStatus` the real `status` is its own future decision, not this task's.
 9. ✅ **DONE (2026-09-26) — Prompt-injection defense + sender verification.** Full detail in
    `flow/00-executive-summary.md` item #9b: a system prompt + `<email>` delimiter framing added to

@@ -20,6 +20,7 @@ interface TremendousFundingSourceResponse {
 export const tremendousBillingAdapter: BillingSyncAdapter = {
   platform: "tremendous",
   label: "Tremendous",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

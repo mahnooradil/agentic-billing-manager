@@ -18,6 +18,7 @@ interface VultrAccountResponse {
 export const vultrBillingAdapter: BillingSyncAdapter = {
   platform: "vultr",
   label: "Vultr",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

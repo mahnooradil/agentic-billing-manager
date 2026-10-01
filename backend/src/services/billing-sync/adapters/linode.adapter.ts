@@ -16,6 +16,7 @@ interface LinodeAccountResponse {
 export const linodeBillingAdapter: BillingSyncAdapter = {
   platform: "linode",
   label: "Linode",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

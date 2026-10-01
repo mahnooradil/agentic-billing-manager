@@ -24,6 +24,7 @@ interface ScrapflyAccountResponse {
 export const scrapflyBillingAdapter: BillingSyncAdapter = {
   platform: "scrapfly",
   label: "Scrapfly",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

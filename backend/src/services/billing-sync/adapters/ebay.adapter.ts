@@ -23,6 +23,7 @@ interface EbayFundsSummaryResponse {
 export const ebayBillingAdapter: BillingSyncAdapter = {
   platform: "ebay",
   label: "eBay",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

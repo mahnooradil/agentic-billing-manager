@@ -17,6 +17,7 @@ interface VonageBalanceResponse {
 export const vonageBillingAdapter: BillingSyncAdapter = {
   platform: "vonage",
   label: "Vonage",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

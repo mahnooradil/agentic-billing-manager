@@ -19,6 +19,7 @@ interface TelnyxBalanceResponse {
 export const telnyxBillingAdapter: BillingSyncAdapter = {
   platform: "telnyx",
   label: "Telnyx",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

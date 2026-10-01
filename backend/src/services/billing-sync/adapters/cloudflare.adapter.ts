@@ -24,6 +24,7 @@ interface CloudflareUsageResponse {
 export const cloudflareBillingAdapter: BillingSyncAdapter = {
   platform: "cloudflare_api_key",
   label: "Cloudflare",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

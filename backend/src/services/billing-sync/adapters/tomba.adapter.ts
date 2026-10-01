@@ -23,6 +23,7 @@ interface TombaMeResponse {
 export const tombaBillingAdapter: BillingSyncAdapter = {
   platform: "tomba",
   label: "Tomba",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -15,6 +15,7 @@ interface RunwayOrganizationResponse {
 export const runwayBillingAdapter: BillingSyncAdapter = {
   platform: "runway",
   label: "Runway",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -16,6 +16,7 @@ interface SerpApiAccountResponse {
 export const serpapiBillingAdapter: BillingSyncAdapter = {
   platform: "serpapi",
   label: "SerpApi",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

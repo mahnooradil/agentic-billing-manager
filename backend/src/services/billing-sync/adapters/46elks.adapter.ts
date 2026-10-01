@@ -17,6 +17,7 @@ interface FortySixElksAccountResponse {
 export const fortySixElksBillingAdapter: BillingSyncAdapter = {
   platform: "46elks",
   label: "46elks",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

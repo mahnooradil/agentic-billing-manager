@@ -17,6 +17,7 @@ interface ZyteStatsResponse {
 export const zyteBillingAdapter: BillingSyncAdapter = {
   platform: "zyte_api",
   label: "Zyte API",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

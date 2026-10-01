@@ -19,6 +19,7 @@ interface EmailVerifyIoBalanceResponse {
 export const emailverifyIoBillingAdapter: BillingSyncAdapter = {
   platform: "emailverify_io",
   label: "EmailVerify.io",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

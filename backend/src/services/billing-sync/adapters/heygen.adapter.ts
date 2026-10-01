@@ -15,6 +15,7 @@ interface HeyGenRemainingQuotaResponse {
 export const heygenBillingAdapter: BillingSyncAdapter = {
   platform: "heygen",
   label: "HeyGen",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

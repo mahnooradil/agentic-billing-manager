@@ -20,11 +20,27 @@ export interface NormalizedBillingRecord {
   notes?: string;
 }
 
+/**
+ * What this adapter's records actually represent (WP-4's domain-model
+ * finding, audit census confirmed exactly: of 129 adapters, 124 hardcode
+ * `status: "Pending"` forever and 122 stamp `billingDate` as the sync time
+ * rather than a real billing date — they model month-to-date usage/balance,
+ * not a discrete invoice. Only 5 (gocardless, heroku, mongodb, northflank,
+ * snapchat-marketing) genuinely derive a status from the provider's own
+ * data). `"invoice"` records still go to the `Billing` collection exactly
+ * as before; `"usage_accrual"` records go to the new, separate
+ * `UsageAccrual` collection instead — see billing-sync/sync-engine.ts.
+ * This is a classification of the DATA SHAPE this specific provider
+ * exposes, not a quality judgment on the adapter itself. */
+export type BillingSyncRecordKind = "invoice" | "usage_accrual";
+
 export interface BillingSyncAdapter {
   /** Must match the Pipedream catalog `nameSlug` for this platform. */
   platform: string;
   /** Human label for logs/UI. */
   label: string;
+  /** See `BillingSyncRecordKind`'s own docstring. */
+  kind: BillingSyncRecordKind;
   /**
    * Fetches this connection's current billing data via the Pipedream proxy.
    * `pipedreamAccountId` is the connected account to act on behalf of;

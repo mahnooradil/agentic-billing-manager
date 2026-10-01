@@ -18,6 +18,7 @@ interface ElevenLabsSubscriptionResponse {
 export const elevenlabsBillingAdapter: BillingSyncAdapter = {
   platform: "elevenlabs",
   label: "ElevenLabs",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

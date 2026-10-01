@@ -19,6 +19,7 @@ interface Ones2uBalanceResponse {
 export const ones2uBillingAdapter: BillingSyncAdapter = {
   platform: "ones2u",
   label: "1S2U",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

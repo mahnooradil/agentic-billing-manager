@@ -22,6 +22,7 @@ interface GrafanaBilledUsageResponse {
 export const grafanaBillingAdapter: BillingSyncAdapter = {
   platform: "grafana",
   label: "Grafana Cloud",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

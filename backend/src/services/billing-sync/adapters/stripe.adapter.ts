@@ -23,6 +23,7 @@ interface StripeBalanceResponse {
 export const stripeBillingAdapter: BillingSyncAdapter = {
   platform: "stripe",
   label: "Stripe",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

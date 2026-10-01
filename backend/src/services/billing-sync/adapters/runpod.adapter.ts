@@ -30,6 +30,7 @@ function extractRecords(data: RunPodBillingResponse | null): RunPodBillingRecord
 export const runpodBillingAdapter: BillingSyncAdapter = {
   platform: "runpod",
   label: "RunPod",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

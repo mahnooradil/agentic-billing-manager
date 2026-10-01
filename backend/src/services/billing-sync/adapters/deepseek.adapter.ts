@@ -20,6 +20,7 @@ interface DeepSeekBalanceResponse {
 export const deepseekBillingAdapter: BillingSyncAdapter = {
   platform: "deepseek",
   label: "DeepSeek",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

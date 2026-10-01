@@ -18,6 +18,7 @@ interface ScreenshotOneUsageResponse {
 export const screenshotoneBillingAdapter: BillingSyncAdapter = {
   platform: "screenshotone",
   label: "ScreenshotOne",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

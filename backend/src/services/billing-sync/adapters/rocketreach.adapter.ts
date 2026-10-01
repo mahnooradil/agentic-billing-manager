@@ -19,6 +19,7 @@ interface RocketReachAccountResponse {
 export const rocketreachBillingAdapter: BillingSyncAdapter = {
   platform: "rocketreach",
   label: "RocketReach",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

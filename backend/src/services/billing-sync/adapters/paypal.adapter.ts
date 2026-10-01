@@ -25,6 +25,7 @@ interface PayPalBalancesResponse {
 export const paypalBillingAdapter: BillingSyncAdapter = {
   platform: "paypal",
   label: "PayPal",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

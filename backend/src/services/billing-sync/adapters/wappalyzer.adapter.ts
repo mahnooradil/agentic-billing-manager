@@ -19,6 +19,7 @@ interface WappalyzerCreditsBalanceResponse {
 export const wappalyzerBillingAdapter: BillingSyncAdapter = {
   platform: "wappalyzer",
   label: "Wappalyzer",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -19,6 +19,7 @@ interface ScrapeOpsUsageResponse {
 export const scrapeopsBillingAdapter: BillingSyncAdapter = {
   platform: "scrapeops",
   label: "ScrapeOps",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

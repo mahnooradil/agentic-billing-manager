@@ -18,6 +18,7 @@ interface PerplexityUsageResponse {
 export const perplexityBillingAdapter: BillingSyncAdapter = {
   platform: "perplexity",
   label: "Perplexity",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -18,6 +18,7 @@ interface WebScrapingAiAccountResponse {
 export const webscrapingAiBillingAdapter: BillingSyncAdapter = {
   platform: "webscraping_ai",
   label: "WebScraping.AI",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

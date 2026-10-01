@@ -15,6 +15,7 @@ interface HunterAccountResponse {
 export const hunterBillingAdapter: BillingSyncAdapter = {
   platform: "hunter",
   label: "Hunter",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

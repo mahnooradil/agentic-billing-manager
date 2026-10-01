@@ -283,3 +283,11 @@ export function getBillingSyncAdapter(platform: string): BillingSyncAdapter | un
 export function hasBillingSyncAdapter(platform: string): boolean {
   return Boolean(getBillingSyncAdapter(platform));
 }
+
+/** Every registered adapter — used by the WP-4 census test (guards against
+ *  a future adapter being added with no `kind` classification, or an
+ *  existing one's classification silently drifting) and any future
+ *  introspection need (e.g. an admin view of sync coverage). */
+export function listBillingSyncAdapters(): BillingSyncAdapter[] {
+  return Object.values(adapters);
+}

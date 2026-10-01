@@ -16,6 +16,7 @@ interface ApifyMonthlyUsageResponse {
 export const apifyBillingAdapter: BillingSyncAdapter = {
   platform: "apify",
   label: "Apify",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -16,6 +16,7 @@ interface PrintNodeWhoamiResponse {
 export const printnodeBillingAdapter: BillingSyncAdapter = {
   platform: "printnode",
   label: "PrintNode",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

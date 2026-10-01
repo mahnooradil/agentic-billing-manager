@@ -32,6 +32,7 @@ function statusFor(status: string | undefined): "Pending" | "Paid" | "Overdue" {
 export const gocardlessBillingAdapter: BillingSyncAdapter = {
   platform: "gocardless",
   label: "GoCardless",
+  kind: "invoice",
 
   async fetchRecords(
     externalUserId,

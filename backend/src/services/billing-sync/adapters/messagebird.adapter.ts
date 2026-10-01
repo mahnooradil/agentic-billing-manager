@@ -18,6 +18,7 @@ interface MessageBirdBalanceResponse {
 export const messagebirdBillingAdapter: BillingSyncAdapter = {
   platform: "messagebird",
   label: "Bird (MessageBird)",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

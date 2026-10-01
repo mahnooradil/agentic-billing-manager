@@ -22,6 +22,7 @@ interface EtherscanApiLimitResponse {
 export const etherscanBillingAdapter: BillingSyncAdapter = {
   platform: "ethereum",
   label: "Etherscan",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

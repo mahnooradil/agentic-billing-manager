@@ -18,6 +18,7 @@ interface UpCloudAccountResponse {
 export const upcloudBillingAdapter: BillingSyncAdapter = {
   platform: "upcloud",
   label: "UpCloud",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

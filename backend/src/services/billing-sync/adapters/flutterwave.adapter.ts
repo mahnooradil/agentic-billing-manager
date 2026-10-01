@@ -21,6 +21,7 @@ interface FlutterwaveBalancesResponse {
 export const flutterwaveBillingAdapter: BillingSyncAdapter = {
   platform: "flutterwave",
   label: "Flutterwave",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

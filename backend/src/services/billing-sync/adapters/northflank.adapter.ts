@@ -33,6 +33,7 @@ function statusFor(status: string | undefined): "Pending" | "Paid" | "Overdue" {
 export const northflankBillingAdapter: BillingSyncAdapter = {
   platform: "northflank",
   label: "Northflank",
+  kind: "invoice",
 
   async fetchRecords(
     externalUserId,

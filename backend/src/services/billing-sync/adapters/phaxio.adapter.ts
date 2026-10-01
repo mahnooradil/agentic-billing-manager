@@ -16,6 +16,7 @@ interface PhaxioAccountStatusResponse {
 export const phaxioBillingAdapter: BillingSyncAdapter = {
   platform: "phaxio",
   label: "Phaxio",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -19,6 +19,7 @@ interface SerpdogAccountInfoResponse {
 export const serpdogBillingAdapter: BillingSyncAdapter = {
   platform: "serpdog",
   label: "Serpdog",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -18,6 +18,7 @@ interface AimlApiBalanceResponse {
 export const aimlApiBillingAdapter: BillingSyncAdapter = {
   platform: "aiml_api",
   label: "AI/ML API",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

@@ -26,6 +26,7 @@ interface DeepgramBalancesResponse {
 export const deepgramBillingAdapter: BillingSyncAdapter = {
   platform: "deepgram",
   label: "Deepgram",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,

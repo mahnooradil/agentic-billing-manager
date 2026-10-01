@@ -17,6 +17,7 @@ interface InfobipBalanceResponse {
 export const infobipBillingAdapter: BillingSyncAdapter = {
   platform: "infobip",
   label: "Infobip",
+  kind: "usage_accrual",
 
   async fetchRecords(
     externalUserId,
