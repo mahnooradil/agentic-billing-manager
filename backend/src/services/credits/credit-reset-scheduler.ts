@@ -50,9 +50,10 @@ async function runOnce(): Promise<void> {
         ? new Date(organization.lastCreditResetAt.getTime() + cycleDays * DAY_MS)
         : null;
       // An org never reset before is always due; otherwise only once ITS
-      // OWN plan's cycle length has actually elapsed (a Pro/Business org
-      // caught by the rough 30-day pre-filter but not yet at its 365-day
-      // mark is skipped here, not reset early).
+      // OWN plan's cycle length has actually elapsed — every plan is 30
+      // days now (see config/credits.ts), but this still reads each org's
+      // own cycle length rather than assuming 30, so a future plan with a
+      // different cycle is never reset early.
       if (dueAt && dueAt.getTime() > Date.now()) continue;
 
       const allowance = CREDIT_ALLOWANCE_BY_PLAN[organization.planTier];

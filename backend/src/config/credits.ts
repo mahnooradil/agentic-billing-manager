@@ -23,34 +23,52 @@ export const STARTING_CREDITS = 100;
  * plan's ENTIRE allowance is used in one cycle, the real Anthropic cost
  * stays safely below what that cycle's subscription revenue covers:
  *
- *   Free:     100 credits  → worst case $2/mo   — plan price $0    (bounded acquisition cost)
- *   Pro:     4000 credits  → worst case $80/yr  — plan price $180/yr (12 × $15) — ~56% margin even at full use
- *   Business: 12000 credits → worst case $240/yr — plan price $588/yr (12 × $49) — ~59% margin even at full use
+ *   Free:     100 credits/mo → worst case $2/mo  — plan price $0/mo  (bounded acquisition cost)
+ *   Pro:      333 credits/mo → worst case $6.7/mo — plan price $15/mo — ~55% margin even at full use
+ *   Business: 1000 credits/mo → worst case $20/mo — plan price $49/mo — ~59% margin even at full use
  *
  * Typical real usage (see the usage estimate this was derived from) is far
  * below these numbers — a normal user never gets near the ceiling; it only
  * bites someone who is genuinely using the AI features far beyond typical
- * patterns. Free resets on a short (monthly) cycle since it's a running
- * cost with no revenue behind it; Pro/Business get one allowance for the
- * WHOLE cycle length below (no monthly top-up) — see
- * `CREDIT_CYCLE_DAYS_BY_PLAN`. Once exhausted mid-cycle, the account simply
- * waits for the next cycle reset, or buys more credits separately (once
- * that purchase flow exists) — there is no automatic top-up.
+ * patterns.
+ *
+ * Every plan now resets MONTHLY (see `CREDIT_CYCLE_DAYS_BY_PLAN`) — Pro and
+ * Business used to get one lump allowance for a full 365-day cycle (4000 /
+ * 12000 credits respectively). The audit (CLAUDE.md §10.3/§10.4,
+ * docs/audit/03-COST-AND-UNIT-ECONOMICS.md §6, CR-012) flagged this as a
+ * real bug: a paid subscription bills monthly, but its AI allowance only
+ * renewed once a year, so a customer who exhausted their credits early
+ * (e.g. the email-sync re-extraction bug, since fixed — see
+ * services/email-sync's ProcessedMessage dedup) was left with a dead
+ * product for up to 11.5 months with no way to buy more credits at the
+ * time. The fix here is NOT "give them the same 4000/12000 every month" —
+ * that would blow the margin math above 12×. It's the exact same annual
+ * total, divided into 12 monthly installments, so a customer regains a
+ * fair-use ceiling every 30 days instead of once a year, at the identical
+ * overall cost ratio already decided above.
+ *
+ * Once exhausted mid-cycle, the account simply waits for the next cycle
+ * reset (now at most 30 days away for every tier, not 365), or buys more
+ * credits separately via the "Buy more credits" Stripe checkout flow
+ * (config/credit-packages.ts) — there is no automatic top-up.
  */
 export const CREDIT_ALLOWANCE_BY_PLAN: Record<PlanTier, number> = {
   Free: 100,
-  Pro: 4000,
-  Business: 12000,
+  Pro: 333,
+  Business: 1000,
 };
 
-/** How many days one credit cycle lasts, per plan. Free resets often (it's
- *  an ongoing cost with no revenue behind it); paid plans get one allowance
- *  for the whole year, matching the "your subscription is locked in and
- *  doesn't expire mid-cycle" framing used for the plan itself. */
+/** How many days one credit cycle lasts, per plan. Every plan resets
+ *  monthly — matches each plan's own Stripe billing cycle (subscriptions
+ *  renew monthly, see services/payments/stripe-subscription.service.ts), so
+ *  a customer's AI allowance refreshes on the same cadence they're actually
+ *  paying on, not once a year. See `CREDIT_ALLOWANCE_BY_PLAN`'s docstring
+ *  above for why Pro/Business's per-cycle numbers were resized, not just
+ *  the cycle length. */
 export const CREDIT_CYCLE_DAYS_BY_PLAN: Record<PlanTier, number> = {
   Free: 30,
-  Pro: 365,
-  Business: 365,
+  Pro: 30,
+  Business: 30,
 };
 
 /** Real-money value backing one credit, set above the actual per-call

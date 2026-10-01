@@ -685,6 +685,47 @@ the document cites, not assumed from the document text.
     place) and instead points at `CLAUDE.md` §8/§10 as the one place that list is kept current.
     Pure documentation change — no code touched, so no tsc/lint/build/test verification applies.
 
+12. ✅ **DONE (2026-10-01) — Credit-cycle bug (CR-012): Pro/Business now renew their AI allowance
+    monthly, not once a year.** `config/credits.ts`'s `CREDIT_CYCLE_DAYS_BY_PLAN` was `{Free: 30,
+    Pro: 365, Business: 365}` — a Pro/Business subscription bills monthly via Stripe but its AI
+    allowance only refreshed once a year, so a customer who exhausted it early (the now-fixed
+    email-sync re-extraction bug being the exact scenario the audit traced — `docs/audit/03-COST-
+    AND-UNIT-ECONOMICS.md` §3/§6, `CLAUDE.md` §10.3/§10.4) was left with a dead product for up to
+    11.5 months with no purchase flow to buy more at the time (a purchase flow now exists —
+    `config/credit-packages.ts` — but a customer still shouldn't have to use it to cover a bug they
+    didn't cause).
+    - `CREDIT_CYCLE_DAYS_BY_PLAN` is now `{Free: 30, Pro: 30, Business: 30}` — every plan resets on
+      the same cadence it's actually billed on. `services/credits/credit-reset-scheduler.ts` needed
+      no logic change at all (it already reads each org's own `cycleDays` dynamically rather than
+      assuming a value) — only a stale comment referencing "the 365-day mark" was corrected.
+    - **Deliberately did NOT just flip the cycle length and leave the per-cycle amount unchanged** —
+      doing that would have given Pro/Business customers their full annual allowance (4000 / 12000
+      credits) EVERY month, a 12× blow-up of the exact margin math `config/credits.ts`'s own
+      docstring had carefully worked out (the audit's §6 "recommended credit model" bundles monthly
+      cycles with an entirely different plan/pricing structure, $29/$99/$299 — that's a separate,
+      not-yet-decided pricing/business call, out of this fix's scope). Instead,
+      `CREDIT_ALLOWANCE_BY_PLAN` was recomputed as the exact same annual total divided into 12
+      monthly installments: Pro 4000→333/mo, Business 12000→1000/mo (Free unchanged at 100/mo, it
+      was already monthly) — same worst-case-cost-vs-plan-price margin ratio as before (~53-59%),
+      just refreshed 12× more often instead of once a year.
+    - Frontend needed no change: `plan-view.tsx`'s `creditsCycleLabel()` already renders `cycleDays
+      === 30` as "month" generically — it was already built to handle this correctly, confirmed by
+      reading the component rather than assumed.
+    - **Live database**: no manual balance correction applied to any existing organization. The
+      scheduler is due-date-driven off each org's own `lastCreditResetAt` — an org that's never been
+      reset is immediately due on the next scheduler tick (within 12h, or ~60s after a deploy) and
+      will pick up the new monthly allowance on its own; an org mid-cycle simply reaches its next
+      30-day mark sooner than the old 365-day mark would have, which is the fix working as intended,
+      not a gap. Consistent with this session's established precedent of not force-backfilling state
+      a background job already self-heals (see item #9c's `AgentSession` orphans).
+
+    **Tested** — new `config/credits.test.ts` (3 new tests, 122 total now passing, confirmed via two
+    consecutive full runs): every plan's cycle is exactly 30 days (fails loudly if a future change
+    reintroduces an annual value for any tier); every plan's worst-case monthly credit cost
+    (`allowance × CREDIT_USD_VALUE`) never exceeds that plan's own monthly price — a standing guard
+    against the exact 12× margin regression this fix was careful to avoid, not just a one-time
+    check. `tsc`/`lint`/`build` clean.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed
