@@ -884,6 +884,53 @@ the document cites, not assumed from the document text.
       confirmed, via two independent read-only `retrieve()` calls. `tsc`/`lint`/`build` clean (`scripts/`
       explicitly linted too, since `npm run lint` only targets `src` by default).
 
+16. ✅ **DONE (2026-10-01) — `crypto.ts` key hardening** (`flow/02` item 22, CLAUDE.md §10.3). Three
+    fixes, exactly as scoped — "require the key, proper KDF, versioned payload":
+    - **`AI_ENCRYPTION_KEY` is now REQUIRED**, not optional. It previously fell back to `JWT_SECRET`
+      when unset (`env.aiEncryptionKey || env.jwtSecret`), meaning two unrelated concerns — signing
+      sessions and encrypting stored third-party credentials — silently shared one secret. New
+      `assertEncryptionKeyConfigured()` (`utils/crypto.ts`) is called from `server.ts` at startup,
+      same "fail loudly before accepting traffic" pattern `assertNoLiveStripeKeyOutsideProduction()`
+      already established for Task 10.
+    - **Bare, unsalted `SHA-256` replaced with HKDF (RFC 5869) + a random salt generated fresh on
+      every single encryption call.** `AI_ENCRYPTION_KEY` is expected to already be a long, random,
+      high-entropy value (same category as `JWT_SECRET`), not a human-chosen password — HKDF is the
+      textbook-correct primitive for stretching an already-high-entropy secret into a derived key;
+      scrypt/bcrypt/argon2 were deliberately NOT used, since those exist specifically to slow down
+      brute-forcing a LOW-entropy human password, which doesn't apply here and would only add real
+      latency to every encrypt/decrypt call (e.g. decrypting a Slack bot token on every chat message)
+      for no actual benefit.
+    - **The stored payload is now versioned** (`"v2.salt.iv.tag.ciphertext"`, all base64 after the
+      version tag) instead of the old unversioned `"iv.tag.ciphertext"` — a future key rotation has
+      somewhere to branch (`v3` could decrypt old `v2` payloads during a transition) instead of
+      needing a flag-day re-encryption migration. **No `v1` migration was needed or attempted**: a
+      live count confirmed `PlatformConnection.credential` and `Organization.slackWorkspace.botToken`
+      were both at 0 documents before this change, so this is a clean format cutover — `decryptSecret`
+      deliberately does NOT accept the old unversioned format at all, rather than quietly carrying a
+      weaker scheme forward "just in case."
+    - `.env.example` and `backend/.env` updated (`AI_ENCRYPTION_KEY` generated fresh via
+      `crypto.randomBytes(32).toString("base64")` for local dev — never printed in full anywhere
+      except once to this session's own scratch generation step, consistent with this session's
+      standing rule against ever pasting a real secret into chat; this one has zero external-account
+      value since nothing but this app's own database depends on it, unlike a Stripe/Anthropic key).
+      `vitest.config.mts` gained a fake test-only value, same convention as its existing
+      `ANTHROPIC_API_KEY`/`JWT_SECRET` entries.
+    - **Live-tested, not just unit-tested**: temporarily blanked `AI_ENCRYPTION_KEY` in `.env` and
+      booted the real server in the foreground — confirmed it exits immediately (`💥 Startup aborted
+      — AI_ENCRYPTION_KEY is not set...`, exit code 1) rather than silently falling back or failing
+      later on first use. Restored the key, killed every stale leftover dev-server process from
+      earlier in this session (10 found via `Get-CimInstance Win32_Process`, all killed), and booted a
+      single fresh instance — confirmed a clean boot (`✅ Database Connected`, `🚀 Backend running`,
+      a real `GET /api/health` returning 200).
+
+    **Tested** — new `crypto.test.ts` (7 new tests, 137 total now passing, two consecutive full
+    runs): round-trip encrypt/decrypt; the payload is versioned AND differs every call even for
+    identical plaintext (salt+iv are fresh every time — the old scheme had no such guarantee); a
+    tampered ciphertext (one byte flipped) is rejected by GCM's own auth tag; a malformed payload
+    (wrong shape) throws a clear `AppError` instead of crashing; an old, unversioned `"iv.tag.
+    ciphertext"`-shaped payload is explicitly rejected, not silently accepted; `assertEncryptionKeyConfigured()`
+    throws when unset and passes once set. `tsc`/`lint`/`build` clean.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

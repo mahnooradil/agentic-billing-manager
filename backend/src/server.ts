@@ -13,6 +13,7 @@ import { startEmailSyncScheduler } from "@/services/email-sync/scheduler";
 import { startCreditResetScheduler } from "@/services/credits/credit-reset-scheduler";
 import { startCreditReconciliationScheduler } from "@/services/credits/credit-reconciliation-scheduler";
 import { assertNoLiveStripeKeyOutsideProduction } from "@/services/payments/stripe-subscription.service";
+import { assertEncryptionKeyConfigured } from "@/utils/crypto";
 
 /**
  * Server bootstrap / entry point.
@@ -34,6 +35,11 @@ async function startServer(): Promise<void> {
     // (Task 10) — a pure config check, no database needed, so it runs
     // before anything else has a chance to touch real money by mistake.
     assertNoLiveStripeKeyOutsideProduction();
+
+    // 0b: refuse to boot without AI_ENCRYPTION_KEY (WP-7 hardening) — same
+    // "fail loudly at startup" reasoning, for the secret that protects every
+    // stored platform credential and Slack bot token.
+    assertEncryptionKeyConfigured();
 
     // 1 + 2: connect to the database before starting Express.
     await connectDatabase();

@@ -29,6 +29,10 @@ export default defineConfig({
       // need one (see ai-invoice-extractor.test.ts); this only exists so
       // `isAiExtractionConfigured()`/`getClient()`'s presence check passes.
       ANTHROPIC_API_KEY: "test-only-anthropic-key-never-used-outside-ci",
+      // Fake — AI_ENCRYPTION_KEY is now REQUIRED (WP-7 hardening, see
+      // utils/crypto.ts); this only exists so `assertEncryptionKeyConfigured()`/
+      // `deriveKey()`'s presence check passes in tests that encrypt/decrypt.
+      AI_ENCRYPTION_KEY: "test-only-encryption-key-never-used-outside-ci",
     },
   },
 });

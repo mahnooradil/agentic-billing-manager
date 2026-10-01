@@ -19,9 +19,12 @@ export const env = {
   jwtSecret: process.env.JWT_SECRET ?? "",
   // Token lifetime, e.g. "1d", "12h", "3600". Falls back to a safe default.
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "1d",
-  // Secret used to encrypt stored third-party API keys (AES-256-GCM). Optional:
-  // falls back to a key derived from JWT_SECRET. Presence validated on first use
-  // (see utils/crypto.ts) so a misconfigured deploy fails with a clear message.
+  // Secret used to derive the AES-256-GCM key that encrypts stored third-party
+  // secrets (platform API keys, Slack bot tokens). REQUIRED — no fallback to
+  // JWT_SECRET (that would mean two unrelated concerns, signing sessions and
+  // encrypting stored credentials, trust the same secret). Presence enforced
+  // at startup, not just on first use — see utils/crypto.ts's
+  // `assertEncryptionKeyConfigured()`, called from server.ts.
   aiEncryptionKey: process.env.AI_ENCRYPTION_KEY ?? "",
   // Pipedream Connect (F9.2) — managed OAuth for 2,700+ providers. When these
   // are unset, the Pipedream features report "not configured" (never faked).
