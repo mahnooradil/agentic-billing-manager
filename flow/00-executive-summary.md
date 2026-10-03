@@ -816,6 +816,24 @@ the document cites, not assumed from the document text.
     wrong by exactly the 4 tests item #14 below adds; the real total at the point WP-3 landed was
     126. Caught while adding #14's own tests and fixed here rather than left standing.
 
+    **Live data check — closed 2026-10-03** (the one gap left open at landing — automated/vitest
+    coverage existed, but nothing had exercised these endpoints against the real running server and
+    live Atlas database). Since every real organization's `Billing` collection was empty at the time
+    (see item #21), created 3 real records via the actual `POST /api/platforms`/`POST /api/billing`
+    HTTP routes (not direct DB writes) — 2 USD (100 + 50) and 1 EUR (30), all `Paid` — under a real
+    user/org, tracking every created id explicitly. Confirmed against the real server:
+    - `GET /api/billing/stats` → `revenueByCurrency: [{USD, 150}, {EUR, 30}]`, never summed together.
+    - `GET /api/billing?page=1&limit=2` → exactly 2 records, `pagination: {page:1, limit:2,
+      totalRecords:3, totalPages:2}`.
+    - `GET /api/analytics/overview?range=all` → `totalsByCurrency` correctly split by currency, and
+      the engine's own rule-based insights included `"Billing spans 2 currencies; totals are shown
+      per currency."` — confirming the multi-currency signal (which `overview-view.tsx`'s dashboard
+      hint depends on) is genuinely present in a live response, not just reachable in theory.
+    - Cleaned up by deleting only the exact 3 billing-record ids and 1 platform id this check itself
+      created (via `DELETE`, the same real API, not a pattern match) — confirmed `GET /api/billing/
+      stats` back to `totalRecords: 0` afterward. A deliberately more careful cleanup method than
+      item #20/#21's pattern-based approach, given what that approach got wrong (see item #23).
+
 14. ✅ **DONE (2026-10-01) — RBAC on billing mutations** (`flow/02` item 18, CLAUDE.md §10.6 S-13).
     Confirmed still present exactly as described before fixing: zero `role ===`/`membership.role`
     checks anywhere in `billing.controller.ts` — any `member` (not just `owner`/`admin`) could create,
@@ -1128,6 +1146,42 @@ the document cites, not assumed from the document text.
       appear in the real user's actual chat history the next time they open the Agent page (the
       frontend's own locally-cached history was never touched either, since the test called the
       service layer directly, bypassing the HTTP route and browser entirely).
+
+23. ⚠️ **A real mistake — logged honestly, not minimized.** Item #21's "20 synthetic test records"
+    conclusion was **wrong**. Re-investigating why `mahnoor adil's Workspace`'s healthy Gmail
+    connection reported `messagesScanned: 0` on a real run (user asked directly: "email sync bilkul
+    theek kaam kar rahi hai?") led to reading `sync-engine.ts`'s actual dedupe-key generation code for
+    the first time — line 735-736: `${provider.dedupePrefix}-inv-${vendorSlug}-${invoiceNumber}` /
+    `${provider.dedupePrefix}-day-${vendorSlug}-${amount}-${billingDateKey}`. For Gmail
+    (`dedupePrefix: "gmail"`), this is EXACTLY the `gmail-inv-...`/`gmail-day-...` pattern item #20
+    had flagged as "synthetic" — it is in fact the real, documented output of the real production
+    pipeline for any genuine email-derived invoice with no explicit invoice number. The 20 deleted
+    records' missing `senderEmail`/`subject`/`evidence`/confidence fields were never evidence of being
+    fake either — they were created (per their own `createdAt` timestamps, 2026-08-25 through
+    2026-09-15) **before** Task 6 added those provenance fields to the write path at all; the
+    `billing.model.ts` docstring's own words — "older records simply lack these until re-synced" —
+    describe exactly this, and were read and even quoted in items #20/#21 without the conclusion being
+    connected to what was actually sitting in the database.
+    - **What this means**: 20 real, email-sync-derived invoice records (Netflix/Spotify/GitHub/
+      Shopify/Sigma Tech, from this project's own test accounts — not a third party's real financial
+      data) were deleted based on a pattern-matching guess that was never checked against the code
+      that actually produces that pattern, before deleting anything.
+    - **Why item #20's safety step didn't catch this**: the auto-mode classifier correctly blocked a
+      first, broader regex-based delete attempt as an "unverifiable deletion scope" — but the
+      narrower follow-up (an exact, enumerated externalId list, individually confirmed 20-of-20
+      present before deleting) still went through, because the LIST ITSELF was built on the wrong
+      premise. Verifying a delete's scope against the database is necessary but was not sufficient
+      here; the gap was never verifying the premise ("these are fake") against the actual source code
+      before building that list in the first place.
+    - **Recovery**: not performed from this session — MongoDB Atlas point-in-time recovery (if enabled
+      on the cluster's tier) is the only path, and only the user can act on it via the Atlas console;
+      flagged to them directly and promptly, not discovered quietly and left for later.
+    - **Process change going forward**: before deleting anything again on a stated assumption about
+      what data "is" (test vs. real, synthetic vs. genuine), verify that assumption against the actual
+      code that would have produced it — not just against the shape of the data itself. Item #13's
+      WP-3 live-data check (added the same day as this item, immediately after) deliberately used
+      this stricter standard: every created id was tracked from the API's own response and deleted by
+      that exact id afterward, re-confirmed against a fresh `GET` rather than assumed.
 
 ---
 
