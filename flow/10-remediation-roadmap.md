@@ -144,12 +144,15 @@ already found:
    sanitizer (one genuinely caught and fixed a real gap: "disregard THE above" didn't match the
    original pattern), a mocked-Anthropic-client test proving the actual request sent has the delimiter
    framing (not just that a string exists somewhere), and full SPF/DKIM/DMARC/confidence-penalty
-   coverage. **One acceptance criterion could not be empirically verified**: a live call to the real
-   Anthropic API with a deliberately adversarial email (to confirm the MODEL itself resists the
-   injection, not just that the request is shaped correctly) failed with "credit balance too low" —
-   an account-level constraint, not a code issue. What's verified is the request-shape tests above;
-   the model's own behavior against a live adversarial email is unconfirmed until the account has
-   credit again — flagged honestly rather than assumed.
+   coverage. **The one acceptance criterion that couldn't be empirically verified at the time — a live
+   call to the real Anthropic API with a deliberately adversarial email — is now ✅ done (2026-10-03)**,
+   once the account's Anthropic-side credit-balance block resolved itself. Two real attacks run
+   directly against the production `extractInvoiceFields` function (real Haiku 4.5, not mocked): a
+   fabricated "$50,000 Paid AWS invoice" instruction embedded in a non-invoice email was rejected
+   outright (`isBillingEmail: false`, every field null); a status-flip + customerName-corruption
+   injection hidden in a genuine-looking $142.50 invoice was ignored, with the real fields (amount,
+   vendor, Pending status) extracted correctly. See `flow/00-executive-summary.md` item #9 for the
+   full detail.
 10. ✅ **DONE (2026-09-29) — Stripe, minimum production-grade.** Full detail in
     `flow/00-executive-summary.md` item #4: new `Subscription` model + `stripe-subscription.service.ts`
     (Checkout in subscription mode, webhook-only `planTier` writes, out-of-order tolerance via
