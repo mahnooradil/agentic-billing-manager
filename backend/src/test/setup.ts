@@ -7,18 +7,30 @@
  * Atlas database (`connectDatabase()` in `config/database.ts` is never
  * called here on purpose). Collections are wiped between tests
  * (`afterEach`) so one test's data can never leak into another's.
+ *
+ * A single-node REPLICA SET, not a standalone server — `deleteAccount`
+ * (auth.controller.ts) uses a real multi-document transaction
+ * (`session.withTransaction`), and MongoDB only supports transactions on a
+ * replica set (even a 1-node one) or a sharded cluster, never a standalone
+ * instance. Atlas itself is always a replica set, so this also makes the
+ * test environment a closer match to production, not just a transaction
+ * workaround.
  */
 import mongoose from "mongoose";
-import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 import { afterAll, afterEach, beforeAll } from "vitest";
 
-let mongod: MongoMemoryServer;
+let mongod: MongoMemoryReplSet;
 
 beforeAll(async () => {
-  // A longer launch timeout than the library's 10s default — the first run
-  // on a machine downloads/extracts the MongoDB binary, which can take
-  // longer than that alone.
-  mongod = await MongoMemoryServer.create({ instance: { launchTimeout: 120_000 } });
+  // A longer launch timeout than the library's default — the first run on a
+  // machine downloads/extracts the MongoDB binary, and a replica set's own
+  // startup (electing a primary) adds a bit more time than a standalone
+  // instance needed.
+  mongod = await MongoMemoryReplSet.create({
+    replSet: { count: 1 },
+    instanceOpts: [{ launchTimeout: 120_000 }],
+  });
   await mongoose.connect(mongod.getUri(), { autoIndex: true });
 
   // `autoIndex: true` schedules index builds in the background — it does

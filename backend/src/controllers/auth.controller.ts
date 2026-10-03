@@ -6,6 +6,7 @@
  */
 import { createHash, randomInt, randomUUID } from "node:crypto";
 
+import mongoose from "mongoose";
 import { OAuth2Client } from "google-auth-library";
 
 import { env } from "@/config/env";
@@ -19,6 +20,9 @@ import { User, type UserDocument } from "@/models/user.model";
 import { Otp, OTP_TTL_MINUTES, OTP_MAX_ATTEMPTS } from "@/models/otp.model";
 import { UserSettings } from "@/models/user-settings.model";
 import { Billing } from "@/models/billing.model";
+import { BillingEvent } from "@/models/billing-event.model";
+import { UsageAccrual } from "@/models/usage-accrual.model";
+import { Vendor } from "@/models/vendor.model";
 import { Platform } from "@/models/platform.model";
 import { PlatformConnection } from "@/models/platform-connection.model";
 import { Recommendation } from "@/models/recommendation.model";
@@ -27,8 +31,11 @@ import { AgentSession } from "@/models/agent-session.model";
 import { Session, type SessionDocument } from "@/models/session.model";
 import { SupportRequest } from "@/models/support-request.model";
 import { CreditTransaction } from "@/models/credit-transaction.model";
+import { Invitation } from "@/models/invitation.model";
+import { Subscription } from "@/models/subscription.model";
 import { sendOtpEmail } from "@/services/email/resend";
 import { resetAgentSession, resetAllAgentSessionsForUser } from "@/services/agent/managed-agent.service";
+import { cancelActiveSubscription } from "@/services/payments/stripe-subscription.service";
 import { grantCredits } from "@/services/credits/credit-ledger.service";
 import { STARTING_CREDITS } from "@/config/credits";
 import { Membership } from "@/models/membership.model";
@@ -469,6 +476,35 @@ export const updateProfile = asyncHandler(async (req, res) => {
  * removing everyone else first is a deliberate, explicit step, never
  * implicit. For every org where they're just admin/member, they simply
  * leave — that organization's shared data stays intact for the rest.
+ *
+ * WP-12 hardening (flow/03 item 25, CLAUDE.md's own "destructive,
+ * irreversible operation" framing) — two fixes:
+ *   1. The actual DB cascade now runs inside ONE MongoDB transaction
+ *      (`session.withTransaction`). Previously every delete ran concurrently
+ *      via `Promise.all` with no atomicity at all — a failure partway
+ *      through (a network blip, a validation hook, a connection hiccup)
+ *      left a half-deleted account: some collections wiped, others not,
+ *      orphaned `Membership`/`Billing`/etc. rows pointing at an
+ *      `Organization` that may or may not still exist. Now it's all-or-
+ *      nothing: either every row and the `User` document itself are gone,
+ *      or (on any failure) NONE of it is — the account is left exactly as
+ *      it was, not half-deleted.
+ *   2. The cascade's own collection list was incomplete — `BillingEvent`,
+ *      `UsageAccrual`, `Vendor`, `Invitation`, and `Subscription` were never
+ *      cleaned up for a deleted org at all, silently orphaned forever (same
+ *      category of gap `deleteBillingRecord`'s own comment already
+ *      disclosed for a single record's `BillingEvent` history — this is the
+ *      same issue at the whole-organization scale). Added all five.
+ *      Deleting an org with an ACTIVE Stripe subscription without actually
+ *      canceling it at Stripe would keep charging the customer forever with
+ *      no in-app record left to even notice — `cancelActiveSubscription` is
+ *      now called for each owned org (same real external API call
+ *      `updateMyPlan`'s downgrade-to-Free path already makes) before the
+ *      local data is removed.
+ *
+ * External calls (Stripe cancellation, archiving Managed Agents sessions)
+ * deliberately run BEFORE the transaction starts, never inside it — a DB
+ * transaction must never wrap a third-party network call.
  */
 export const deleteAccount = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -499,30 +535,44 @@ export const deleteAccount = asyncHandler(async (req, res) => {
     // Best-effort — a stale/unreachable agent session must not block deletion.
   });
 
-  // Solo-owned orgs (verified above — no other members) take their whole
-  // shared data set with them; every membership (solo-owned org or not)
-  // is removed either way.
-  const orgWideDeletes = ownedOrgs.flatMap((m) => [
-    Billing.deleteMany({ organization: m.organization }),
-    Platform.deleteMany({ organization: m.organization }),
-    PlatformConnection.deleteMany({ organization: m.organization }),
-    Recommendation.deleteMany({ organization: m.organization }),
-    Notification.deleteMany({ organization: m.organization }),
-    CreditTransaction.deleteMany({ organization: m.organization }),
-    Organization.deleteOne({ _id: m.organization }),
-  ]);
+  // Stop real-world billing for every solo-owned org before its local
+  // record disappears — see this function's own docstring for why.
+  const ownedOrgDocs = await Organization.find({
+    _id: { $in: ownedOrgs.map((m) => m.organization) },
+  });
+  await Promise.all(ownedOrgDocs.map((org) => cancelActiveSubscription(org)));
 
-  await Promise.all([
-    ...orgWideDeletes,
-    Membership.deleteMany({ user: user._id }),
-    UserSettings.deleteMany({ user: user._id }),
-    AgentSession.deleteMany({ user: user._id }),
-    Session.deleteMany({ user: user._id }),
-    SupportRequest.deleteMany({ user: user._id }),
-    Otp.deleteMany({ email: user.email }),
-  ]);
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      // Sequential, not Promise.all — operations sharing one session must
+      // run one at a time; this is also what makes the whole thing atomic.
+      for (const m of ownedOrgs) {
+        await Billing.deleteMany({ organization: m.organization }, { session });
+        await BillingEvent.deleteMany({ organization: m.organization }, { session });
+        await UsageAccrual.deleteMany({ organization: m.organization }, { session });
+        await Vendor.deleteMany({ organization: m.organization }, { session });
+        await Platform.deleteMany({ organization: m.organization }, { session });
+        await PlatformConnection.deleteMany({ organization: m.organization }, { session });
+        await Recommendation.deleteMany({ organization: m.organization }, { session });
+        await Notification.deleteMany({ organization: m.organization }, { session });
+        await CreditTransaction.deleteMany({ organization: m.organization }, { session });
+        await Invitation.deleteMany({ organization: m.organization }, { session });
+        await Subscription.deleteMany({ organization: m.organization }, { session });
+        await Organization.deleteOne({ _id: m.organization }, { session });
+      }
+      await Membership.deleteMany({ user: user._id }, { session });
+      await UserSettings.deleteMany({ user: user._id }, { session });
+      await AgentSession.deleteMany({ user: user._id }, { session });
+      await Session.deleteMany({ user: user._id }, { session });
+      await SupportRequest.deleteMany({ user: user._id }, { session });
+      await Otp.deleteMany({ email: user.email }, { session });
+      await User.deleteOne({ _id: user._id }, { session });
+    });
+  } finally {
+    await session.endSession();
+  }
 
-  await user.deleteOne();
   // Otherwise a cached entry could keep answering requests as this
   // now-deleted user for up to the cache TTL. See auth-cache.ts.
   invalidateCachedAuth(user._id.toString());

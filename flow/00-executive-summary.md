@@ -1183,6 +1183,44 @@ the document cites, not assumed from the document text.
       this stricter standard: every created id was tracked from the API's own response and deleted by
       that exact id afterward, re-confirmed against a fresh `GET` rather than assumed.
 
+24. ✅ **DONE (2026-10-04) — `deleteAccount` wrapped in a real transaction + cascade completed**
+    (`flow/03` item 25 — "wrap `deleteAccount`'s cascade in a Mongo transaction... small, isolated,
+    high value given it's a destructive, irreversible operation"). Directly motivated by item #23's
+    mistake earlier the same session — a different kind of data-loss risk, but the same category of
+    concern: an irreversible operation with no safety net.
+    - **Atomicity**: the cascade previously ran every delete concurrently via `Promise.all` with zero
+      transactional guarantee — a failure partway (network blip, validation hook, connection hiccup)
+      left a half-deleted account: some collections wiped, others not, `Membership`/`Billing`/etc.
+      rows pointing at an `Organization` that may or may not still exist. Now wrapped in one real
+      MongoDB transaction (`session.withTransaction`) — confirmed genuinely atomic by a dedicated test
+      that forces one collection's delete to fail mid-cascade and asserts an EARLIER-deleted
+      collection's data is still present afterward (proof the whole transaction rolled back, not that
+      it merely stopped where it failed).
+    - **Completed the cascade's own collection list** — `BillingEvent`, `UsageAccrual`, `Vendor`,
+      `Invitation`, and `Subscription` were never included at all, silently orphaned forever for every
+      deleted organization (the same category of gap `deleteBillingRecord`'s own code comment already
+      disclosed for one record's `BillingEvent` history, just never applied at the whole-org scale).
+      Also now calls `cancelActiveSubscription` for each owned org BEFORE the transaction starts
+      (external Stripe call, deliberately kept outside the DB transaction) — deleting an org with an
+      active Stripe subscription without actually canceling it at Stripe would keep charging the
+      customer forever with no in-app record left to even notice.
+    - **Test infrastructure change required**: MongoDB transactions need a replica set (even a 1-node
+      one) — `mongodb-memory-server`'s default `MongoMemoryServer` is a standalone instance and does
+      not support them. `src/test/setup.ts` switched to `MongoMemoryReplSet` (`replSet: { count: 1 }`)
+      — the entire existing suite (140 tests at the time) re-run against this new engine FIRST, before
+      writing any new test, to confirm the infrastructure switch itself introduced no regression; all
+      140 passed unchanged.
+    - **Tested** — new `delete-account.test.ts` (3 tests, via the real `DELETE /api/auth/account`
+      route): full cascade deletes the user AND every previously-orphaned collection
+      (`BillingEvent`/`Vendor`/`Invitation`/`UserSettings` explicitly asserted, not just the
+      already-covered ones); the existing "blocks when owner has other members" behavior still works
+      and confirms nothing was touched; the new atomicity guarantee itself, as described above. 143
+      total backend tests, two consecutive full runs green. **Also live-tested against the real Atlas
+      database** (not just the in-memory test replica set) — seeded a real throwaway user/org/
+      platform/billing record via the real API-adjacent path, called the real `DELETE /api/auth/
+      account` route, and confirmed via direct queries that every piece of it was actually gone
+      afterward. `tsc`/`lint`/`build` clean.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed
