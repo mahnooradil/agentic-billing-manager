@@ -1221,6 +1221,49 @@ the document cites, not assumed from the document text.
       account` route, and confirmed via direct queries that every piece of it was actually gone
       afterward. `tsc`/`lint`/`build` clean.
 
+25. ✅ **DONE (2026-10-04) — Audit log on financial mutations** (`flow/03` Sec7's "no audit log on
+    financial mutations" — the first real slice of WP-12's product-scope gap list, picked up as the
+    next piece right after item #24 closed the destructive-operation-safety item next to it). Pairs
+    directly with the RBAC fix from earlier this session: now that both `owner` and `admin` can edit/
+    delete any record, there's a real answer to "who did this, and when."
+    - New `AuditLog` model (`organization`, `user`, `action: create|update|delete`,
+      `entityType: "Billing"`, `entityId`, a short human `summary`) — an append-only record of the
+      administrative act itself, deliberately separate from `BillingEvent` (which tracks a record's
+      own payment-lifecycle EVIDENCE to derive its status). The two answer different questions:
+      BillingEvent answers "why is this Paid?"; AuditLog answers "who deleted invoice #123, and
+      when?" — including for a record that no longer exists, which BillingEvent (itself deleted
+      alongside the Billing record) cannot.
+    - Wired into `billing.controller.ts`'s `createBillingRecord`/`updateBillingRecord`/
+      `deleteBillingRecord` (CSV bulk import deliberately NOT included this pass — a batch operation
+      across many new records doesn't fit the model's one-entity-per-entry shape without either a
+      noisy one-row-per-import-line log or a schema change to support batch-level entries; scoped out
+      rather than forced in). A status-changing update gets a specific summary ("Changed status of
+      ... from Pending to Paid"); any other edit gets a generic one ("Edited ..."); a delete captures
+      the record's own fields into the summary BEFORE the delete, since nothing else will be able to
+      afterward.
+    - New `GET /api/audit-log` (owner/admin only, same RBAC boundary as the mutations themselves —
+      a member who can read billing data isn't automatically allowed to see who's been editing it),
+      newest-first, capped at 200, with the acting user populated (`fullName`/`email`).
+    - **Applied the exact lesson from items #21/#23 proactively this time**: `AuditLog` was added to
+      `deleteAccount`'s transactional cascade (item #24, landed minutes earlier in this same session)
+      and to `scripts/sync-indexes.ts`'s model list FROM THE START, rather than being forgotten and
+      discovered as a gap later.
+    - **Tested** — new `audit-log.test.ts` (2 tests, real HTTP routes): a full create→update→delete
+      sequence produces exactly 3 entries in the correct newest-first order with the correct summaries
+      (including the deleted record's entry still naming it correctly); a `member` is rejected (403)
+      from even reading the log. `delete-account.test.ts` extended with an `AuditLog` seed + assertion
+      — confirms the new collection is genuinely included in the transactional cascade, not just
+      added to a list and forgotten again. 145 total backend tests, two consecutive full runs green.
+      **Live-tested against the real Atlas database**: a real create→update→delete→`GET /api/audit-log`
+      sequence produced the exact expected 3 entries with correct summaries and populated user, then
+      a real `DELETE /api/auth/account` call confirmed (via direct Atlas queries) the org and its
+      `AuditLog` entries were both genuinely gone afterward. `tsc`/`lint`/`build` clean. Indexes
+      already live (dev server's own `autoIndex`), confirmed via `sync-indexes.ts`'s check mode —
+      nothing to apply.
+    - **Honest scope note**: this is WP-12's audit-log slice only. Still not done: full data export
+      beyond the existing Billing-only CSV, a retention policy, and privacy copy at the OAuth consent
+      moment — all explicitly separate, not silently folded in.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

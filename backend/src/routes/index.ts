@@ -16,6 +16,7 @@ import creditsRoutes from "@/routes/credits.routes";
 import organizationRoutes from "@/routes/organization.routes";
 import invitationRoutes from "@/routes/invitation.routes";
 import slackRoutes from "@/routes/slack.routes";
+import auditLogRoutes from "@/routes/audit-log.routes";
 
 /**
  * Root API router. All feature routers are mounted here so the
@@ -47,5 +48,6 @@ router.use("/invitations", invitationRoutes);
 // ahead of this router — it needs the raw request body, not the parsed JSON
 // every other route here gets. This only carries the authenticated endpoints.
 router.use("/slack", slackRoutes);
+router.use("/audit-log", auditLogRoutes);
 
 export default router;

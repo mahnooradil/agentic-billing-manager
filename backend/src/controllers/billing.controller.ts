@@ -28,6 +28,7 @@ import {
 } from "@/utils/plan-limits";
 import { importBillingRowSchema, listBillingQuerySchema } from "@/validators/billing.validator";
 import { recordBillingEvent } from "@/services/billing/billing-event-recorder.service";
+import { recordAuditLog, billingAuditSummary } from "@/services/billing/audit-log-recorder.service";
 import type {
   CreateBillingInput,
   UpdateBillingInput,
@@ -362,6 +363,14 @@ export const createBillingRecord = asyncHandler(async (req, res) => {
     user: user._id,
   });
   await billing.populate("platform");
+  await recordAuditLog({
+    organization: organization._id,
+    user: user._id,
+    action: "create",
+    entityType: "Billing",
+    entityId: billing._id,
+    summary: `Created invoice ${billingAuditSummary(billing)}`,
+  });
   emitBusinessDataChanged({
     source: "billing",
     action: "create",
@@ -421,6 +430,18 @@ export const updateBillingRecord = asyncHandler(async (req, res) => {
     });
   }
 
+  await recordAuditLog({
+    organization: organization._id,
+    user: user._id,
+    action: "update",
+    entityType: "Billing",
+    entityId: billing._id,
+    summary:
+      body.status && body.status !== previousStatus
+        ? `Changed status of ${billingAuditSummary(billing)} from ${previousStatus} to ${body.status}`
+        : `Edited ${billingAuditSummary(billing)}`,
+  });
+
   emitBusinessDataChanged({
     source: "billing",
     action: "update",
@@ -444,12 +465,25 @@ export const deleteBillingRecord = asyncHandler(async (req, res) => {
   }
 
   const billing = await findBillingOr404(req.params.id as string, organization._id);
+  // Captured before the delete so AuditLog has something to describe — the
+  // in-memory document still holds every field afterward too (deleteOne()
+  // only issues the DB command, it doesn't clear this object), but reading
+  // it beforehand makes that not something a future refactor could break.
+  const summary = `Deleted invoice ${billingAuditSummary(billing)}`;
   await billing.deleteOne();
   // Best-effort cleanup of this record's BillingEvent history (Task 8) — an
   // orphaned event referencing a deleted Billing id is harmless (nothing
   // reads events except by billing id, which will simply never match
   // again), but there's no reason to leave it around either.
   await BillingEvent.deleteMany({ billing: billing._id }).catch(() => {});
+  await recordAuditLog({
+    organization: organization._id,
+    user: user._id,
+    action: "delete",
+    entityType: "Billing",
+    entityId: billing._id,
+    summary,
+  });
   emitBusinessDataChanged({
     source: "billing",
     action: "delete",

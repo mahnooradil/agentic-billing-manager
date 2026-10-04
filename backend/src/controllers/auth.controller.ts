@@ -33,6 +33,7 @@ import { SupportRequest } from "@/models/support-request.model";
 import { CreditTransaction } from "@/models/credit-transaction.model";
 import { Invitation } from "@/models/invitation.model";
 import { Subscription } from "@/models/subscription.model";
+import { AuditLog } from "@/models/audit-log.model";
 import { sendOtpEmail } from "@/services/email/resend";
 import { resetAgentSession, resetAllAgentSessionsForUser } from "@/services/agent/managed-agent.service";
 import { cancelActiveSubscription } from "@/services/payments/stripe-subscription.service";
@@ -494,7 +495,9 @@ export const updateProfile = asyncHandler(async (req, res) => {
  *      cleaned up for a deleted org at all, silently orphaned forever (same
  *      category of gap `deleteBillingRecord`'s own comment already
  *      disclosed for a single record's `BillingEvent` history — this is the
- *      same issue at the whole-organization scale). Added all five.
+ *      same issue at the whole-organization scale). Added all five, plus the
+ *      new `AuditLog` collection (WP-12, added in this same pass) from the
+ *      very start, rather than repeating the same omission a sixth time.
  *      Deleting an org with an ACTIVE Stripe subscription without actually
  *      canceling it at Stripe would keep charging the customer forever with
  *      no in-app record left to even notice — `cancelActiveSubscription` is
@@ -559,6 +562,7 @@ export const deleteAccount = asyncHandler(async (req, res) => {
         await CreditTransaction.deleteMany({ organization: m.organization }, { session });
         await Invitation.deleteMany({ organization: m.organization }, { session });
         await Subscription.deleteMany({ organization: m.organization }, { session });
+        await AuditLog.deleteMany({ organization: m.organization }, { session });
         await Organization.deleteOne({ _id: m.organization }, { session });
       }
       await Membership.deleteMany({ user: user._id }, { session });

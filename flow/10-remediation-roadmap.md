@@ -25,7 +25,7 @@ reconciliation of everything scattered across the other nine files into one plac
 | 9 | **Payments** | 2.5 | WP-1, ∥ WP-4/5 | Full Stripe subscription/plan-tier architecture (`flow/07`'s §5 gap analysis — **the ~10% not already built**) — **ON HOLD, see note below** |
 | 10 | Scale | 2.0 | WP-2 | Worker process, Redis/BullMQ, distributed locks (`flow/06`'s infra-evolution table — the ~50-customer trigger) |
 | 11 | Learning loop | 2.0 | WP-4, 5, 8 | `SenderProfile`, `ClassificationFeedback`, `UserRule`, nightly job (`flow/04` item 33) |
-| 12 | Privacy & retention | 1.0 | WP-4 | Data export, transactional deletion, audit log, consent copy (`flow/03`'s privacy/retention section) |
+| 12 | Privacy & retention | 1.0 | WP-4 | ⚠️ **Started (2026-10-04).** Transactional deletion ✅ done (item #24 — `deleteAccount` now atomic, cascade completed, live-tested against real Atlas). Audit log on financial mutations ✅ done (item #25 — `AuditLog` model, wired into Billing create/update/delete, owner/admin-only `GET /api/audit-log`, live-tested). **Not done:** full data export beyond the existing Billing CSV, a retention policy, and OAuth-consent-moment privacy copy. |
 
 **Total: 21.5 engineer-weeks → ~26 with a 20% review/unknowns buffer.** ~4 months solo, ~2.5 months
 with two engineers.

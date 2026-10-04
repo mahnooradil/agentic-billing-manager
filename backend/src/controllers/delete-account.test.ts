@@ -13,6 +13,7 @@ import { BillingEvent } from "@/models/billing-event.model";
 import { Vendor } from "@/models/vendor.model";
 import { Invitation } from "@/models/invitation.model";
 import { UserSettings } from "@/models/user-settings.model";
+import { AuditLog } from "@/models/audit-log.model";
 
 const app = createApp();
 
@@ -21,7 +22,8 @@ const app = createApp();
  * cascade inside one MongoDB transaction instead of an unordered
  * `Promise.all`, and the cascade's own collection list was completed
  * (BillingEvent/UsageAccrual/Vendor/Invitation/Subscription were silently
- * orphaned before). Tests go through the real `DELETE /api/auth/account`
+ * orphaned before; AuditLog — added in the same WP-12 pass — was included
+ * from the start). Tests go through the real `DELETE /api/auth/account`
  * route, not the function directly.
  */
 describe("DELETE /api/auth/account (WP-12)", () => {
@@ -74,6 +76,14 @@ describe("DELETE /api/auth/account (WP-12)", () => {
       expiresAt: new Date(Date.now() + 86_400_000),
     });
     await UserSettings.create({ user: user._id });
+    await AuditLog.create({
+      organization: organization._id,
+      user: user._id,
+      action: "create",
+      entityType: "Billing",
+      entityId: billing._id,
+      summary: "Created invoice INV-1 (Acme, 10 USD)",
+    });
 
     return { organization, user, token, platform, billing };
   }
@@ -96,6 +106,7 @@ describe("DELETE /api/auth/account (WP-12)", () => {
     expect(await Vendor.countDocuments({ organization: organization._id })).toBe(0);
     expect(await Invitation.countDocuments({ organization: organization._id })).toBe(0);
     expect(await UserSettings.countDocuments({ user: user._id })).toBe(0);
+    expect(await AuditLog.countDocuments({ organization: organization._id })).toBe(0);
   });
 
   it("blocks deletion when the user owns an org with other members, and changes nothing", async () => {

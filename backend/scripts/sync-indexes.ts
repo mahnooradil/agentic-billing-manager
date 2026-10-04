@@ -54,6 +54,7 @@ import "@/models/vendor.model";
 import "@/models/billing-event.model";
 import "@/models/subscription.model";
 import "@/models/usage-accrual.model";
+import "@/models/audit-log.model";
 
 interface UniqueCheck {
   modelName: string;
@@ -275,6 +276,7 @@ const ALL_MODEL_NAMES = [
   "BillingEvent",
   "Subscription",
   "UsageAccrual",
+  "AuditLog",
 ];
 
 async function main(): Promise<void> {
