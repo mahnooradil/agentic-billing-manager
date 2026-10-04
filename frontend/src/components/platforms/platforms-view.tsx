@@ -21,7 +21,7 @@ import {
 } from "@/lib/email-sync-platforms";
 import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { useAlertState } from "@/hooks/use-alert-state";
-import { usePipedreamConnect } from "@/hooks/use-pipedream-connect";
+import { usePipedreamConnect, type PipedreamConnectTarget } from "@/hooks/use-pipedream-connect";
 import { ApiError } from "@/services/api/client";
 import {
   getPipedreamCatalog,
@@ -33,6 +33,7 @@ import type { PlatformConnection } from "@/services/types/platform-connections";
 import type { BillingRecord } from "@/services/types/billing";
 import { PlatformLogo } from "@/components/platforms/platform-logo";
 import { ConnectPlatformDialog } from "@/components/platforms/connect-platform-dialog";
+import { EmailPrivacyConsentDialog } from "@/components/platforms/email-privacy-consent-dialog";
 import { TrackedSendersDialog } from "@/components/platforms/tracked-senders-dialog";
 import { DisconnectDialog } from "@/components/connections/disconnect-dialog";
 
@@ -103,6 +104,13 @@ function PlatformsViewInner() {
   const [senderDialogTarget, setSenderDialogTarget] = React.useState<PlatformConnection | null>(
     null
   );
+  // WP-12 — the "Connect Gmail"/"Connect Outlook" buttons open this first;
+  // the real Pipedream popup only opens once the user confirms here. Scoped
+  // to these two explicit buttons only — the agent-chat deep-link flow below
+  // already arrives with its own explanatory context from the agent's own
+  // reply, so it isn't re-gated behind a second confirmation here.
+  const [emailConsentTarget, setEmailConsentTarget] =
+    React.useState<PipedreamConnectTarget | null>(null);
 
   React.useEffect(() => {
     let ignore = false;
@@ -250,7 +258,12 @@ function PlatformsViewInner() {
   };
   const handleConnectEmail = (app: (typeof EMAIL_SYNC_APPS)[number]) => {
     setAlert(null);
-    void connect(app);
+    setEmailConsentTarget(app);
+  };
+  const handleEmailConsentContinue = () => {
+    const target = emailConsentTarget;
+    setEmailConsentTarget(null);
+    if (target) void connect(target);
   };
   const handleSendersSaved = (message: string) => {
     setAlert({ type: "success", message });
@@ -508,6 +521,12 @@ function PlatformsViewInner() {
         onOpenChange={(open) => setDisconnect((state) => ({ ...state, open }))}
         connection={disconnect.connection}
         onDisconnected={handleDisconnected}
+      />
+      <EmailPrivacyConsentDialog
+        app={emailConsentTarget}
+        open={emailConsentTarget !== null}
+        onOpenChange={(open) => !open && setEmailConsentTarget(null)}
+        onContinue={handleEmailConsentContinue}
       />
     </PageWrapper>
   );

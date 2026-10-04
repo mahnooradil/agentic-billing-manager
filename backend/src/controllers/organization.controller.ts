@@ -11,9 +11,21 @@ import { sendSuccess } from "@/utils/apiResponse";
 import { toPublicOrganization } from "@/utils/organization.serializer";
 import { toPublicMember } from "@/utils/membership.serializer";
 import { toPublicInvitation } from "@/utils/invitation.serializer";
+import { toPublicPlatform } from "@/utils/platform.serializer";
+import { toPublicPlatformConnection } from "@/utils/platform-connection.serializer";
+import { toPublicBilling } from "@/utils/billing.serializer";
+import { toPublicCreditTransaction } from "@/utils/credit-transaction.serializer";
+import { toPublicAuditLog } from "@/utils/audit-log.serializer";
+import { toPublicUserSettings } from "@/utils/user-settings.serializer";
 import { Membership } from "@/models/membership.model";
 import { Invitation } from "@/models/invitation.model";
 import { User } from "@/models/user.model";
+import { Platform } from "@/models/platform.model";
+import { PlatformConnection } from "@/models/platform-connection.model";
+import { Billing } from "@/models/billing.model";
+import { CreditTransaction } from "@/models/credit-transaction.model";
+import { AuditLog } from "@/models/audit-log.model";
+import { UserSettings } from "@/models/user-settings.model";
 import { cleanupRedundantFallbackWorkspace } from "@/services/organizations/organization-bootstrap.service";
 import { invalidateCachedAuth } from "@/middlewares/auth-cache";
 import type {
@@ -160,4 +172,67 @@ export const removeMember = asyncHandler(async (req, res) => {
   }
 
   sendSuccess(res, 200, "Member removed", { id: target._id.toString() });
+});
+
+/**
+ * GET /api/organization/export — WP-12 (flow/03 Sec7: "no full data export
+ * (CSV-only)"). Every member can export their own organization's data (same
+ * visibility they already have through the normal read endpoints — this
+ * isn't a privilege escalation, just a different shape of the same read
+ * access), as one downloadable JSON file rather than hunting through
+ * several pages' worth of CSV exports one at a time.
+ *
+ * Scoped to what a person would actually recognize as "my data": the
+ * organization record, platforms, platform connections (metadata only —
+ * `toPublicPlatformConnection` never includes the encrypted credential),
+ * billing records (with their full provenance trail), credit transactions,
+ * the audit log, and the requesting user's own settings. Deliberately
+ * EXCLUDES `Vendor` (an internal resolved-identity cache, not something the
+ * user directly created or would recognize as "their" data — the vendor
+ * name/domain a user cares about already travels on each Billing record
+ * itself) and `Notification`/`Recommendation` (ephemeral, system-generated,
+ * not the kind of record a portability request is about).
+ */
+export const exportMyData = asyncHandler(async (req, res) => {
+  const user = req.user;
+  const organization = req.organization;
+  if (!user || !organization) {
+    throw new AppError("Authentication required", 401);
+  }
+
+  const [platforms, connections, billingRecords, creditTransactions, auditLog, userSettings] =
+    await Promise.all([
+      Platform.find({ organization: organization._id }),
+      PlatformConnection.find({ organization: organization._id }),
+      Billing.find({ organization: organization._id })
+        .populate("platform", "name slug")
+        .populate("platformConnection", "displayName platform accountIdentifier")
+        .populate("vendor", "name domain"),
+      CreditTransaction.find({ organization: organization._id }).sort({ createdAt: -1 }),
+      AuditLog.find({ organization: organization._id })
+        .sort({ createdAt: -1 })
+        .populate("user", "fullName email"),
+      UserSettings.findOne({ user: user._id }),
+    ]);
+
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    exportedBy: { id: user._id.toString(), fullName: user.fullName, email: user.email },
+    organization: toPublicOrganization(organization, req.membership?.role ?? "member"),
+    platforms: platforms.map(toPublicPlatform),
+    platformConnections: connections.map(toPublicPlatformConnection),
+    billingRecords: billingRecords.map(toPublicBilling),
+    creditTransactions: creditTransactions.map(toPublicCreditTransaction),
+    auditLog: auditLog.map(toPublicAuditLog),
+    // `toPublicUserSettings` already handles a missing document (returns
+    // the real defaults with a null id), so no `? :` wrapper is needed here.
+    userSettings: toPublicUserSettings(userSettings),
+  };
+
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="billing-manager-export-${new Date().toISOString().slice(0, 10)}.json"`
+  );
+  res.send(JSON.stringify(payload, null, 2));
 });

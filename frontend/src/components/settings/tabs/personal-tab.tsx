@@ -19,6 +19,7 @@ import {
   exportBillingRecords,
   importBillingRecords,
 } from "@/services/billing/billing.service";
+import { exportMyData } from "@/services/organizations/organization.service";
 import { useAuth } from "@/hooks/use-auth";
 import { TextField } from "@/components/settings/settings-fields";
 import { DeleteAccountDialog } from "./delete-account-dialog";
@@ -39,6 +40,8 @@ export function PersonalSettingsTab() {
   const [alert, setAlert] = useAlertState();
   const [exporting, setExporting] = React.useState(false);
   const [exportError, setExportError] = React.useState<string | null>(null);
+  const [exportingAll, setExportingAll] = React.useState(false);
+  const [exportAllError, setExportAllError] = React.useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteDialogKey, setDeleteDialogKey] = React.useState(0);
   const [importing, setImporting] = React.useState(false);
@@ -65,6 +68,20 @@ export function PersonalSettingsTab() {
       );
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleExportAll = async () => {
+    setExportAllError(null);
+    setExportingAll(true);
+    try {
+      await exportMyData();
+    } catch (error) {
+      setExportAllError(
+        error instanceof ApiError ? error.message : "Failed to export your data."
+      );
+    } finally {
+      setExportingAll(false);
     }
   };
 
@@ -159,9 +176,10 @@ export function PersonalSettingsTab() {
       <section className="space-y-4">
         <SectionHeader
           title="Your data"
-          description="Download or bulk-add your billing records."
+          description="Download your data, or bulk-add billing records."
         />
         {exportError ? <FormAlert variant="error" message={exportError} /> : null}
+        {exportAllError ? <FormAlert variant="error" message={exportAllError} /> : null}
         {importAlert ? (
           <FormAlert
             variant={importAlert.type}
@@ -170,6 +188,23 @@ export function PersonalSettingsTab() {
           />
         ) : null}
         <Card className="divide-y p-0">
+          <CardContent className="flex items-center justify-between gap-4 py-4">
+            <div>
+              <p className="text-sm font-medium">Export everything</p>
+              <p className="text-xs text-muted-foreground">
+                Downloads one JSON file with everything your workspace owns — platforms,
+                connections, billing records, credit history, and the audit log.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => void handleExportAll()}
+              disabled={exportingAll}
+            >
+              {exportingAll ? <Loader2 className="animate-spin" /> : <Download />}
+              Export all data
+            </Button>
+          </CardContent>
           <CardContent className="flex items-center justify-between gap-4 py-4">
             <div>
               <p className="text-sm font-medium">Export billing records</p>
@@ -203,6 +238,15 @@ export function PersonalSettingsTab() {
             </Button>
           </CardContent>
         </Card>
+        {/* WP-12 (flow/03 Sec7: "no retention policy") — a plain statement of
+            current behavior, not a feature with its own settings: this app
+            keeps your data for as long as your account exists, and removes it
+            immediately (not on a delay) when you delete your account. */}
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Data retention: </span>
+          we keep your workspace&apos;s data for as long as your account exists. Deleting your
+          account (below) removes everything immediately — there is no recovery period.
+        </p>
       </section>
 
       <section className="space-y-4">

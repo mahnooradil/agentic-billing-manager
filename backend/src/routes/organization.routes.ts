@@ -6,6 +6,7 @@ import {
   getMembers,
   updateMemberRole,
   removeMember,
+  exportMyData,
 } from "@/controllers/organization.controller";
 import {
   createOrganizationInvitation,
@@ -25,6 +26,10 @@ router.use(authenticate);
 
 router.get("/", getMyOrganization);
 router.patch("/", validate(updateOrganizationSchema), updateMyOrganization);
+// Static path registered before "/members"/"/invitations" — no id collision
+// risk here either way, but keeps the convention consistent with other
+// route files that register fixed paths before dynamic ones.
+router.get("/export", exportMyData);
 
 router.get("/members", getMembers);
 router.patch("/members/:id", validate(updateMembershipRoleSchema), updateMemberRole);

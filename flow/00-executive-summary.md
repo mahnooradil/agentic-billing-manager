@@ -1264,6 +1264,55 @@ the document cites, not assumed from the document text.
       beyond the existing Billing-only CSV, a retention policy, and privacy copy at the OAuth consent
       moment — all explicitly separate, not silently folded in.
 
+26. ✅ **DONE (2026-10-04) — WP-12's remaining three items: full data export, OAuth-consent privacy
+    copy, and a retention policy statement.** Before building the retention piece, asked the user
+    directly what "retention policy" should mean here, since guessing wrong (e.g. building automatic
+    time-based deletion of real financial data) would be a genuinely risky, hard-to-reverse mistake —
+    exactly the category of risk this same session's own earlier data-loss mistake (item #23) was
+    about. User chose: a plain written statement of current behavior, no automatic deletion code.
+    - **Full data export** — new `GET /api/organization/export` (any member, same visibility they
+      already have through the normal read endpoints — not a privilege escalation, just a different
+      shape of the same read access), returning one downloadable JSON bundle: the organization record,
+      platforms, platform connections (metadata only — `toPublicPlatformConnection` never includes the
+      encrypted credential), billing records with their full provenance trail, credit transactions,
+      the audit log (item #25), and the requesting user's own settings. Deliberately excludes `Vendor`
+      (an internal resolved-identity cache, not something a user directly created) and `Notification`/
+      `Recommendation` (ephemeral, system-generated — not what a portability request is about).
+      Frontend: a new "Export everything" button in Settings → Personal, right next to the existing
+      Billing-only CSV export, using the exact same download-blob pattern that export already used.
+    - **OAuth-consent privacy copy** — new `EmailPrivacyConsentDialog`, shown when a user clicks
+      "Connect Gmail"/"Connect Outlook" on the Platforms page, BEFORE the real Google/Microsoft OAuth
+      popup opens: explains in plain language what gets read (invoice/receipt-shaped emails only),
+      what never happens (sending, deleting, modifying anything; credentials never seen/stored by this
+      app), and that the next screen is the provider's own consent screen showing the actual requested
+      permissions. Scoped deliberately to just these two explicit buttons — confirmed via
+      `getPipedreamCatalog`'s own backend filter (`hasBillingSyncAdapter`) that Gmail/Outlook cannot be
+      reached through the generic "Connect a platform" catalog dialog at all, so there's no way to
+      bypass this new dialog by using a different entry point. The agent-chat deep-link connect flow
+      (`?connect=` query param) is deliberately NOT re-gated behind this dialog — it already arrives
+      with its own explanatory context from the agent's own reply.
+    - **Retention policy** — a plain-language statement added next to the new export button in
+      Settings → Personal ("we keep your workspace's data for as long as your account exists. Deleting
+      your account removes everything immediately — there is no recovery period") — describing the
+      REAL behavior items #24's transactional `deleteAccount` already guarantees, not a new mechanism.
+    - **Tested** — new `export-my-data.test.ts` (2 tests, real HTTP routes): a seeded platform +
+      billing record are genuinely present in the exported bundle (not just a 200 with an empty
+      shape), alongside the audit-log entry the create itself produced; a `member` (not just owner/
+      admin) can export, confirming this is scoped as a read, not a mutation. A real bug caught by
+      this test before it ever shipped: the controller's own `userSettings ? toPublicUserSettings(...)
+      : null` wrapper silently overrode that serializer's own designed behavior (it already returns
+      real defaults, never `null`, for a user with no settings document yet) — fixed to call the
+      serializer directly. 147 total backend tests, two consecutive full runs green. Backend and
+      frontend `tsc`/`lint`/`build` clean (full production build). **Live-tested against the real
+      Atlas database**: seeded a real throwaway account + platform + billing record via the real API,
+      called the real `GET /api/organization/export`, confirmed the correct organization name,
+      platform, billing record, and audit-log entry in the response, then cleaned up via the real
+      `DELETE /api/auth/account`.
+    - **Honest scope note**: WP-12 is now functionally complete per the three items `flow/03` Sec7
+      originally named (transactional deletion, audit log, data export, retention policy, consent
+      copy — all five landed across items #24/#25/#26). Not attempted: automatic time-based data
+      deletion (deliberately declined per the user's own explicit choice above, not an oversight).
+
 ---
 
 ## Verified as already working — no action needed, just confirmed
