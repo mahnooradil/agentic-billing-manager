@@ -1313,6 +1313,46 @@ the document cites, not assumed from the document text.
       copy — all five landed across items #24/#25/#26). Not attempted: automatic time-based data
       deletion (deliberately declined per the user's own explicit choice above, not an oversight).
 
+27. ✅ **DONE (2026-10-04) — WP-4's missing UsageAccrual UI.** The `UsageAccrual` model and the 124
+    adapters that write to it (month-to-date usage/balance, not a discrete invoice — see item on the
+    129-adapter census) had existed on the backend since the billing-sync work, but there was **zero
+    way to see this data anywhere in the app** — no endpoint, no frontend surface at all. Flagged by
+    the user directly ("UsageAccrual has no UI") as part of WP-4/WP-5 being asked to be completed
+    before WP-6.
+    - **Backend** — new `GET /api/usage-accruals` (any authed member): an aggregation
+      (`$match organization → $sort snapshotAt desc → $group by platformConnection, $first → $replaceRoot
+      → $sort`) returning only the LATEST snapshot per connected platform, not a full historical
+      ledger — several adapters (e.g. Vultr) write one new dated row per sync day rather than
+      updating one row in place, so a naive `.find()` would show every historical day, not the
+      current balance. `usage-accrual.serializer.ts` (`toPublicUsageAccrual`), `usage-accrual.
+      controller.ts`, `usage-accrual.routes.ts`, mounted at `/usage-accruals` in `routes/index.ts`.
+    - **Frontend** — new types (`usage-accrual.ts`) and service (`listUsageAccruals()`), fetched
+      alongside connections/billing in the Platforms page's existing `Promise.all` (added to
+      `PlatformsCachePayload` so it's covered by the existing page-cache pattern). New "Usage &
+      balances" section on the Platforms page, right after "Connected Platforms": each connection's
+      latest amount (via the existing `formatMoney` helper, currency-aware) + relative snapshot time
+      (`formatRelativeTime`), with explicit copy clarifying this is month-to-date usage/balance, not
+      an invoice, and is never counted toward outstanding/overdue totals — directly addressing the
+      double-counting risk the 129-adapter census flagged.
+    - **Tested** — new `usage-accrual.test.ts` (1 test, real HTTP route): seeds 3 days of Vultr
+      snapshots ($10/$15/$22.50) + 1 Heroku snapshot ($5) for the same org, asserts exactly 2 rows
+      come back (one per connection) and the Vultr row shows the LATEST value ($22.50), not the
+      first or a sum — proves the aggregation's `$group`/`$first` actually works, not just that the
+      route returns 200. 148 total backend tests, two consecutive full runs green. Backend and
+      frontend `tsc`/`lint`/`build` all clean. **Live-tested against the real Atlas database**:
+      seeded a real throwaway org/user/`PlatformConnection`(Vultr)/2 `UsageAccrual` rows (Oct 1
+      $8.50, Oct 2 $12.30) via a scratch script (deleted immediately after running), obtained a real
+      JWT, called the real `GET /api/usage-accruals` — response showed exactly one row, $12.30 (Oct
+      2, the latest), correctly NOT the earlier $8.50 row — then cleaned up via the real `DELETE
+      /api/auth/account` and re-verified via direct Atlas queries that the org, user, and both
+      `UsageAccrual` rows were genuinely gone.
+    - **Honest scope note**: this closes the "no UI at all" gap, not the deeper WP-4 item still open
+      — whether `derivedStatus` (the AI's status read on an email-derived Billing record) should
+      become the record's real `status` field is a separate, consequential behavior-changing decision
+      not yet raised with the user; this UsageAccrual work doesn't touch that. WP-5's own remaining
+      gap (a live trust-surface test against a real Gmail-derived record) also remains blocked on the
+      Pipedream production/reconnect issue from earlier in this session, unrelated to this item.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

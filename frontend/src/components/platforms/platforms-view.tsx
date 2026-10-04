@@ -14,6 +14,8 @@ import { PageHeader } from "@/components/common/page-header";
 import { PageWrapper } from "@/components/common/page-wrapper";
 import { SectionHeader } from "@/components/common/section-header";
 import { cn } from "@/lib/utils";
+import { formatMoney, formatRelativeTime } from "@/lib/format";
+import { usePreferences } from "@/services/preferences/preferences-store";
 import {
   EMAIL_SYNC_APPS,
   emailSyncProviderLabel,
@@ -29,8 +31,10 @@ import {
   connectViaPipedream,
 } from "@/services/connections/platform-connections.service";
 import { listBillingRecords } from "@/services/billing/billing.service";
+import { listUsageAccruals } from "@/services/connections/usage-accrual.service";
 import type { PlatformConnection } from "@/services/types/platform-connections";
 import type { BillingRecord } from "@/services/types/billing";
+import type { UsageAccrual } from "@/services/types/usage-accrual";
 import { PlatformLogo } from "@/components/platforms/platform-logo";
 import { ConnectPlatformDialog } from "@/components/platforms/connect-platform-dialog";
 import { EmailPrivacyConsentDialog } from "@/components/platforms/email-privacy-consent-dialog";
@@ -43,6 +47,7 @@ const CACHE_KEY = "platforms";
 interface PlatformsCachePayload {
   connections: PlatformConnection[];
   billingRecords: BillingRecord[];
+  usageAccruals: UsageAccrual[];
 }
 
 interface ConnectedPlatformRow {
@@ -82,6 +87,7 @@ function PlatformsViewInner() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { general } = usePreferences();
 
   const cached = readPageCache<PlatformsCachePayload>(CACHE_KEY);
   const [status, setStatus] = React.useState<ViewStatus>(cached ? "ready" : "loading");
@@ -90,6 +96,9 @@ function PlatformsViewInner() {
   );
   const [billingRecords, setBillingRecords] = React.useState<BillingRecord[]>(
     cached?.billingRecords ?? []
+  );
+  const [usageAccruals, setUsageAccruals] = React.useState<UsageAccrual[]>(
+    cached?.usageAccruals ?? []
   );
   const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
@@ -117,18 +126,21 @@ function PlatformsViewInner() {
     (async () => {
       if (!readPageCache<PlatformsCachePayload>(CACHE_KEY)) setStatus("loading");
       try {
-        const [connectionsRes, billingRes] = await Promise.all([
+        const [connectionsRes, billingRes, usageRes] = await Promise.all([
           listPlatformConnections(),
           listBillingRecords(),
+          listUsageAccruals(),
         ]);
         if (ignore) return;
         const payload: PlatformsCachePayload = {
           connections: connectionsRes.data.connections,
           billingRecords: billingRes.data.billingRecords,
+          usageAccruals: usageRes.data.accruals,
         };
         writePageCache(CACHE_KEY, payload);
         setConnections(payload.connections);
         setBillingRecords(payload.billingRecords);
+        setUsageAccruals(payload.usageAccruals);
         setStatus("ready");
       } catch (error) {
         if (ignore) return;
@@ -345,6 +357,37 @@ function PlatformsViewInner() {
               ))}
             </Card>
           </section>
+
+          {usageAccruals.length > 0 ? (
+            <section className="space-y-3">
+              <SectionHeader
+                title="Usage & balances"
+                description="Month-to-date usage or account balance from your connected platforms — not an invoice, and never counted toward outstanding or overdue."
+              />
+              <Card className="divide-y overflow-hidden p-0">
+                {usageAccruals.map((accrual) => (
+                  <div key={accrual.id} className="flex items-center gap-3 px-5 py-3.5">
+                    <PlatformLogo
+                      src={null}
+                      name={accrual.connection.displayName}
+                      className="size-9"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {accrual.connection.displayName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Updated {formatRelativeTime(accrual.snapshotAt, general)}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground">
+                      {formatMoney(accrual.amount, accrual.currency, general)}
+                    </span>
+                  </div>
+                ))}
+              </Card>
+            </section>
+          ) : null}
 
           {emailProviderGroups.length === 0 ? (
             <section className="space-y-3">

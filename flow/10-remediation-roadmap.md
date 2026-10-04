@@ -169,6 +169,15 @@ already found:
     proceeded on the user's own explicit go-ahead ("chalo phir Task 10 shuru karo"), and built on top
     of — not instead of — the already-~90%-complete credit-top-up flow per `flow/07`'s gap analysis,
     which was re-verified rather than redone.
+11. ✅ **DONE (2026-10-04) — UsageAccrual UI (WP-4 gap closure).** Full detail in
+    `flow/00-executive-summary.md` item #27: new `GET /api/usage-accruals` (latest-snapshot-per-
+    connection aggregation) + a "Usage & balances" section on the Platforms page — closes the
+    "UsageAccrual data exists on the backend but has zero UI" gap the user flagged directly. 1 new
+    test (148 total), live-tested against real Atlas (seed → verify latest-only → cleanup → re-
+    verify gone). **Still open, not this task's scope**: whether `Billing.derivedStatus` should
+    become the real `status` field (task #8's own explicitly-deferred decision) remains unraised with
+    the user; WP-5's live trust-surface test against a real Gmail-derived record remains blocked on
+    the Pipedream production/reconnect issue (separate, business-side blocker).
 
 ---
 
