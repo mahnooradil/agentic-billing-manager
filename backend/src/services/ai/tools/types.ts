@@ -12,8 +12,15 @@ export interface AssistantTool<TResult = unknown> {
   name: string;
   /** Human/LLM-readable description of what the tool returns. */
   description: string;
-  /** Executes the tool and returns aggregated, PII-free data for ONE user.
+  /** Executes the tool and returns aggregated, PII-free data for ONE
+   *  organization — WP-7's org-id consolidation (flow/04 §8): the caller
+   *  (managed-agent.service.ts) already resolved `organizationId` once per
+   *  chat turn from the live request, so every tool invoked during that
+   *  turn uses that SAME value, instead of each tool independently
+   *  re-deriving it from a bare userId via `getOrganizationIdForUser` (which
+   *  reads `User.activeOrganizationId` fresh each time — a real, if
+   *  previously theoretical, risk if the user switches workspaces mid-turn).
    *  `input` carries the tool's own call arguments (e.g. a custom date
    *  range) — optional so tools with no parameters are unaffected. */
-  run: (userId: string, input?: Record<string, unknown>) => Promise<TResult>;
+  run: (organizationId: string, input?: Record<string, unknown>) => Promise<TResult>;
 }

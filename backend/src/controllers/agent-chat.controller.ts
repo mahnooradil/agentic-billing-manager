@@ -12,6 +12,7 @@ import {
   sendAgentMessage,
   resetAgentSession,
 } from "@/services/agent/managed-agent.service";
+import { tryRouteDeterministically } from "@/services/ai/intent-router.service";
 import type { AgentChatInput } from "@/validators/agent-chat.validator";
 
 /** POST /api/agent/chat */
@@ -22,9 +23,22 @@ export const agentChat = asyncHandler(async (req, res) => {
     throw new AppError("Authentication required", 401);
   }
 
+  const { message } = req.body as AgentChatInput;
+
+  // WP-7 intent router (flow/04 §8) — tried BEFORE the credit check, on
+  // purpose: a deterministic answer costs nothing and must still work for a
+  // workspace that's genuinely out of AI credits. Falls through to the real
+  // agent turn below (unchanged) on anything not confidently matched.
+  const routed = await tryRouteDeterministically(organization._id.toString(), message);
+  if (routed) {
+    sendSuccess(res, 200, "Agent response generated", {
+      message: { role: "assistant", content: routed.reply },
+    });
+    return;
+  }
+
   assertCreditBalance(organization);
 
-  const { message } = req.body as AgentChatInput;
   const { reply, action } = await sendAgentMessage(user._id, organization._id, message);
 
   sendSuccess(res, 200, "Agent response generated", {

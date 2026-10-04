@@ -18,10 +18,11 @@ import {
   getConnectionRequirements,
 } from "@/services/integrations/capability-resolver";
 
-/** Executes a custom tool by name, scoped to the calling user. Throws on an
- *  unrecognized tool name. */
+/** Executes a custom tool by name, scoped to the calling organization (WP-7
+ *  org-id consolidation — see types.ts's `AssistantTool.run` docstring).
+ *  Throws on an unrecognized tool name. */
 export async function executeCustomTool(
-  userId: string,
+  organizationId: string,
   name: string,
   input: Record<string, unknown>
 ): Promise<unknown> {
@@ -30,14 +31,14 @@ export async function executeCustomTool(
     case "get_platform_summary": {
       const tool = TOOL_REGISTRY.find((t) => t.name === name);
       if (!tool) throw new Error(`Unknown tool: ${name}`);
-      return tool.run(userId, input);
+      return tool.run(organizationId, input);
     }
     case "search_billing_records":
-      return billingSearchTool.run(userId, input);
+      return billingSearchTool.run(organizationId, input);
     case "propose_update_billing_status":
-      return runProposeUpdateBillingStatus(userId, input);
+      return runProposeUpdateBillingStatus(organizationId, input);
     case "propose_delete_billing_record":
-      return runProposeDeleteBillingRecord(userId, input);
+      return runProposeDeleteBillingRecord(organizationId, input);
     case "search_supported_platforms": {
       const query = typeof input.query === "string" ? input.query : "";
       return searchSupportedPlatforms(query);

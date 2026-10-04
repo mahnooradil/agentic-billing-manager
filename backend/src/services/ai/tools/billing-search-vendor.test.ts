@@ -91,7 +91,7 @@ describe("search_billing_records vendor search", () => {
       status: "Paid",
     });
 
-    const awsResult = await billingSearchTool.run(user._id.toString(), { customerName: "AWS" });
+    const awsResult = await billingSearchTool.run(organization._id.toString(), { customerName: "AWS" });
     expect(awsResult.matchCount).toBe(1);
     expect(awsResult.records[0]?.invoiceNumber).toBe("AWS-001");
     expect(awsResult.records[0]?.vendor).toBe("AWS");
@@ -101,7 +101,7 @@ describe("search_billing_records vendor search", () => {
     // parameter would cover, folded into the existing `customerName` input
     // instead of a new Console-registered parameter (see the tool's own
     // comment for why).
-    const netflixByDomain = await billingSearchTool.run(user._id.toString(), {
+    const netflixByDomain = await billingSearchTool.run(organization._id.toString(), {
       customerName: "netflix.com",
     });
     expect(netflixByDomain.matchCount).toBe(1);

@@ -12,7 +12,6 @@ import { Types } from "mongoose";
 
 import { Billing } from "@/models/billing.model";
 import { computeAnalyticsOverview } from "@/services/analytics/analytics.engine";
-import { getOrganizationIdForUser } from "@/services/organizations/membership-lookup.service";
 import type { AssistantTool } from "@/services/ai/tools/types";
 
 const TOP_CUSTOMERS_LIMIT = 5;
@@ -108,34 +107,18 @@ function parseToolDate(value: unknown): Date | undefined {
  *  file docstring on why customer names appear here specifically). Defaults
  *  to all-time; pass `input.from`/`input.to` (YYYY-MM-DD) for a specific
  *  window instead — either edge may be omitted for an open-ended range. */
-async function runAnalyticsSummary(
-  userId: string,
+export async function runAnalyticsSummary(
+  organizationId: string,
   input?: Record<string, unknown>
 ): Promise<AnalyticsSummary> {
-  const organizationId = await getOrganizationIdForUser(userId);
-  if (!organizationId) {
-    return {
-      invoiceCount: 0,
-      primaryCurrency: null,
-      totalsByCurrency: [],
-      statusCounts: [],
-      spendByPlatform: [],
-      recentMonthlyTrend: [],
-      ruleBasedInsights: [],
-      topCustomersByInvoiceCount: [],
-      topCustomersByAmount: [],
-    };
-  }
-
   const from = parseToolDate(input?.from);
   const to = parseToolDate(input?.to);
-  const organizationIdStr = organizationId.toString();
   const overview = await computeAnalyticsOverview(
-    organizationIdStr,
+    organizationId,
     from || to ? "custom" : "all",
     from || to ? { from, to } : undefined
   );
-  const topCustomers = await computeTopCustomers(organizationIdStr, overview.primaryCurrency);
+  const topCustomers = await computeTopCustomers(organizationId, overview.primaryCurrency);
   return {
     invoiceCount: overview.invoiceCount,
     primaryCurrency: overview.primaryCurrency,

@@ -1499,6 +1499,62 @@ the document cites, not assumed from the document text.
       anywhere in the WP-0…WP-12 set tracked by `flow/10` is WP-9's lack of a real Stripe live test
       (no live Stripe account exists in this environment) and the three WPs never started (WP-6, 10, 11).
 
+31. ✅ **DONE (2026-10-04) — WP-7 (Agent architecture) completed in full: org-id consolidation +
+    the intent router.** The two items the roadmap's own WP-7 row had listed as explicitly deferred
+    (`flow/01` item #5, `flow/04` §8).
+    - **Org-id consolidation** — closes the theoretical concurrent-org-switch race CLAUDE.md §10.6
+      flagged (not a confirmed bug, but a real gap: every agent tool independently re-derived its
+      organization from `User.activeOrganizationId` via `getOrganizationIdForUser(userId)`, instead of
+      using the SAME `organizationId` `sendAgentMessage` already resolves once per chat turn from the
+      live request). `AssistantTool.run()`'s signature changed from `(userId, input)` to
+      `(organizationId, input)`; `executeCustomTool()` and all four tool files
+      (`analytics.tool.ts`, `billing-search.tool.ts`, `billing-actions.tool.ts`, `platforms.tool.ts`)
+      updated to match — each one actually got SIMPLER (the "organization not found" branch every tool
+      needed for a nullable lookup no longer exists, since a valid id is now always passed in).
+      `recommendation-engine.ts`/`notification-engine.ts` deliberately left untouched — confirmed (again)
+      that these are genuinely background jobs with no HTTP request in scope, the one case
+      `getOrganizationIdForUser` is still the right tool for.
+    - **Intent router** (flow/04 §8's "deterministic router in front of Managed Agents," ~70% of
+      questions at 0 credits) — new `services/ai/intent-router.service.ts`: a STRICT, narrow
+      pattern-matcher for exactly 3 of the 5 named categories (`aggregate`/`lookup`/`explain`),
+      reusing the exact same underlying functions the agent's own tools call
+      (`runAnalyticsSummary`/`runBillingSearch`) so a deterministic answer is never a second,
+      divergent implementation of the same question. Wired into BOTH chat surfaces
+      (`agent-chat.controller.ts` for the web UI, `slack-chat-handler.ts` for Slack) — tried BEFORE
+      the credit check in both, so a deterministic answer works even for a workspace that's
+      completely out of AI credits, which was the actual point of "0 credits" in the target design.
+      Anything not a confident match (including free-form questions, and `action`/`rule` — the two
+      categories deliberately NOT built deterministically this pass, since safe entity resolution for
+      a mutation is a materially bigger, separate scope) returns `null` and falls through to the real
+      agent completely unchanged.
+    - **Tested** — `agent-tools-org-scoping.test.ts` (2 tests) proves the actual race-condition fix
+      directly: seeds a user in Org A, switches their `activeOrganizationId` to Org B mid-test, then
+      calls `executeCustomTool` with Org A's id explicitly — confirms the result still reflects Org A's
+      data, not Org B's (which the OLD userId-based re-derivation would have returned). A real,
+      pre-existing test (`billing-search-vendor.test.ts`) was passing a user id where an organization id
+      was expected — TypeScript couldn't catch this (both are plain strings), so it silently returned
+      zero matches; caught by actually running the suite, not just `tsc`, and fixed.
+      `intent-router.test.ts` (15 tests): correct aggregate totals for an explicit calendar range vs.
+      all-time, zero-result honesty (never fabricates a number), vendor lookup matching/non-matching,
+      invoice-number explain (including the manually-edited-record special case), and — the most
+      important property — 7 deliberately ambiguous/conversational messages (including literal "mark
+      invoice X as paid" and "notify me when...") all correctly return `null` rather than a wrong
+      guess. `agent-chat-router.test.ts` (3 tests, real HTTP): a deterministic question answers
+      correctly with a workspace at exactly 0 credits; a non-deterministic question still gets the
+      existing 403 credit-gate message at 0 credits; a deterministic "why is invoice X" question also
+      bypasses the gate. 191 total backend tests, two consecutive full runs green. `tsc`/`lint`/`build`
+      clean. **Live-tested against the real Atlas database and the real running server**: seeded a real
+      org with a real invoice, confirmed a deterministic aggregate query answered correctly with
+      credits genuinely unchanged (50→50), a deterministic lookup query found the real record, then a
+      non-deterministic question correctly fell through to the REAL Anthropic Managed Agent (a real
+      AI-generated reply) and genuinely spent a real credit (50→49) — proving the fallback path still
+      works end-to-end, not just that the router doesn't break it. Cleaned up and re-verified gone.
+    - **Honest scope note**: `action`/`rule` remain agent-routed, not deterministic — flagged above as
+      a deliberate scope limit, not an oversight; they still work exactly as before (via the agent's
+      own `propose_*` tools). This completes WP-7 in full as the roadmap scoped it — WP-0 through WP-5,
+      WP-7, WP-8, and WP-12 are all now fully done; only WP-9 (no live Stripe test) and the three
+      never-started WPs (6, 10, 11) remain anywhere in the WP-0…WP-12 set.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

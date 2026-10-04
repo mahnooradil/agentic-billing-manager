@@ -23,6 +23,7 @@ import { Membership } from "@/models/membership.model";
 import { SlackProcessedEvent } from "@/models/slack-processed-event.model";
 import type { OrganizationDocument } from "@/models/organization.model";
 import { sendAgentMessage, type AgentAction } from "@/services/agent/managed-agent.service";
+import { tryRouteDeterministically } from "@/services/ai/intent-router.service";
 import { postSlackMessage } from "@/services/slack/slack-web-api";
 
 const LINK_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous 0/O, 1/I
@@ -154,6 +155,15 @@ export async function handleSlackChatEvent(
           ? "✅ Connected! Ab aap yahan seedha Billing Advisor se baat kar sakte hain — koi bhi sawal poochein."
           : 'Mujhe abhi aapki pehchan nahi hui. App mein *Settings → Notifications* pe jaake "Connect Slack" dabayein, phir wahan mila code yahan bhej dein.'
       );
+      return;
+    }
+
+    // WP-7 intent router — same reasoning as the web chat controller: tried
+    // before the credit check, so a deterministic answer works even when
+    // this workspace is out of AI credits.
+    const routed = await tryRouteDeterministically(organization._id.toString(), text);
+    if (routed) {
+      await reply(routed.reply);
       return;
     }
 

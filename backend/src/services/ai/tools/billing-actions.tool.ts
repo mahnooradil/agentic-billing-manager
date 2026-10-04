@@ -18,7 +18,6 @@ import { Billing, BILLING_STATUSES, type BillingStatus } from "@/models/billing.
 import type { PlatformDocument } from "@/models/platform.model";
 import type { PlatformConnectionDocument } from "@/models/platform-connection.model";
 import type { VendorDocument } from "@/models/vendor.model";
-import { getOrganizationIdForUser } from "@/services/organizations/membership-lookup.service";
 
 export interface ProposeUpdateStatusResult {
   found: boolean;
@@ -47,9 +46,7 @@ export interface ProposeDeleteResult {
 /** Looks up one billing record by id, scoped to the calling user's
  *  organization — returns null if it doesn't exist or belongs to another
  *  organization (never leaks a not-found vs. wrong-org distinction). */
-async function findOwnedBilling(userId: string, billingId: string) {
-  const organizationId = await getOrganizationIdForUser(userId);
-  if (!organizationId) return null;
+async function findOwnedBilling(organizationId: string, billingId: string) {
   return Billing.findOne({ _id: billingId, organization: organizationId })
     .populate("platformConnection", "displayName")
     .populate("platform", "name")
@@ -73,7 +70,7 @@ function vendorOf(record: {
 }
 
 export async function runProposeUpdateBillingStatus(
-  userId: string,
+  organizationId: string,
   input: Record<string, unknown>
 ): Promise<ProposeUpdateStatusResult> {
   const billingId = typeof input.billingId === "string" ? input.billingId : "";
@@ -83,7 +80,7 @@ export async function runProposeUpdateBillingStatus(
     return { found: false, message: `newStatus must be one of: ${BILLING_STATUSES.join(", ")}.` };
   }
 
-  const record = await findOwnedBilling(userId, billingId).catch(() => null);
+  const record = await findOwnedBilling(organizationId, billingId).catch(() => null);
   if (!record) {
     return { found: false, message: "No billing record found with that id — search again first." };
   }
@@ -115,12 +112,12 @@ export async function runProposeUpdateBillingStatus(
 }
 
 export async function runProposeDeleteBillingRecord(
-  userId: string,
+  organizationId: string,
   input: Record<string, unknown>
 ): Promise<ProposeDeleteResult> {
   const billingId = typeof input.billingId === "string" ? input.billingId : "";
 
-  const record = await findOwnedBilling(userId, billingId).catch(() => null);
+  const record = await findOwnedBilling(organizationId, billingId).catch(() => null);
   if (!record) {
     return { found: false, message: "No billing record found with that id — search again first." };
   }

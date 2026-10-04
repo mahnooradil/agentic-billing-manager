@@ -340,8 +340,12 @@ export async function sendAgentMessage(
       let isError = false;
       try {
         const input = (event.input ?? {}) as Record<string, unknown>;
+        // WP-7 org-id consolidation — pass the SAME organizationId this
+        // whole turn already resolved, instead of letting each tool
+        // independently re-derive it from userId (a real race if the user
+        // switches workspaces mid-turn — see types.ts's own docstring).
         const result = await executeCustomTool(
-          userId.toString(),
+          organizationId.toString(),
           event.name,
           input
         );

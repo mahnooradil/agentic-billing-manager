@@ -13,7 +13,6 @@
  */
 import { Platform } from "@/models/platform.model";
 import { PlatformConnection } from "@/models/platform-connection.model";
-import { getOrganizationIdForUser } from "@/services/organizations/membership-lookup.service";
 import type { AssistantTool } from "@/services/ai/tools/types";
 
 export interface PlatformSummary {
@@ -35,19 +34,7 @@ export interface PlatformSummary {
 const DISAMBIGUATION_NOTE =
   "'connectedIntegrationsCount'/'connectedIntegrationNames' = real connected accounts (Gmail, GitHub, Stripe, etc. via Pipedream or native OAuth/API-key) — this is what the user means by 'platforms I've connected' or 'integrations'. 'totalPlatforms'/'activePlatforms'/'inactivePlatforms' are a SEPARATE concept: manually-created billing categories a Billing record can attach to — do NOT use these to answer a 'connected' question.";
 
-async function runPlatformSummary(userId: string): Promise<PlatformSummary> {
-  const organizationId = await getOrganizationIdForUser(userId);
-  if (!organizationId) {
-    return {
-      totalPlatforms: 0,
-      activePlatforms: 0,
-      inactivePlatforms: 0,
-      connectedIntegrationsCount: 0,
-      connectedIntegrationNames: [],
-      note: DISAMBIGUATION_NOTE,
-    };
-  }
-
+async function runPlatformSummary(organizationId: string): Promise<PlatformSummary> {
   const [totalPlatforms, activePlatforms, inactivePlatforms, connections] = await Promise.all([
     Platform.countDocuments({ organization: organizationId }),
     Platform.countDocuments({ organization: organizationId, status: "Active" }),

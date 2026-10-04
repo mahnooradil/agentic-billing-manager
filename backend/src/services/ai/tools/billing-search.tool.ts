@@ -10,8 +10,14 @@ import { Billing } from "@/models/billing.model";
 import type { PlatformDocument } from "@/models/platform.model";
 import type { PlatformConnectionDocument } from "@/models/platform-connection.model";
 import type { VendorDocument } from "@/models/vendor.model";
-import { getOrganizationIdForUser } from "@/services/organizations/membership-lookup.service";
 import type { AssistantTool } from "@/services/ai/tools/types";
+// Registered for side effects only — this file's own `.populate()` calls
+// below need these models registered with Mongoose even when this module is
+// imported in isolation (e.g. a standalone test run that never otherwise
+// loads a controller that pulls them in first).
+import "@/models/platform.model";
+import "@/models/platform-connection.model";
+import "@/models/vendor.model";
 
 const RESULT_LIMIT = 10;
 const MAX_RESULT_LIMIT = 20;
@@ -62,15 +68,10 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function runBillingSearch(
-  userId: string,
+export async function runBillingSearch(
+  organizationId: string,
   input?: Record<string, unknown>
 ): Promise<BillingSearchResult> {
-  const organizationId = await getOrganizationIdForUser(userId);
-  if (!organizationId) {
-    return { matchCount: 0, records: [], truncated: false, note: DISAMBIGUATION_NOTE };
-  }
-
   const query: Record<string, unknown> = { organization: organizationId };
 
   // Matched against customerName, vendorName, AND vendorDomain — see
