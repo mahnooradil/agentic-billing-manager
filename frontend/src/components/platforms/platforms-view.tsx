@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Boxes, Filter, Mail, Plus } from "lucide-react";
+import { Boxes, Check, Filter, Mail, Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -32,9 +32,15 @@ import {
 } from "@/services/connections/platform-connections.service";
 import { listBillingRecords } from "@/services/billing/billing.service";
 import { listUsageAccruals } from "@/services/connections/usage-accrual.service";
+import {
+  listPendingVendors,
+  confirmVendor,
+  rejectVendor,
+} from "@/services/connections/vendor.service";
 import type { PlatformConnection } from "@/services/types/platform-connections";
 import type { BillingRecord } from "@/services/types/billing";
 import type { UsageAccrual } from "@/services/types/usage-accrual";
+import type { PendingVendor } from "@/services/types/vendor";
 import { PlatformLogo } from "@/components/platforms/platform-logo";
 import { ConnectPlatformDialog } from "@/components/platforms/connect-platform-dialog";
 import { EmailPrivacyConsentDialog } from "@/components/platforms/email-privacy-consent-dialog";
@@ -48,6 +54,7 @@ interface PlatformsCachePayload {
   connections: PlatformConnection[];
   billingRecords: BillingRecord[];
   usageAccruals: UsageAccrual[];
+  pendingVendors: PendingVendor[];
 }
 
 interface ConnectedPlatformRow {
@@ -100,6 +107,10 @@ function PlatformsViewInner() {
   const [usageAccruals, setUsageAccruals] = React.useState<UsageAccrual[]>(
     cached?.usageAccruals ?? []
   );
+  const [pendingVendors, setPendingVendors] = React.useState<PendingVendor[]>(
+    cached?.pendingVendors ?? []
+  );
+  const [vendorActionId, setVendorActionId] = React.useState<string | null>(null);
   const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
   const reload = () => setReloadKey((key) => key + 1);
@@ -126,21 +137,24 @@ function PlatformsViewInner() {
     (async () => {
       if (!readPageCache<PlatformsCachePayload>(CACHE_KEY)) setStatus("loading");
       try {
-        const [connectionsRes, billingRes, usageRes] = await Promise.all([
+        const [connectionsRes, billingRes, usageRes, pendingVendorsRes] = await Promise.all([
           listPlatformConnections(),
           listBillingRecords(),
           listUsageAccruals(),
+          listPendingVendors(),
         ]);
         if (ignore) return;
         const payload: PlatformsCachePayload = {
           connections: connectionsRes.data.connections,
           billingRecords: billingRes.data.billingRecords,
           usageAccruals: usageRes.data.accruals,
+          pendingVendors: pendingVendorsRes.data.vendors,
         };
         writePageCache(CACHE_KEY, payload);
         setConnections(payload.connections);
         setBillingRecords(payload.billingRecords);
         setUsageAccruals(payload.usageAccruals);
+        setPendingVendors(payload.pendingVendors);
         setStatus("ready");
       } catch (error) {
         if (ignore) return;
@@ -286,6 +300,39 @@ function PlatformsViewInner() {
     reload();
   };
 
+  // WP-5's "confirm detected vendors" step — a soft, local update on
+  // success (removes the vendor from this list) rather than a full reload,
+  // since confirming/rejecting a vendor never changes anything else this
+  // page shows (connections, billing, usage).
+  const handleConfirmVendor = async (vendorId: string) => {
+    setVendorActionId(vendorId);
+    try {
+      await confirmVendor(vendorId);
+      setPendingVendors((prev) => prev.filter((v) => v.id !== vendorId));
+    } catch (error) {
+      setAlert({
+        type: "error",
+        message: error instanceof ApiError ? error.message : "Could not confirm this vendor.",
+      });
+    } finally {
+      setVendorActionId(null);
+    }
+  };
+  const handleRejectVendor = async (vendorId: string) => {
+    setVendorActionId(vendorId);
+    try {
+      await rejectVendor(vendorId);
+      setPendingVendors((prev) => prev.filter((v) => v.id !== vendorId));
+    } catch (error) {
+      setAlert({
+        type: "error",
+        message: error instanceof ApiError ? error.message : "Could not update this vendor.",
+      });
+    } finally {
+      setVendorActionId(null);
+    }
+  };
+
   const connectedSlugs = new Set(connections.map((c) => c.platform.toLowerCase()));
   const nothingConnected =
     connectedPlatformRows.length === 0 && emailProviderGroups.length === 0;
@@ -357,6 +404,48 @@ function PlatformsViewInner() {
               ))}
             </Card>
           </section>
+
+          {pendingVendors.length > 0 ? (
+            <section className="space-y-3">
+              <SectionHeader
+                title="Vendors to confirm"
+                description="New vendors detected from your connected accounts — confirm these are real, or flag any that aren't."
+              />
+              <Card className="divide-y overflow-hidden p-0">
+                {pendingVendors.map((vendor) => (
+                  <div key={vendor.id} className="flex items-center gap-3 px-5 py-3.5">
+                    <PlatformLogo src={null} name={vendor.name} className="size-9" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{vendor.name}</p>
+                      {vendor.sampleBilling ? (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {formatMoney(vendor.sampleBilling.amount, vendor.sampleBilling.currency, general)}{" "}
+                          on {new Date(vendor.sampleBilling.billingDate).toLocaleDateString()}
+                        </p>
+                      ) : null}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleRejectVendor(vendor.id)}
+                      disabled={vendorActionId !== null}
+                    >
+                      <X />
+                      Not a vendor
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => void handleConfirmVendor(vendor.id)}
+                      disabled={vendorActionId !== null}
+                    >
+                      <Check />
+                      Confirm
+                    </Button>
+                  </div>
+                ))}
+              </Card>
+            </section>
+          ) : null}
 
           {usageAccruals.length > 0 ? (
             <section className="space-y-3">

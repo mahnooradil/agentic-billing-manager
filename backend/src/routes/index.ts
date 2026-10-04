@@ -18,6 +18,7 @@ import invitationRoutes from "@/routes/invitation.routes";
 import slackRoutes from "@/routes/slack.routes";
 import auditLogRoutes from "@/routes/audit-log.routes";
 import usageAccrualRoutes from "@/routes/usage-accrual.routes";
+import vendorRoutes from "@/routes/vendor.routes";
 
 /**
  * Root API router. All feature routers are mounted here so the
@@ -51,5 +52,6 @@ router.use("/invitations", invitationRoutes);
 router.use("/slack", slackRoutes);
 router.use("/audit-log", auditLogRoutes);
 router.use("/usage-accruals", usageAccrualRoutes);
+router.use("/vendors", vendorRoutes);
 
 export default router;

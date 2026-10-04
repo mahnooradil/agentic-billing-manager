@@ -40,6 +40,19 @@ export interface IVendor {
    *  but not its opposite. Never exposed via the API (see `toJSON.transform`
    *  below) — a pure implementation detail of the dedup key. */
   dedupeKey: string;
+  /** WP-5's onboarding "confirm detected vendors" step — set once a human
+   *  has looked at this vendor and confirmed it's real. Absent means
+   *  "awaiting review" and surfaces this vendor in `GET /vendors/pending`.
+   *  Existing vendors (created before this field existed) are backfilled to
+   *  already-confirmed by `scripts/backfill-vendor-confirmation.ts` so this
+   *  feature only ever prompts for genuinely NEW detections going forward,
+   *  not a surprise backlog of vendors already in real, trusted use. */
+  confirmedAt?: Date;
+  /** Set instead of `confirmedAt` when a human says "not a real vendor" (the
+   *  AI misread something as a vendor name). Non-destructive by the same
+   *  reasoning as `Billing.duplicateOf` — only stops this vendor from being
+   *  prompted for again; its already-synced Billing records are untouched. */
+  rejectedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -71,6 +84,12 @@ const vendorSchema = new Schema<IVendor, VendorModel>(
       type: String,
       required: true,
       maxlength: [270, "Vendor dedupe key must be at most 270 characters"],
+    },
+    confirmedAt: {
+      type: Date,
+    },
+    rejectedAt: {
+      type: Date,
     },
   },
   {

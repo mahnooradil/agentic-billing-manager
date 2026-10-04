@@ -67,6 +67,18 @@ export const importBillingSchema = z.object({
 export const listBillingQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
   limit: z.coerce.number().int().min(1).max(5000).optional().default(2000),
+  /** WP-5 duplicate-merge — merged-away duplicates are hidden from the
+   *  default list (see billing.controller.ts); this reveals them for a
+   *  "view/restore hidden duplicates" UI. */
+  includeDuplicates: z.coerce.boolean().optional().default(false),
+});
+
+/** POST /billing/:id/merge body — the OTHER record being merged into :id. */
+export const mergeBillingSchema = z.object({
+  duplicateId: z
+    .string()
+    .trim()
+    .regex(OBJECT_ID_REGEX, "A valid billing record id is required"),
 });
 
 export type CreateBillingInput = z.infer<typeof createBillingSchema>;
@@ -74,3 +86,4 @@ export type UpdateBillingInput = z.infer<typeof updateBillingSchema>;
 export type ImportBillingRowInput = z.infer<typeof importBillingRowSchema>;
 export type ImportBillingInput = z.infer<typeof importBillingSchema>;
 export type ListBillingQuery = z.infer<typeof listBillingQuerySchema>;
+export type MergeBillingInput = z.infer<typeof mergeBillingSchema>;

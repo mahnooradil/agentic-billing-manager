@@ -69,6 +69,9 @@ export interface PublicBilling {
   derivedStatusConfidence?: number;
   derivedStatusBasis?: string;
   derivedStatusExplanation?: string;
+  /** WP-5 duplicate-merge — set (to the canonical record's id) when this
+   *  record has been merged away as a duplicate; absent otherwise. */
+  duplicateOf?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -131,6 +134,7 @@ export function toPublicBilling(billing: BillingDocument): PublicBilling {
     derivedStatusConfidence: billing.derivedStatusConfidence,
     derivedStatusBasis: billing.derivedStatusBasis,
     derivedStatusExplanation: billing.derivedStatusExplanation,
+    duplicateOf: billing.duplicateOf?.toString(),
     createdAt: billing.createdAt,
     updatedAt: billing.updatedAt,
   };

@@ -13,6 +13,7 @@ import type {
   BillingListData,
   BillingStatsData,
   CreateBillingPayload,
+  DuplicateCandidatesData,
   ImportBillingResult,
   UpdateBillingPayload,
 } from "@/services/types/billing";
@@ -52,6 +53,30 @@ export function deleteBillingRecord(
   id: string
 ): Promise<ApiSuccess<BillingDeletedData>> {
   return api.delete<ApiSuccess<BillingDeletedData>>(`/billing/${id}`);
+}
+
+/** GET /billing/duplicate-candidates — WP-5's "duplicate flags" (flow/08 §6). */
+export function getDuplicateCandidates(): Promise<ApiSuccess<DuplicateCandidatesData>> {
+  return api.get<ApiSuccess<DuplicateCandidatesData>>("/billing/duplicate-candidates");
+}
+
+/** POST /billing/:id/merge — confirms `duplicateId` is a duplicate of `id`.
+ *  Non-destructive: nothing is deleted, see `unmergeBillingRecord`. */
+export function mergeBillingRecords(
+  id: string,
+  duplicateId: string
+): Promise<ApiSuccess<BillingData>> {
+  return api.post<ApiSuccess<BillingData>>(`/billing/${id}/merge`, { duplicateId });
+}
+
+/** POST /billing/:id/unmerge — undoes a merge. */
+export function unmergeBillingRecord(id: string): Promise<ApiSuccess<BillingData>> {
+  return api.post<ApiSuccess<BillingData>>(`/billing/${id}/unmerge`);
+}
+
+/** POST /billing/:id/dismiss-duplicate — "these are NOT duplicates." */
+export function dismissDuplicateCandidate(id: string): Promise<ApiSuccess<BillingData>> {
+  return api.post<ApiSuccess<BillingData>>(`/billing/${id}/dismiss-duplicate`);
 }
 
 /**

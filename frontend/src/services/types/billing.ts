@@ -67,6 +67,10 @@ export interface BillingRecord {
   derivedStatusConfidence?: number;
   derivedStatusBasis?: string;
   derivedStatusExplanation?: string;
+  /** WP-5 duplicate-merge — set (to the canonical record's id) when this
+   *  record has been merged away as a duplicate. Absent from the default
+   *  `GET /billing` list unless `includeDuplicates=true` was passed. */
+  duplicateOf?: string;
 }
 
 /** Request payload for creating a billing record. */
@@ -134,4 +138,12 @@ export interface ImportBillingResult {
   imported: number;
   failed: number;
   errors: { row: number; message: string }[];
+}
+
+/** WP-5 duplicate-merge — `GET /billing/duplicate-candidates` returns groups
+ *  of 2+ records that look like the SAME real bill observed twice. Each
+ *  group is sorted newest-first; within a group, records are in no
+ *  particular order. */
+export interface DuplicateCandidatesData {
+  groups: BillingRecord[][];
 }

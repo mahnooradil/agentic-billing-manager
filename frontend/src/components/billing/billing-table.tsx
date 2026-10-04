@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Copy, Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,11 +25,22 @@ interface BillingTableProps {
   records: BillingRecord[];
   onEdit: (record: BillingRecord) => void;
   onDelete: (record: BillingRecord) => void;
+  /** WP-5 duplicate-merge — the other record(s) flagged alongside this one,
+   *  keyed by this record's own id. A record with no entry here isn't
+   *  flagged. */
+  duplicateGroupByRecordId?: Map<string, BillingRecord[]>;
+  onReviewDuplicate?: (record: BillingRecord) => void;
 }
 
 /** A professional, scannable data table for billing records — the standard
  *  presentation for financial/invoice data, in place of a card grid. */
-export function BillingTable({ records, onEdit, onDelete }: BillingTableProps) {
+export function BillingTable({
+  records,
+  onEdit,
+  onDelete,
+  duplicateGroupByRecordId,
+  onReviewDuplicate,
+}: BillingTableProps) {
   const { general } = usePreferences();
   // WP-5 — which record's provenance dialog is open, if any.
   const [sourceDialogTarget, setSourceDialogTarget] = React.useState<BillingRecord | null>(null);
@@ -73,7 +84,19 @@ export function BillingTable({ records, onEdit, onDelete }: BillingTableProps) {
                 {record.customerName}
               </TableCell>
               <TableCell className="font-medium text-foreground">
-                {record.invoiceNumber}
+                <div>
+                  {record.invoiceNumber}
+                  {duplicateGroupByRecordId?.has(record.id) ? (
+                    <button
+                      type="button"
+                      onClick={() => onReviewDuplicate?.(record)}
+                      className="mt-1 flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground hover:bg-secondary/70"
+                    >
+                      <Copy className="size-3" />
+                      Possible duplicate
+                    </button>
+                  ) : null}
+                </div>
               </TableCell>
               <TableCell className="text-right font-semibold tabular-nums text-foreground">
                 {formatMoney(record.amount, record.currency, general)}

@@ -1409,6 +1409,96 @@ the document cites, not assumed from the document text.
       all — unaffected by this task, already separately tracked (the "124 of 129 adapters hardcode
       Pending forever" finding).
 
+29. ✅ **DONE (2026-10-04) — The real-Gmail-inbox live test that WP-2/WP-4/WP-5 had never had.**
+    Every prior live-testing pass in this session verified the database/state-machine layer against
+    real Atlas, but the FULL pipeline — a real email actually flowing through Pipedream → Gmail search
+    → AI extraction → Billing write — had never once been run against a real inbox (no test inbox was
+    available). The user's own real Gmail (`mahnooradil317@gmail.com`, already connected and healthy —
+    confirmed via a screenshot, not the earlier orphaned `umair habib` account) made this possible: a
+    real invoice-shaped email was sent to it via the app's own Resend account (whose sending domain,
+    `thesigmatech.com`, already happened to be one of this connection's tracked sender domains — no
+    config change needed), then the real `syncConnectionEmail()` was run directly against the real
+    connection. Result: the real Pipedream Gmail search found the message, the real Anthropic API
+    extracted `vendorName: "Acme Cloud Services"`, `amount: 1.23 USD`, `status: "Paid"` at 0.95
+    confidence, a real `BillingEvent` (`payment_confirmed`) was recorded, the WP-4 status-cutover logic
+    (item #28) correctly computed and wrote `status: "Paid"`, and every provenance field (`senderEmail`,
+    `senderDomain`, `subject`, `evidence`, `sourceMessageId`) was populated correctly. 2 real credits
+    were spent (83 → 81). The created test Billing/BillingEvent records were deleted and verified gone
+    afterward — the sent email itself could not be removed (the app's Gmail scope is read-only by
+    design; disclosed to the user, who can delete it manually — subject line was prefixed
+    `[TEST — safe to delete]` for exactly this reason).
+    - **What this actually closes**: the "never tested against a real inbox" gap previously disclosed
+      on WP-2 (ingestion), WP-4 (the GM-027 status-cutover fix), and is a prerequisite closed for WP-5
+      below. Not a code change — a verification milestone.
+
+30. ✅ **DONE (2026-10-04) — WP-5 (Trust surfaces) fully completed: duplicate flags + merge, and the
+    "confirm detected vendors" onboarding step.** The two items flow/08 §6/§9 and the roadmap's own
+    WP-5 row had named as "not done, by design" after the first pass (2026-10-01, item #17). Before
+    building the merge action, asked the user directly what "merge" should actually do to two financial
+    records — the roadmap itself flagged this as needing a real decision, and guessing wrong here is
+    exactly the category of mistake this session's own earlier data-loss incident (item #23) was about.
+    User chose: non-destructive (hide + link, never delete, fully reversible) over permanently deleting
+    one record.
+    - **Duplicate flags + merge** (flow/08 §6) — new `billing-duplicate-detector.service.ts`: groups
+      records by real-world vendor identity (preferring the shared `Vendor` id from Task 7, so an
+      auto_sync AND email_sync record for the SAME vendor correctly group together — the actual
+      double-counting scenario) plus identical amount/currency, then clusters by `billingDate`
+      proximity (5-day window) — tight enough to never mistake a normal monthly/annual RECURRING charge
+      for a duplicate, loose enough to catch two sources reporting the same real bill a few days apart.
+      `Billing` gained `duplicateOf` (ref, set on merge — non-destructive) and `duplicateDismissedAt`
+      (set by "not a duplicate," excludes a record from future detection). New endpoints: `GET
+      /billing/duplicate-candidates` (groups), `POST /billing/:id/merge` (owner/admin only, records an
+      AuditLog entry), `POST /billing/:id/unmerge` (fully reverses), `POST /billing/:id/dismiss-
+      duplicate` (any member — no financial data changes). `listBillingRecords`/`getBillingStats` both
+      exclude merged-away duplicates by default (a new `includeDuplicates=true` query param reveals
+      them) so a merged duplicate can never double-count revenue/overdue totals — the actual point of
+      the feature. Deleting a canonical record un-hides anything merged into it, so nothing can be
+      permanently stranded behind a dangling reference. Frontend: a "Possible duplicate" badge on a
+      flagged row in the Billing table opens `DuplicateReviewDialog` (side-by-side comparison, Merge or
+      "Not a duplicate").
+    - **"Confirm detected vendors"** (flow/08 §9) — new `Vendor.confirmedAt`/`rejectedAt`; a brand-new
+      Vendor starts unconfirmed. `scripts/backfill-vendor-confirmation.ts` marks every PRE-EXISTING
+      vendor as already-confirmed (as of its own `createdAt`) — run live against real Atlas (exactly
+      the 7 real vendors found) — so this only ever prompts for genuinely NEW detections going forward,
+      not a surprise backlog dumped on an existing account. New `vendor.controller.ts`/`vendor.routes.ts`
+      mounted at `/api/vendors`: `GET /vendors/pending` (vendor + a sample Billing record so there's
+      something to judge it by), `POST /vendors/:id/confirm`, `POST /vendors/:id/reject` (non-
+      destructive — only stops future prompts, deliberately leaves that vendor's already-synced Billing
+      records untouched, consistent with the same "ask before touching financial data, default to
+      non-destructive" reasoning as the merge decision above). Frontend: a new "Vendors to confirm"
+      section on the Platforms page (same placement pattern as the Usage & balances section, item #27).
+    - **Tested** — 18 new backend tests across three files (`billing-duplicate-detector.test.ts`,
+      `billing-merge.test.ts`, `vendor-confirmation.test.ts`): correctly flags a same-vendor/amount
+      pair close in time, correctly does NOT flag the same vendor/amount a month apart (the critical
+      false-positive case), groups by `vendorName` when no resolved `Vendor` id exists, excludes
+      already-merged/dismissed records, scopes strictly by organization, RBAC (member blocked from
+      merge/unmerge, allowed to dismiss), stats/list exclusion math, the delete-un-hides-merged-records
+      safety net, and the full vendor-confirmation lifecycle. A real test bug was caught and fixed
+      during this work — not a production bug: the test helpers used a fabricated random `ObjectId` for
+      `platform` instead of a real `Platform` document, which broke only because `findBillingOr404`'s
+      `.populate("platform", ...)` resolves a non-existent reference to `null`, and the model's own
+      `pre("validate")` hook (`exactly one of platform or platformConnection`) then correctly rejected
+      the save — fixed by seeding real `Platform` documents, matching every other passing test's
+      existing convention. 171 total backend tests, two consecutive full runs green. Backend and
+      frontend `tsc`/`lint`/`build` all clean (full production build, 15 routes). **Live-tested against
+      the real Atlas database AND the real running server** (`GET`/`POST` over real HTTP, not just
+      vitest): seeded a real throwaway org + 2 duplicate candidates + 1 unconfirmed vendor, verified the
+      candidate group was detected, merged → confirmed hidden from the list/stats but still present in
+      the database and reachable via `includeDuplicates=true` → unmerged → confirmed restored →
+      confirmed an `AuditLog` entry exists for both the merge and the unmerge → confirmed the pending
+      vendor appeared with its sample billing info → confirmed it disappeared from `/vendors/pending`
+      after confirming it — then cleaned up every seeded document and re-verified via direct Atlas
+      queries that all of it (Billing, Vendor, AuditLog, Platform, Membership, User, Organization) was
+      genuinely gone.
+    - **Honest scope note**: this closes flow/08 §6 and §9 exactly as scoped. Still explicitly NOT
+      built, per `flow/08`'s own framing of these as separate, larger pieces of work: the full
+      multi-step onboarding WIZARD (register → explain → connect → scan progress → confirm vendors →
+      …) — only the vendor-confirmation UI panel itself was built, not a guided journey around it — and
+      the §7 dashboard-hierarchy redesign ("needs attention" sections etc.), which was never part of
+      WP-5's own scope to begin with. This completes WP-4 AND WP-5 in full — the only remaining blocker
+      anywhere in the WP-0…WP-12 set tracked by `flow/10` is WP-9's lack of a real Stripe live test
+      (no live Stripe account exists in this environment) and the three WPs never started (WP-6, 10, 11).
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

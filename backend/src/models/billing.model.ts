@@ -148,6 +148,23 @@ export interface IBilling {
   derivedStatusBasis?: string;
   derivedStatusExplanation?: string;
   derivedStatusUpdatedAt?: Date;
+  /** WP-5 trust surfaces — duplicate flag + merge (non-destructive). When
+   *  set, this record is a confirmed duplicate of the referenced (canonical)
+   *  Billing record: nothing is ever deleted (the user's own explicit
+   *  choice when asked — reversible over data-destroying), this record is
+   *  just hidden from the default list/stats and excluded from revenue/
+   *  overdue totals so it doesn't double-count. `POST /billing/:id/unmerge`
+   *  clears this to undo. Mutually exclusive in practice with
+   *  `duplicateDismissedAt` (a record is either merged away, dismissed as
+   *  NOT a duplicate, or neither — never both at once, though nothing
+   *  enforces that beyond the controllers' own logic, since there's no
+   *  harm in both being theoretically settable). */
+  duplicateOf?: Types.ObjectId;
+  /** Set when a user reviews a flagged candidate pair and says "these are
+   *  NOT duplicates" — excludes this record from future duplicate-candidate
+   *  detection (see billing-duplicate-detector.service.ts) so the same
+   *  false positive doesn't keep resurfacing on every visit. */
+  duplicateDismissedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -343,6 +360,14 @@ const billingSchema = new Schema<IBilling, BillingModel>(
       maxlength: [500, "Derived status explanation must be at most 500 characters"],
     },
     derivedStatusUpdatedAt: {
+      type: Date,
+    },
+    duplicateOf: {
+      type: Schema.Types.ObjectId,
+      ref: "Billing",
+      index: true,
+    },
+    duplicateDismissedAt: {
       type: Date,
     },
   },

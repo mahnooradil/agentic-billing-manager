@@ -14,7 +14,11 @@ import { Pagination } from "@/components/common/pagination";
 import { useAlertState } from "@/hooks/use-alert-state";
 import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { ApiError } from "@/services/api/client";
-import { getBillingStats, listBillingRecords } from "@/services/billing/billing.service";
+import {
+  getBillingStats,
+  listBillingRecords,
+  getDuplicateCandidates,
+} from "@/services/billing/billing.service";
 import { listPlatforms } from "@/services/platforms/platform.service";
 import type { BillingRecord, BillingStats } from "@/services/types/billing";
 import type { Platform } from "@/services/types/platform";
@@ -24,6 +28,7 @@ import { BillingFormDialog } from "./billing-form-dialog";
 import { DeleteBillingDialog } from "./delete-billing-dialog";
 import { BillingStatsGrid } from "./billing-stats";
 import { BillingToolbar, type BillingSort, type BillingStatusFilter } from "./billing-toolbar";
+import { DuplicateReviewDialog } from "./duplicate-review-dialog";
 
 type ViewStatus = "loading" | "error" | "ready";
 
@@ -35,6 +40,7 @@ interface BillingCachePayload {
   records: BillingRecord[];
   stats: BillingStats | null;
   platforms: Platform[];
+  duplicateGroups: BillingRecord[][];
 }
 
 /**
@@ -48,8 +54,14 @@ export function BillingView() {
   const [records, setRecords] = React.useState<BillingRecord[]>(cached?.records ?? []);
   const [platforms, setPlatforms] = React.useState<Platform[]>(cached?.platforms ?? []);
   const [stats, setStats] = React.useState<BillingStats | null>(cached?.stats ?? null);
+  const [duplicateGroups, setDuplicateGroups] = React.useState<BillingRecord[][]>(
+    cached?.duplicateGroups ?? []
+  );
   const [loadError, setLoadError] = React.useState("");
   const [alert, setAlert] = useAlertState();
+
+  // WP-5 duplicate-merge — which row's review dialog is open, if any.
+  const [reviewTarget, setReviewTarget] = React.useState<BillingRecord | null>(null);
 
   // Create/Edit dialog state (key forces a fresh form on each open).
   const [formOpen, setFormOpen] = React.useState(false);
@@ -80,20 +92,24 @@ export function BillingView() {
     let ignore = false;
     (async () => {
       try {
-        const [billingResponse, statsResponse, platformsResponse] = await Promise.all([
-          listBillingRecords(),
-          getBillingStats(),
-          listPlatforms(),
-        ]);
+        const [billingResponse, statsResponse, platformsResponse, duplicatesResponse] =
+          await Promise.all([
+            listBillingRecords(),
+            getBillingStats(),
+            listPlatforms(),
+            getDuplicateCandidates(),
+          ]);
         if (ignore) return;
         writePageCache(CACHE_KEY, {
           records: billingResponse.data.billingRecords,
           stats: statsResponse.data.stats,
           platforms: platformsResponse.data.platforms,
+          duplicateGroups: duplicatesResponse.data.groups,
         });
         setRecords(billingResponse.data.billingRecords);
         setStats(statsResponse.data.stats);
         setPlatforms(platformsResponse.data.platforms);
+        setDuplicateGroups(duplicatesResponse.data.groups);
         setStatus("ready");
       } catch (error) {
         if (ignore) return;
@@ -144,6 +160,21 @@ export function BillingView() {
     });
     return copy;
   }, [filtered, sort]);
+
+  // WP-5 duplicate-merge — for each flagged record, the OTHER record(s) in
+  // its candidate group (never itself).
+  const duplicateGroupByRecordId = React.useMemo(() => {
+    const map = new Map<string, BillingRecord[]>();
+    for (const group of duplicateGroups) {
+      for (const record of group) {
+        map.set(
+          record.id,
+          group.filter((other) => other.id !== record.id)
+        );
+      }
+    }
+    return map;
+  }, [duplicateGroups]);
 
   const totalResults = sorted.length;
   const totalPages = Math.max(1, Math.ceil(totalResults / PAGE_SIZE));
@@ -310,7 +341,13 @@ export function BillingView() {
                     Page {currentPage} of {totalPages}
                   </span>
                 </div>
-                <BillingTable records={pageRecords} onEdit={openEdit} onDelete={openDelete} />
+                <BillingTable
+                  records={pageRecords}
+                  onEdit={openEdit}
+                  onDelete={openDelete}
+                  duplicateGroupByRecordId={duplicateGroupByRecordId}
+                  onReviewDuplicate={setReviewTarget}
+                />
                 <Pagination page={currentPage} totalPages={totalPages} onPageChange={setPage} />
               </>
             )}
@@ -340,6 +377,18 @@ export function BillingView() {
         platform={null}
         onOpenChange={setPlatformFormOpen}
         onSaved={handlePlatformCreated}
+      />
+      <DuplicateReviewDialog
+        record={reviewTarget}
+        others={reviewTarget ? (duplicateGroupByRecordId.get(reviewTarget.id) ?? []) : []}
+        open={reviewTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setReviewTarget(null);
+        }}
+        onResolved={(message) => {
+          setAlert({ type: "success", message });
+          reload();
+        }}
       />
     </PageWrapper>
   );
