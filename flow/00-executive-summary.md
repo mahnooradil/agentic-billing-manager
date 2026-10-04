@@ -1353,6 +1353,62 @@ the document cites, not assumed from the document text.
       gap (a live trust-surface test against a real Gmail-derived record) also remains blocked on the
       Pipedream production/reconnect issue from earlier in this session, unrelated to this item.
 
+28. ✅ **DONE (2026-10-04) — The `derivedStatus` → `status` cutover (WP-4's last open decision),
+    narrow scope.** Item #27 flagged this as still open; asked the user directly rather than guessing,
+    since it changes live behavior and the full target vocabulary (11 states) vs. the app's actual
+    3-state `status` field (Pending/Paid/Overdue) turned out to be a much bigger mismatch than first
+    described — a literal "copy `derivedStatus` into `status`" would have broken validation/UI/
+    notifications/analytics/the agent everywhere. Presented two real options (narrow bug-fix-only cut
+    over vs. the full 11-state vocabulary expansion across the whole app) via `AskUserQuestion`; user
+    chose the narrow option.
+    - **What shipped**: a new pure, exhaustively-tested `mapDerivedStatusToBillingStatus()` in
+      `status-machine.ts` maps `deriveStatus()`'s richer result down onto the existing 3-value
+      `status` field (`payment_processing` → `Overdue`, `refunded`/`partially_refunded`/
+      `partially_paid` → `Paid` — unreachable today given which event types the app actually emits,
+      chosen conservatively and documented as such; everything else → `Pending`/`Overdue`/`Paid` as
+      expected). `recordBillingEvent`/`recomputeDerivedStatus` (`billing-event-recorder.service.ts`)
+      now RETURN the derived result instead of `Promise<void>`, so a caller can act on it — they still
+      never write `status` themselves. `email-sync/sync-engine.ts`'s commit loop is the one caller
+      that does: after its existing naive `status` write (which only ever looks at the single email
+      just read — the actual root cause of GM-027) and after recording the event(s), it overwrites
+      `Billing.status` with the mapped, full-history-aware value when it differs. Scoped deliberately
+      to **email_sync only** — manual edits already write the correct user-intended `status` directly
+      (unaffected), and `billing-sync/sync-engine.ts` (the 129 adapters) was confirmed to never call
+      `recordBillingEvent` at all (no `BillingEvent` history exists for `auto_sync` records), so this
+      change has zero effect there.
+    - **Real improvement beyond just the bug fix**: a first-ever sync of an old invoice whose own due
+      date has already passed now correctly lands as `Overdue` immediately (the due-date fallback
+      looks at the real `dueDate`), instead of sitting as `Pending` — because the naive write only
+      ever copied whatever the AI's single-email read said (an AI's own schema only ever reports
+      "Pending" for a plain invoice with no payment outcome yet).
+    - **Tested** — `status-machine.test.ts` gained 3 new tests on the mapping function (reachable
+      states, an exhaustiveness check over every `DerivedStatus` value, and the conservative
+      unreachable-state choices). A brand-new `sync-engine.test.ts` (2 tests) drives the REAL
+      `syncConnectionEmail()` pipeline end-to-end against the real DB, mocking only the two genuinely
+      external dependencies (the Gmail/Outlook provider and the Anthropic extraction call): one test
+      replays GM-027 exactly — run 1 processes an invoice + its payment confirmation (ends up Paid),
+      run 2 processes a stale reminder for the same invoice (same dedupe key, resolves onto the same
+      Billing row) and confirms `status` stays `Paid`, not reverted to `Pending` — proving the fix
+      through the real commit loop, not just the pure `deriveStatus()` function (already covered
+      separately in `status-machine.test.ts`); the second proves the due-date-fallback improvement
+      above. 153 total backend tests, two consecutive full runs green. `tsc`/`lint`/`build` all clean.
+      **Live-tested against the real Atlas database**: a scratch script imported the actual production
+      `recordBillingEvent`/`mapDerivedStatusToBillingStatus` functions (not reimplemented) and
+      replayed the exact GM-027 sequence against a real throwaway org/connection/Billing record —
+      confirmed `status` stayed `Paid` after the simulated stale-reminder write, then cleaned up and
+      re-verified via direct Atlas queries that everything was gone. (The full pipeline — a real Gmail
+      message actually flowing through `syncConnectionEmail` end-to-end — remains blocked on the same
+      pre-existing Pipedream production/reconnect issue as WP-5's own live test; this live check
+      exercises the DB/state-machine/mapping layer that this task actually changed, which is the part
+      under this task's control.)
+    - **Honest scope note**: the full 11-state vocabulary expansion (UI badges/filters, notification
+      rules, analytics groupings, agent tool schemas, CSV export/import all understanding `due_soon`/
+      `payment_processing`/`refunded`/etc. as first-class states) was explicitly declined by the user
+      for now and NOT built — logged here as a known, deliberately-deferred future decision, not an
+      oversight. `billing-sync/sync-engine.ts` (129 adapters) still doesn't record `BillingEvent`s at
+      all — unaffected by this task, already separately tracked (the "124 of 129 adapters hardcode
+      Pending forever" finding).
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

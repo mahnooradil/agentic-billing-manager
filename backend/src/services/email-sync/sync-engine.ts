@@ -47,6 +47,7 @@ import {
 import { consumeCredits } from "@/services/credits/credit-ledger.service";
 import { resolveVendor } from "@/services/vendors/vendor-resolver.service";
 import { recordBillingEvent } from "@/services/billing/billing-event-recorder.service";
+import { mapDerivedStatusToBillingStatus } from "@/services/billing/status-machine";
 import type { BillingEventType } from "@/models/billing-event.model";
 import type { BillingStatus } from "@/models/billing.model";
 import { tokensToCredits } from "@/config/credits";
@@ -389,10 +390,12 @@ async function syncConnectionEmailInner(
       );
       if (!existing) created++;
 
-      // Task 8 (dual-write, behind a flag) — append the evidence this
-      // write represents, then re-derive status from the record's WHOLE
-      // history. Best-effort: this is a comparison layer, not the source of
-      // truth yet, so it must never fail the actual `status` write above.
+      // Task 8, cut over (narrow scope — see status-machine.ts's
+      // mapDerivedStatusToBillingStatus docstring for why this stays a
+      // 3-value mapping, not the full target vocabulary) — append the
+      // evidence this write represents, re-derive status from the record's
+      // WHOLE history, then overwrite the naive `status` just written above
+      // (which only looked at THIS email) with the history-aware value.
       if (savedBilling) {
         const setFields = update.setFields as {
           status?: BillingStatus;
@@ -407,8 +410,10 @@ async function syncConnectionEmailInner(
         // that moment, so the amount_changed call (when it happens) must
         // run strictly after the status event's own insert has landed, or
         // its recompute could read a stale history and leave a stored
-        // derivedStatus one event behind.
-        await recordBillingEvent({
+        // derivedStatus one event behind. `latestDerived` tracks the most
+        // recent recompute so the status overwrite below reflects whichever
+        // event was recorded last.
+        let latestDerived = await recordBillingEvent({
           organization: connection.organization,
           billing: savedBilling._id,
           type: eventTypeForStatus(status, !existing),
@@ -416,15 +421,13 @@ async function syncConnectionEmailInner(
           confidence,
           source: "email_sync",
           sourceMessageId: setFields.sourceMessageId,
-        }).catch(() => {
-          // Best-effort — see the function's own docstring.
-        });
+        }).catch(() => null);
         if (
           existing &&
           typeof setFields.amount === "number" &&
           setFields.amount !== existing.amount
         ) {
-          await recordBillingEvent({
+          latestDerived = await recordBillingEvent({
             organization: connection.organization,
             billing: savedBilling._id,
             type: "amount_changed",
@@ -433,9 +436,29 @@ async function syncConnectionEmailInner(
             source: "email_sync",
             amount: setFields.amount,
             sourceMessageId: setFields.sourceMessageId,
-          }).catch(() => {
-            // Best-effort — see the function's own docstring.
-          });
+          }).catch(() => latestDerived);
+        }
+
+        // The actual bug fix (GM-027): a stale reminder, synced in a later
+        // run than a genuine payment confirmation, used to overwrite
+        // `status` straight back to "Pending" because the write above only
+        // ever looks at the single email it just read. `deriveStatus()`
+        // reads the record's ENTIRE event history instead, so a reminder
+        // arriving after a `payment_confirmed` leaves the governing status
+        // at "paid" — this overwrite is what makes that actually take
+        // effect on the real `status` field, not just the comparison-only
+        // `derivedStatus*` fields. Best-effort: if derivation failed, the
+        // naive value already written above is kept rather than guessed.
+        if (latestDerived) {
+          const mappedStatus = mapDerivedStatusToBillingStatus(latestDerived.status);
+          if (mappedStatus !== status) {
+            await Billing.updateOne(
+              { _id: savedBilling._id },
+              { $set: { status: mappedStatus } }
+            ).catch(() => {
+              // Best-effort — see above.
+            });
+          }
         }
       }
 

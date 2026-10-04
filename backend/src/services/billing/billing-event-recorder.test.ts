@@ -52,8 +52,10 @@ describe("recordBillingEvent / recomputeDerivedStatus (real DB)", () => {
     expect(reloaded?.derivedStatusBasis).toBe("ai");
     expect(reloaded?.derivedStatusConfidence).toBeCloseTo(0.95, 5);
     expect(reloaded?.derivedStatusUpdatedAt).toBeInstanceOf(Date);
-    // The real `status` field is completely untouched by any of this —
-    // dual-write, never a replacement.
+    // recordBillingEvent/recomputeDerivedStatus themselves never touch
+    // `status` — only email-sync/sync-engine.ts's commit loop does, via its
+    // own explicit mapDerivedStatusToBillingStatus overwrite (see
+    // sync-engine's own tests for that end-to-end behavior).
     expect(reloaded?.status).toBe("Pending");
   });
 

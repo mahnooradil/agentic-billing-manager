@@ -250,3 +250,68 @@ function explanationFor(governing: Governing): string {
       return "Derived from the recorded event history.";
   }
 }
+
+/** Narrow cutover (not the full target vocabulary) — maps `deriveStatus()`'s
+ *  richer 11-state result down onto the 3-state `Billing.status` the rest of
+ *  the app (UI badges/filters, notification rules, analytics groupings, the
+ *  Billing Advisor Agent's tools) still runs on. This is deliberately scoped
+ *  to fix the one confirmed real bug (GM-027 — a stale reminder email,
+ *  synced in a later run than a genuine payment confirmation, reverting
+ *  `status` back to "Pending" because the naive write only ever looks at the
+ *  single email it just read) WITHOUT expanding the app's status vocabulary
+ *  — that is a separate, much larger decision the user explicitly deferred.
+ *
+ *  Given the event types `email-sync/sync-engine.ts` actually emits today
+ *  (`invoice_issued`/`reminder`/`final_reminder`/`payment_confirmed`/
+ *  `payment_failed`/`amount_changed`/`user_correction`), `deriveStatus()` can
+ *  currently only ever return "pending"/"due_soon"/"overdue"/"paid"/
+ *  "payment_processing" in practice — "issued" is absorbed into the due-date
+ *  fallback before it's ever returned, and "refunded"/"partially_refunded"/
+ *  "cancelled"/"partially_paid"/"disputed" require event types nothing in
+ *  this codebase emits yet. The switch below is still exhaustive (for type
+ *  safety and so a future event source doesn't silently fall through), with
+ *  the currently-unreachable branches chosen conservatively — see inline
+ *  comments — rather than guessed. */
+export function mapDerivedStatusToBillingStatus(
+  derived: DerivedStatus
+): "Pending" | "Paid" | "Overdue" {
+  switch (derived) {
+    case "paid":
+      return "Paid";
+    case "overdue":
+      return "Overdue";
+    // A failed payment after a prior confirmation is a real problem state —
+    // closer to "needs attention" than "Pending", and matches what the old
+    // naive write would have called it (the AI extractor only ever reports
+    // "Overdue" for this, which is what originally produced the
+    // `payment_failed` event in the first place — see `eventTypeForStatus`).
+    case "payment_processing":
+      return "Overdue";
+    // "due_soon" has no dedicated bucket in the 3-state vocabulary — the
+    // existing `dueDate` field already powers its own separate "due in N
+    // days" alert (see billing.model.ts), so this stays "Pending" rather
+    // than inventing a 4th value.
+    case "due_soon":
+    case "pending":
+    case "issued":
+      return "Pending";
+    // Unreachable today (see docstring above) — chosen conservatively so a
+    // future event source can't silently cause an invoice to disappear from
+    // "needs attention"/outstanding views. Money was actually received
+    // before being refunded, so "Paid" (its historical state) is the least
+    // misleading of the 3 available values.
+    case "refunded":
+    case "partially_refunded":
+    case "partially_paid":
+      return "Paid";
+    // Unreachable today. No money changed hands and nothing is owed, but
+    // the 3-state vocabulary has no "void" bucket — defaults to "Pending"
+    // rather than "Paid" so a cancelled invoice doesn't misleadingly count
+    // as collected revenue in analytics/stats.
+    case "cancelled":
+    case "disputed":
+      return "Pending";
+    default:
+      return "Pending";
+  }
+}

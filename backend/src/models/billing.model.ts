@@ -132,11 +132,15 @@ export interface IBilling {
    *  domain whose replies are silently redirected elsewhere). */
   senderReplyToMismatch?: boolean;
   /** Task 8 — an INDEPENDENT status computed by `deriveStatus()` from this
-   *  record's full `BillingEvent` history, dual-written alongside (never
-   *  replacing) the real `status` field above, per the roadmap's own "ship
-   *  behind a flag, dual-write, compare, then cut over" sequencing.
-   *  `status` still drives every existing read path unchanged — nothing
-   *  about current behavior depends on these fields yet. Recomputed by
+   *  record's full `BillingEvent` history, stored alongside the real
+   *  `status` field above. **Cut over for email_sync records** (narrow
+   *  scope, not the full 11-state target vocabulary — see status-machine.ts's
+   *  `mapDerivedStatusToBillingStatus`): email-sync/sync-engine.ts's commit
+   *  loop now maps this result back onto `status` itself after every write,
+   *  which is what actually fixes GM-027 (a stale reminder reverting a Paid
+   *  invoice back to Pending). Still purely observational for manual and
+   *  auto_sync (billing-sync adapter) records — those write `status`
+   *  directly and never read these fields back. Recomputed by
    *  services/billing/billing-event-recorder.service.ts every time a new
    *  BillingEvent is appended. Absent until at least one event exists. */
   derivedStatus?: string;

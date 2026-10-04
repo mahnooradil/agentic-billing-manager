@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveStatus, type BillingEventLike } from "@/services/billing/status-machine";
+import {
+  deriveStatus,
+  mapDerivedStatusToBillingStatus,
+  DERIVED_STATUSES,
+  type BillingEventLike,
+} from "@/services/billing/status-machine";
 
 const DAY_MS = 86_400_000;
 const day = (offset: number): Date => new Date(2026, 0, 1 + offset);
@@ -187,5 +192,33 @@ describe("deriveStatus", () => {
     ];
     const result = deriveStatus(events, day(10));
     expect(result.status).toBe("pending");
+  });
+});
+
+describe("mapDerivedStatusToBillingStatus", () => {
+  it("maps the reachable-today states exactly as the narrow cutover intends", () => {
+    expect(mapDerivedStatusToBillingStatus("paid")).toBe("Paid");
+    expect(mapDerivedStatusToBillingStatus("overdue")).toBe("Overdue");
+    expect(mapDerivedStatusToBillingStatus("pending")).toBe("Pending");
+    expect(mapDerivedStatusToBillingStatus("due_soon")).toBe("Pending");
+    // A failed payment after a prior confirmation reads as a problem state,
+    // not quietly "Pending" — matches what the old naive write would have
+    // called it (the AI extractor only ever reports "Overdue" for this).
+    expect(mapDerivedStatusToBillingStatus("payment_processing")).toBe("Overdue");
+  });
+
+  it("is exhaustive over every DerivedStatus value — no value silently falls through", () => {
+    for (const value of DERIVED_STATUSES) {
+      expect(["Pending", "Paid", "Overdue"]).toContain(mapDerivedStatusToBillingStatus(value));
+    }
+  });
+
+  it("maps the currently-unreachable states conservatively (refund keeps its historical Paid, cancelled/disputed stay visible as Pending)", () => {
+    expect(mapDerivedStatusToBillingStatus("refunded")).toBe("Paid");
+    expect(mapDerivedStatusToBillingStatus("partially_refunded")).toBe("Paid");
+    expect(mapDerivedStatusToBillingStatus("partially_paid")).toBe("Paid");
+    expect(mapDerivedStatusToBillingStatus("cancelled")).toBe("Pending");
+    expect(mapDerivedStatusToBillingStatus("disputed")).toBe("Pending");
+    expect(mapDerivedStatusToBillingStatus("issued")).toBe("Pending");
   });
 });

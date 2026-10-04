@@ -17,7 +17,7 @@ reconciliation of everything scattered across the other nine files into one plac
 | 1 | Production integrity & auth hardening | 1.5 | none | Index migration, OTP fixes, rate limiting, `trust proxy`, session/OTP TTLs, CI setup (`flow/00` #1–2, `flow/02` items 15/16-ish, `flow/03` items 24/27-29) |
 | 2 | Ingestion cost & completeness | 1.5 | WP-1 | ✅ **Done.** `ProcessedMessage` store, watermark-advance fix, reconnect fix, `lastSyncError` surfaced (`flow/00` #3, `flow/02` item 6/16, `flow/05` items 34/37). The paired economics bug CLAUDE.md §10.4 said to "fix both together" — `CREDIT_CYCLE_DAYS_BY_PLAN` annual→monthly for Pro/Business, CR-012 — is also now done, see `flow/00` item #12. |
 | 3 | Analytics correctness | 0.8 | WP-1, ∥ WP-2 | ✅ **Done, live-verified (2026-10-03).** Mixed-currency sum removed (backend stats + dashboard headline), `dueDate`/compound indexes added and applied live, `/billing` safety-capped + paginated — confirmed against the real running server with real HTTP calls (not just vitest), real mixed-currency data, cleaned up by exact tracked id afterward. See `flow/00` item #13. **Not done, by design:** the larger server-side search/filter/sort/pagination rework of `billing-view.tsx`'s table, and the full dashboard-hierarchy redesign (`flow/08` item 47) — both explicitly separate, larger pieces of work. |
-| 4 | **Domain model rebuild** | 3.0 | WP-1 | ⚠️ **Mostly done.** `Vendor` + `BillingEvent` + `deriveStatus()` done 2026-09-26 (tasks #7/#8 below). `UsageAccrual` model + the 129 billing-sync adapters' `Billing`-vs-`UsageAccrual` split done 2026-09-30/2026-10-01 — see `flow/00-executive-summary.md` item #9d. **Still not done:** the actual cut-over of `derivedStatus` to become the real `status` field (shipped behind a flag on purpose, task #8's own explicit scope boundary), and all frontend trust-surface UI (WP-5) — `UsageAccrual` has no UI at all yet. |
+| 4 | **Domain model rebuild** | 3.0 | WP-1 | ✅ **Done (2026-10-04).** `Vendor` + `BillingEvent` + `deriveStatus()` done 2026-09-26 (tasks #7/#8 below). `UsageAccrual` model + the 129 billing-sync adapters' `Billing`-vs-`UsageAccrual` split done 2026-09-30/2026-10-01 (`flow/00` item #9d). `UsageAccrual` UI done 2026-10-04 (`flow/00` item #27, task #11 below). The `derivedStatus` → `status` cut-over — narrow, bug-fix-only scope, per the user's own explicit choice over the full vocabulary expansion — done 2026-10-04 (`flow/00` item #28, task #12 below). Only WP-5's own live trust-surface test remains, tracked separately in row 5 below, blocked on Pipedream. |
 | 5 | Trust surfaces | 1.5 | WP-4 | ⚠️ **First pass done (2026-10-01).** Origin badges, low-confidence flag, "view source email" detail dialog, status explanation, manual-edit attribution — all on the Billing table, see `flow/00` item #17. Per-connection freshness + the Reconnect banner turned out to already exist (`automation-view.tsx`). **Not done, by design:** duplicate flags + merge action (needs new detection logic and a real decision on what "merge" does to two financial records), the onboarding "confirm detected vendors" flow (item 45), and the new dashboard hierarchy (item 47) — `flow/08` itself calls both of those "larger" work. |
 | 6 | Recall: attachments & providers | 2.5 | WP-2, WP-4 | PDF parsing, direct Gmail/Outlook OAuth (`flow/05` item 38) — **same reasoning already applied to the Slack redesign** (`flow/extra-01`) |
 | 7 | Agent architecture | 2.0 | WP-4, ∥ WP-6 | ⚠️ **Partially done (2026-10-01)** — `MAX_ITERATIONS=8` (two-tier, soft+hard) and `AgentSession` re-keyed to `(user, organization)` are both ✅ done, see `flow/00-executive-summary.md` item #9c. **Config-in-repo is also ✅ done** — see item #15: `sync-agent-config.ts` re-synced against the live Console (was badly stale — 3 missing tools, a missing date-range schema) and, while investigating, an unintended `agent_toolset_20260401` (bash/web/filesystem, `always_allow`) grant was found live on the agent and disabled, traced via version history to a Console-UI save-default, not a deliberate decision. Intent router and the `getOrganizationIdForUser` consolidation remain explicitly **not** done — the former is a large, net-new sub-system the user deliberately deferred (asked for "small, safe leftover items" instead when offered the choice); the latter deferred with reasoning in `flow/01` item #5 (deliberately kept separate from `req.organization` since every real call site has no HTTP request in scope at all). |
@@ -178,6 +178,24 @@ already found:
     become the real `status` field (task #8's own explicitly-deferred decision) remains unraised with
     the user; WP-5's live trust-surface test against a real Gmail-derived record remains blocked on
     the Pipedream production/reconnect issue (separate, business-side blocker).
+12. ✅ **DONE (2026-10-04) — WP-4's last open decision: `derivedStatus` → `status` cutover, narrow
+    scope.** Full detail in `flow/00-executive-summary.md` item #28: user was asked directly (via
+    `AskUserQuestion`, not guessed) between a narrow bug-fix-only cutover and the full 11-state
+    vocabulary expansion once investigation showed the literal "copy the field" plan would have broken
+    validation/UI/notifications/analytics/the agent everywhere — chose narrow. New
+    `mapDerivedStatusToBillingStatus()` maps the richer result back onto the existing 3-state `status`;
+    `email-sync/sync-engine.ts`'s commit loop overwrites its own naive `status` write with the mapped,
+    full-history-aware value — this is what actually fixes GM-027 on the real `status` field, not just
+    the comparison-only `derivedStatus*` fields task #8 shipped. Scoped to email_sync only (manual
+    edits unaffected; the 129 billing-sync adapters confirmed to never call `recordBillingEvent` at
+    all, so zero effect there). 5 new tests (153 total, two consecutive full runs green) — including a
+    new `sync-engine.test.ts` driving the real `syncConnectionEmail()` pipeline end-to-end (mocking
+    only the Gmail/Outlook provider and the Anthropic call) to prove the fix through the real commit
+    loop, not just the pure function. Live-tested against real Atlas with the actual production
+    functions imported directly. **Deliberately not built**: the full 11-state vocabulary expansion
+    across the whole app — explicitly declined by the user for now, logged as a future decision. This
+    closes WP-4's domain-model line in full; the only remaining item in that whole row is WP-5's own
+    live trust-surface test, still blocked on the separate Pipedream production/reconnect issue.
 
 ---
 

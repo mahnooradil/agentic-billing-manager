@@ -3,14 +3,19 @@
  * dual-written `derivedStatus*` fields on the owning `Billing` document —
  * used by both sync-engine.ts (email_sync) and billing.controller.ts
  * (manual corrections) so the two never drift out of sync with each other.
- * Never touches `Billing.status` itself — see billing.model.ts's
- * `derivedStatus` docstring for why.
+ * Does not itself write `Billing.status` — email-sync/sync-engine.ts is the
+ * one caller that maps the returned result (via
+ * `mapDerivedStatusToBillingStatus`) onto `status`; see its commit loop.
  */
 import { Types } from "mongoose";
 
 import { Billing } from "@/models/billing.model";
 import { BillingEvent, type BillingEventType } from "@/models/billing-event.model";
-import { deriveStatus, type BillingEventLike } from "@/services/billing/status-machine";
+import {
+  deriveStatus,
+  type BillingEventLike,
+  type DerivedStatusResult,
+} from "@/services/billing/status-machine";
 
 export interface RecordBillingEventInput {
   organization: Types.ObjectId;
@@ -33,9 +38,13 @@ export interface RecordBillingEventInput {
  * rather than only ever reacting to whatever was written most recently.
  * Best-effort on the Billing update — a failure to write the derived fields
  * must never break the caller's own write (the real `status` field), since
- * this is a comparison/observability layer, not the source of truth yet.
+ * this remains a comparison/observability layer at the model level; it is
+ * the CALLER's choice whether to also act on the returned result.
+ * Returns `null` if the recompute itself failed (best-effort, not fatal).
  */
-export async function recordBillingEvent(input: RecordBillingEventInput): Promise<void> {
+export async function recordBillingEvent(
+  input: RecordBillingEventInput
+): Promise<DerivedStatusResult | null> {
   await BillingEvent.create({
     organization: input.organization,
     billing: input.billing,
@@ -49,25 +58,30 @@ export async function recordBillingEvent(input: RecordBillingEventInput): Promis
     ...(input.createdBy ? { createdBy: input.createdBy } : {}),
   });
 
-  await recomputeDerivedStatus(input.billing).catch(() => {
+  return recomputeDerivedStatus(input.billing).catch(() => {
     // Best-effort — the real `status` field (written independently by the
     // caller) is what the app actually runs on; this comparison layer must
     // never fail the caller's own operation.
+    return null;
   });
 }
 
 /** Re-reads a Billing record's full event history and its own `dueDate`,
  *  runs `deriveStatus()`, and stores the result. Exported separately from
  *  `recordBillingEvent` so the vendor/index backfill-style migration this
- *  task also ships can recompute in bulk without re-appending events. */
-export async function recomputeDerivedStatus(billingId: Types.ObjectId): Promise<void> {
+ *  task also ships can recompute in bulk without re-appending events.
+ *  Returns the computed result (or `null` if the record no longer exists)
+ *  so a caller can act on it beyond just persisting `derivedStatus*`. */
+export async function recomputeDerivedStatus(
+  billingId: Types.ObjectId
+): Promise<DerivedStatusResult | null> {
   const [billing, events] = await Promise.all([
     Billing.findById(billingId).select("dueDate"),
     BillingEvent.find({ billing: billingId }).select(
       "type occurredAt confidence source correctedStatus"
     ),
   ]);
-  if (!billing) return;
+  if (!billing) return null;
 
   const eventLikes: BillingEventLike[] = events.map((e) => ({
     type: e.type,
@@ -91,4 +105,6 @@ export async function recomputeDerivedStatus(billingId: Types.ObjectId): Promise
       },
     }
   );
+
+  return result;
 }
