@@ -16,7 +16,8 @@ export interface GmailHeader {
 
 export interface GmailMessagePart {
   mimeType?: string;
-  body?: { data?: string; size?: number };
+  filename?: string;
+  body?: { data?: string; size?: number; attachmentId?: string };
   parts?: GmailMessagePart[];
 }
 
@@ -81,6 +82,34 @@ export async function getMessage(
       `${GMAIL_API_BASE}/messages/${encodeURIComponent(messageId)}?format=full`
     )) as GmailMessage | null;
     return data?.id ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+interface RawAttachmentResponse {
+  data?: string;
+  size?: number;
+}
+
+/** Fetches ONE attachment's raw bytes (base64url) — `format=full` above
+ *  already returns the MIME tree with each attachment part's `attachmentId`,
+ *  but Gmail only inlines the actual bytes for small embedded parts; a real
+ *  PDF invoice attachment needs this separate call. Null on any failure —
+ *  one unreadable attachment must never abort the message it belongs to. */
+export async function getAttachment(
+  externalUserId: string,
+  pipedreamAccountId: string,
+  messageId: string,
+  attachmentId: string
+): Promise<Buffer | null> {
+  try {
+    const data = (await connectProxyRequest(
+      externalUserId,
+      pipedreamAccountId,
+      `${GMAIL_API_BASE}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`
+    )) as RawAttachmentResponse | null;
+    return data?.data ? Buffer.from(data.data, "base64url") : null;
   } catch {
     return null;
   }

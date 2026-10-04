@@ -3,8 +3,18 @@
  * message normalization live here; the raw REST calls stay in gmail-client.ts.
  */
 import type { EmailSyncProvider } from "@/services/email-sync/provider";
-import { listCandidateMessageIds, getMessage } from "@/services/email-sync/gmail-client";
-import { extractPlainText, parseAuthenticationResults } from "@/services/email-sync/parser";
+import {
+  listCandidateMessageIds,
+  getMessage,
+  getAttachment,
+  type GmailMessage,
+} from "@/services/email-sync/gmail-client";
+import {
+  extractPlainText,
+  findPdfAttachmentParts,
+  parseAuthenticationResults,
+} from "@/services/email-sync/parser";
+import { extractPdfText } from "@/services/email-sync/pdf-extractor";
 
 const INVOICE_KEYWORDS = [
   "invoice",
@@ -66,6 +76,39 @@ function buildSearchQuery(sinceDate: Date | null, trackedSenders: string[]): str
   return `${subject} ${noise} ${window}`;
 }
 
+/** WP-6 attachment recall — appends any PDF attachment's extracted text to
+ *  the message's own body text (never replaces it: a short "see attached
+ *  invoice" body plus the PDF's real content is the best case for the AI
+ *  extractor). The combined result flows through the SAME `<email>`
+ *  untrusted-data framing and `MAX_BODY_CHARS` truncation
+ *  `ai-invoice-extractor.ts` already applies to `plainText` — no separate
+ *  defense needed for attachment-derived text, it's just more of the same
+ *  field. Best-effort per attachment: one unreadable/corrupt PDF is skipped,
+ *  never aborts the message. */
+async function appendPdfAttachmentText(
+  externalUserId: string,
+  pipedreamAccountId: string,
+  message: GmailMessage,
+  bodyText: string
+): Promise<string> {
+  const pdfParts = findPdfAttachmentParts(message);
+  if (pdfParts.length === 0) return bodyText;
+
+  const extracted: string[] = [];
+  for (const part of pdfParts) {
+    const buffer = part.inlineData
+      ? Buffer.from(part.inlineData, "base64url")
+      : part.attachmentId
+        ? await getAttachment(externalUserId, pipedreamAccountId, message.id, part.attachmentId)
+        : null;
+    if (!buffer) continue;
+    const text = await extractPdfText(buffer);
+    if (text) extracted.push(`[Attachment: ${part.filename}]\n${text}`);
+  }
+  if (extracted.length === 0) return bodyText;
+  return `${bodyText}\n\n${extracted.join("\n\n")}`;
+}
+
 export const GMAIL_PROVIDER: EmailSyncProvider = {
   dedupePrefix: "gmail",
   notesText: "Parsed from a Gmail message (fallback email sync).",
@@ -97,12 +140,18 @@ export const GMAIL_PROVIDER: EmailSyncProvider = {
       parsedInternalDate && !Number.isNaN(parsedInternalDate.getTime())
         ? parsedInternalDate
         : new Date();
+    const plainText = await appendPdfAttachmentText(
+      externalUserId,
+      pipedreamAccountId,
+      message,
+      extractPlainText(message)
+    );
     return {
       id: message.id,
       threadId: message.threadId,
       receivedAt,
       subject,
-      plainText: extractPlainText(message),
+      plainText,
       fromHeader,
       replyToHeader,
       authResults,

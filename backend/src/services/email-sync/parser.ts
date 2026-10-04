@@ -60,6 +60,46 @@ export function extractPlainText(message: GmailMessage): string {
   return message.snippet ?? "";
 }
 
+export interface PdfAttachmentPart {
+  filename: string;
+  /** Inline bytes, when Gmail embedded them directly (rare for a real
+   *  attachment-sized file) — present XOR `attachmentId`. */
+  inlineData?: string;
+  /** Needs a separate `gmail-client.ts#getAttachment` call to fetch the
+   *  actual bytes — the normal case for a real PDF invoice. */
+  attachmentId?: string;
+}
+
+const MAX_PDF_ATTACHMENTS_PER_MESSAGE = 3;
+
+/** Finds every PDF attachment part in a message's MIME tree (by MIME type OR
+ *  a `.pdf` filename — some senders mislabel the type as the generic
+ *  `application/octet-stream`). Bounded so one pathological email with many
+ *  attachments can't balloon a sync run's attachment-fetch volume. */
+export function findPdfAttachmentParts(message: GmailMessage): PdfAttachmentPart[] {
+  const found: PdfAttachmentPart[] = [];
+
+  function walk(part: GmailMessagePart | undefined): void {
+    if (!part || found.length >= MAX_PDF_ATTACHMENTS_PER_MESSAGE) return;
+    const looksLikePdf =
+      part.mimeType === "application/pdf" || /\.pdf$/i.test(part.filename ?? "");
+    if (looksLikePdf && (part.body?.data || part.body?.attachmentId)) {
+      found.push({
+        filename: part.filename || "attachment.pdf",
+        inlineData: part.body?.data,
+        attachmentId: part.body?.attachmentId,
+      });
+    }
+    for (const child of part.parts ?? []) {
+      if (found.length >= MAX_PDF_ATTACHMENTS_PER_MESSAGE) break;
+      walk(child);
+    }
+  }
+
+  walk(message.payload);
+  return found;
+}
+
 /** Best-effort vendor display name + email + domain from a `From` header, used
  *  for `customerName`, the dedupe key namespace, and (email) the record's
  *  provenance trail — never a hard requirement. */

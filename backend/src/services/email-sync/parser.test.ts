@@ -4,7 +4,72 @@ import {
   parseAuthenticationResults,
   hasReplyToMismatch,
   applySenderTrustPenalty,
+  findPdfAttachmentParts,
 } from "@/services/email-sync/parser";
+import type { GmailMessage } from "@/services/email-sync/gmail-client";
+
+describe("findPdfAttachmentParts (WP-6 attachment recall)", () => {
+  function message(payload: GmailMessage["payload"]): GmailMessage {
+    return { id: "m1", threadId: "t1", payload };
+  }
+
+  it("finds a PDF part by mimeType, with its attachmentId", () => {
+    const msg = message({
+      mimeType: "multipart/mixed",
+      parts: [
+        { mimeType: "text/plain", body: { data: "aGk", size: 2 } },
+        {
+          mimeType: "application/pdf",
+          filename: "invoice.pdf",
+          body: { attachmentId: "att-1", size: 50000 },
+        },
+      ],
+    });
+    const found = findPdfAttachmentParts(msg);
+    expect(found).toEqual([{ filename: "invoice.pdf", inlineData: undefined, attachmentId: "att-1" }]);
+  });
+
+  it("finds a PDF by filename even when mislabeled as application/octet-stream", () => {
+    const msg = message({
+      mimeType: "multipart/mixed",
+      parts: [
+        {
+          mimeType: "application/octet-stream",
+          filename: "Receipt-2026.pdf",
+          body: { attachmentId: "att-2" },
+        },
+      ],
+    });
+    const found = findPdfAttachmentParts(msg);
+    expect(found).toHaveLength(1);
+    expect(found[0].filename).toBe("Receipt-2026.pdf");
+  });
+
+  it("ignores a non-PDF attachment (e.g. an embedded logo image)", () => {
+    const msg = message({
+      mimeType: "multipart/mixed",
+      parts: [{ mimeType: "image/png", filename: "logo.png", body: { attachmentId: "att-3" } }],
+    });
+    expect(findPdfAttachmentParts(msg)).toEqual([]);
+  });
+
+  it("returns an empty array for a message with no attachments", () => {
+    const msg = message({ mimeType: "text/plain", body: { data: "aGk" } });
+    expect(findPdfAttachmentParts(msg)).toEqual([]);
+  });
+
+  it("caps at 3 PDF attachments for one pathological message", () => {
+    const msg = message({
+      mimeType: "multipart/mixed",
+      parts: Array.from({ length: 10 }, (_, i) => ({
+        mimeType: "application/pdf",
+        filename: `file-${i}.pdf`,
+        body: { attachmentId: `att-${i}` },
+      })),
+    });
+    expect(findPdfAttachmentParts(msg)).toHaveLength(3);
+  });
+});
 
 describe("parseAuthenticationResults (Task 9, S-08)", () => {
   it("parses a real Gmail-style Authentication-Results header", () => {

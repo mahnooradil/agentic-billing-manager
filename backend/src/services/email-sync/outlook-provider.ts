@@ -8,8 +8,44 @@
  * done (see `sortedNewestFirstUnfiltered` below).
  */
 import type { EmailSyncProvider } from "@/services/email-sync/provider";
-import { listCandidateMessageIds, getMessage } from "@/services/email-sync/outlook-client";
+import {
+  listCandidateMessageIds,
+  getMessage,
+  getAttachments,
+} from "@/services/email-sync/outlook-client";
 import { stripHtml, parseAuthenticationResults } from "@/services/email-sync/parser";
+import { extractPdfText } from "@/services/email-sync/pdf-extractor";
+
+const MAX_PDF_ATTACHMENTS_PER_MESSAGE = 3;
+
+/** WP-6 attachment recall — mirrors gmail-provider.ts's identical fix. Graph
+ *  inlines attachment bytes directly (no separate per-attachment call), so
+ *  this is simpler than Gmail's version: list once, filter to PDFs, decode. */
+async function appendPdfAttachmentText(
+  externalUserId: string,
+  pipedreamAccountId: string,
+  messageId: string,
+  bodyText: string
+): Promise<string> {
+  const attachments = await getAttachments(externalUserId, pipedreamAccountId, messageId);
+  const pdfAttachments = attachments
+    .filter(
+      (a) =>
+        a.contentBytes &&
+        (a.contentType === "application/pdf" || /\.pdf$/i.test(a.name ?? ""))
+    )
+    .slice(0, MAX_PDF_ATTACHMENTS_PER_MESSAGE);
+  if (pdfAttachments.length === 0) return bodyText;
+
+  const extracted: string[] = [];
+  for (const attachment of pdfAttachments) {
+    const buffer = Buffer.from(attachment.contentBytes as string, "base64");
+    const text = await extractPdfText(buffer);
+    if (text) extracted.push(`[Attachment: ${attachment.name ?? "attachment.pdf"}]\n${text}`);
+  }
+  if (extracted.length === 0) return bodyText;
+  return `${bodyText}\n\n${extracted.join("\n\n")}`;
+}
 
 /** Graph's `emailAddress` shape -> the "Name <email>" format `parser.ts`'s
  *  `parseSender` expects, matching Gmail's raw header format so both
@@ -65,8 +101,11 @@ export const OUTLOOK_PROVIDER: EmailSyncProvider = {
     if (!message) return null;
 
     const body = message.body?.content ?? "";
-    const plainText =
+    const bodyText =
       message.body?.contentType?.toLowerCase() === "text" ? body : stripHtml(body);
+    const plainText = message.hasAttachments
+      ? await appendPdfAttachmentText(externalUserId, pipedreamAccountId, messageId, bodyText)
+      : bodyText;
 
     const fromHeader = formatEmailAddress(message.from?.emailAddress);
     const replyToHeader = formatEmailAddress(message.replyTo?.[0]?.emailAddress);
