@@ -5,6 +5,8 @@ import { Billing } from "@/models/billing.model";
 import { BillingEvent } from "@/models/billing-event.model";
 import { Organization } from "@/models/organization.model";
 import { PlatformConnection } from "@/models/platform-connection.model";
+import { ProcessedMessage } from "@/models/processed-message.model";
+import { SenderProfile } from "@/models/sender-profile.model";
 import { syncConnectionEmail } from "@/services/email-sync/sync-engine";
 import type { EmailSyncProvider, NormalizedEmailMessage } from "@/services/email-sync/provider";
 
@@ -218,5 +220,116 @@ describe("syncConnectionEmail — GM-027 cutover (real DB, mocked provider + AI 
     const billing = await Billing.findOne({ organization: organization._id });
     expect(billing?.status).toBe("Overdue");
     expect(billing?.derivedStatus).toBe("overdue");
+  });
+});
+
+/**
+ * WP-11 learning loop, integration-level: proves the suppression check
+ * actually skips the (mocked) AI extractor call entirely — not just that
+ * the service function returns the right answer in isolation (already
+ * covered by sender-trust.test.ts) — and that a trusted sender's confidence
+ * genuinely gets raised in the real commit loop.
+ */
+describe("syncConnectionEmail — WP-11 sender trust integration", () => {
+  beforeEach(() => {
+    vi.mocked(getEmailSyncProvider).mockReset();
+  });
+
+  async function seedOrgAndConnection() {
+    const organization = await Organization.create({ name: "Sender Trust Test Org", creditsBalance: 10_000 });
+    const userId = new Types.ObjectId();
+    const connection = await PlatformConnection.create({
+      organization: organization._id,
+      user: userId,
+      platform: "gmail",
+      accountIdentifier: "owner@example.com",
+      displayName: "Gmail",
+      status: "connected",
+      connectionType: "oauth",
+      metadata: { pipedreamAccountId: "apn_test123" },
+    });
+    return { organization, connection };
+  }
+
+  it("a suppressed sender's candidate message never reaches the AI extractor, costs 0 credits, marked suppressed_sender", async () => {
+    const { organization, connection } = await seedOrgAndConnection();
+    await SenderProfile.create({
+      organization: organization._id,
+      domain: "aws.amazon.com",
+      trust: "suppressed",
+    });
+
+    mockExtraction({}); // would fail the test if actually called with an unexpected subject
+    const extractSpy = vi.mocked(extractInvoiceFields);
+    vi.mocked(getEmailSyncProvider).mockReturnValue(
+      fakeProvider([
+        message({ id: "msg-suppressed-1", receivedAt: new Date("2026-02-01"), subject: "Your invoice" }),
+      ])
+    );
+
+    const freshConnection = await PlatformConnection.findById(connection._id);
+    if (!freshConnection) throw new Error("seed failed");
+
+    const creditsBefore = (await Organization.findById(organization._id))?.creditsBalance;
+    await syncConnectionEmail(freshConnection);
+    const creditsAfter = (await Organization.findById(organization._id))?.creditsBalance;
+
+    expect(extractSpy).not.toHaveBeenCalled();
+    expect(creditsAfter).toBe(creditsBefore); // 0 credits spent
+
+    const billing = await Billing.find({ organization: organization._id });
+    expect(billing).toHaveLength(0);
+
+    const processed = await ProcessedMessage.findOne({
+      connection: connection._id,
+      messageId: "msg-suppressed-1",
+    });
+    expect(processed?.outcome).toBe("suppressed_sender");
+  });
+
+  it("a trusted sender's low raw confidence gets raised to the trust floor", async () => {
+    const { organization, connection } = await seedOrgAndConnection();
+    await SenderProfile.create({
+      organization: organization._id,
+      domain: "aws.amazon.com",
+      trust: "trusted",
+    });
+
+    // The AI's own raw confidence (0.3) is well below the trust floor —
+    // proves the floor actually overrides it, not just passes it through.
+    mockExtraction({ "Your invoice": { status: "Pending", confidence: 0.3 } });
+    vi.mocked(getEmailSyncProvider).mockReturnValue(
+      fakeProvider([
+        message({ id: "msg-trusted-1", receivedAt: new Date("2026-02-01"), subject: "Your invoice" }),
+      ])
+    );
+
+    const freshConnection = await PlatformConnection.findById(connection._id);
+    if (!freshConnection) throw new Error("seed failed");
+    await syncConnectionEmail(freshConnection);
+
+    const billing = await Billing.findOne({ organization: organization._id });
+    expect(billing?.extractionConfidence).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it("a NEUTRAL (never-evaluated) sender behaves exactly as before — no behavior change for the common case", async () => {
+    const { organization, connection } = await seedOrgAndConnection();
+    // No SenderProfile created at all — the realistic "never seen this
+    // domain before" case.
+
+    mockExtraction({ "Your invoice": { status: "Pending", confidence: 0.9 } });
+    vi.mocked(getEmailSyncProvider).mockReturnValue(
+      fakeProvider([
+        message({ id: "msg-neutral-1", receivedAt: new Date("2026-02-01"), subject: "Your invoice" }),
+      ])
+    );
+
+    const freshConnection = await PlatformConnection.findById(connection._id);
+    if (!freshConnection) throw new Error("seed failed");
+    await syncConnectionEmail(freshConnection);
+
+    const billing = await Billing.findOne({ organization: organization._id });
+    expect(billing).not.toBeNull();
+    expect(billing?.extractionConfidence).toBe(0.9); // untouched, no floor applied
   });
 });

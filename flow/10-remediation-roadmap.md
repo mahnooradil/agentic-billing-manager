@@ -24,7 +24,7 @@ reconciliation of everything scattered across the other nine files into one plac
 | 8 | Injection defense & sender verification | 1.0 | WP-6, WP-7 | ✅ **Done (2026-09-26), ahead of its own listed dependencies.** System-prompt framing, SPF/DKIM/DMARC capture, output sanitization — all three built and live-verified against the real Anthropic API on 2026-10-03 (two real adversarial-email attacks, both correctly handled). See task #9 below. The WP-6/WP-7 dependency listed here didn't turn out to be a hard one — this work didn't actually need PDF parsing/direct OAuth or the agent intent router to exist first. |
 | 9 | **Payments** | 2.5 | WP-1, ∥ WP-4/5 | ✅ **Done (2026-09-29) — the "ON HOLD" below is now stale.** The user's own explicit go-ahead ("chalo phir Task 10 shuru karo") unblocked this; full Stripe subscription/plan-tier architecture built — see task #10 below and the "Reconciliation" section further down this file. No live Stripe account exists in this environment, so this was verified against realistic fixtures, not a real webhook delivery — "refund" (one of 9 scenarios) also not implemented, both disclosed as real gaps in task #10's own entry. |
 | 10 | Scale | 2.0 | WP-2 | ⏸️ **Deliberately deferred (2026-10-05), user's own explicit choice when asked.** Worker process, Redis/BullMQ, distributed locks (`flow/06`'s infra-evolution table — the ~50-customer trigger). Real Atlas data checked at the time: 5 organizations, 4 users, 1 connected platform — nowhere near the trigger condition this work is scoped against. Building it now would add real cost/complexity (+$35/mo, a new Redis dependency) for a problem that doesn't exist yet — revisit once real usage actually approaches ~50 customers. |
-| 11 | Learning loop | 2.0 | WP-4, 5, 8 | `SenderProfile`, `ClassificationFeedback`, `UserRule`, nightly job (`flow/04` item 33) |
+| 11 | Learning loop | 2.0 | WP-4, 5, 8 | ✅ **Done (2026-10-05).** See `flow/00` item #34. `SenderProfile` + `ClassificationFeedback` built, nightly trust-evaluation job wired into `sync-engine.ts` (suppressed senders skipped before any AI call, trusted senders get a confidence floor). `UserRule`'s "ignore domain X" folded into `SenderProfile.manuallySet` rather than a separate model — disclosed scope simplification. `UserRule`'s "remind N days before Z" and flow/04's "Global" curated-vendor-registry tier both deliberately not built (a different concept; an ongoing content-curation task, not a coding feature, respectively). |
 | 12 | Privacy & retention | 1.0 | WP-4 | ✅ **Done (2026-10-04).** All five named items landed: transactional deletion (item #24), audit log on financial mutations (item #25), and full data export + OAuth-consent privacy copy + a retention policy statement (item #26) — all live-tested against real Atlas. **Deliberately not built:** automatic time-based data deletion — the user explicitly chose a written retention statement over an automated deletion mechanism when asked, since guessing wrong there risks real financial data. |
 
 **Total: 21.5 engineer-weeks → ~26 with a 20% review/unknowns buffer.** ~4 months solo, ~2.5 months
@@ -252,6 +252,20 @@ already found:
     out of scope**: a full reservation/lock-based credit system — the existing design already accepts a
     small single-turn overdraft as intentional; this closes the unbounded-magnitude bug (many stale-
     cached requests passing at once), not that already-accepted case.
+17. ✅ **DONE (2026-10-05) — WP-11, the learning loop (flow/04 §7).** Full detail in `flow/00-
+    executive-summary.md` item #34. The last never-started WP with a real spec. `SenderProfile`/
+    `ClassificationFeedback` built; a human deleting an email_sync record (the one unambiguous "AI got
+    this wrong" signal) increments false-positive counts in real time, a nightly job recomputes
+    confirmed-invoice counts (3-day grace period) and applies the trust thresholds flow/04 specifies —
+    suppressed senders are skipped before any AI call (0 credits), trusted senders get a confidence
+    floor raised. `UserRule`'s domain-ignore capability folded into `SenderProfile.manuallySet` rather
+    than a second model — a disclosed simplification, not a silent scope cut. 29 new tests (248 total,
+    two consecutive full runs green); backend+frontend clean; live-tested end-to-end against real
+    Atlas and the real server (3 real deletes → real false-positive count → real nightly-job suppression
+    → real notification → real restore). **This closes the WP-0 through WP-12 set entirely** — every
+    item has now had full completion, a deliberate documented scope decision, or a deliberate documented
+    deferral; nothing remains silently untouched. Open items: WP-9 (no live Stripe test), WP-6 (direct-
+    OAuth half blocked externally), WP-10 (deliberately deferred pending real usage).
 
 ---
 

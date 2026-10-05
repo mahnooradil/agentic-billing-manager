@@ -34,6 +34,8 @@ import { CreditTransaction } from "@/models/credit-transaction.model";
 import { Invitation } from "@/models/invitation.model";
 import { Subscription } from "@/models/subscription.model";
 import { AuditLog } from "@/models/audit-log.model";
+import { SenderProfile } from "@/models/sender-profile.model";
+import { ClassificationFeedback } from "@/models/classification-feedback.model";
 import { sendOtpEmail } from "@/services/email/resend";
 import { resetAgentSession, resetAllAgentSessionsForUser } from "@/services/agent/managed-agent.service";
 import { cancelActiveSubscription } from "@/services/payments/stripe-subscription.service";
@@ -563,6 +565,8 @@ export const deleteAccount = asyncHandler(async (req, res) => {
         await Invitation.deleteMany({ organization: m.organization }, { session });
         await Subscription.deleteMany({ organization: m.organization }, { session });
         await AuditLog.deleteMany({ organization: m.organization }, { session });
+        await SenderProfile.deleteMany({ organization: m.organization }, { session });
+        await ClassificationFeedback.deleteMany({ organization: m.organization }, { session });
         await Organization.deleteOne({ _id: m.organization }, { session });
       }
       await Membership.deleteMany({ user: user._id }, { session });

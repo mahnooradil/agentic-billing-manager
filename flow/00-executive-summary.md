@@ -1679,6 +1679,86 @@ the document cites, not assumed from the document text.
       closes the part that was a real, unbounded-magnitude bug (N stale-cached requests all passing at
       once), not the already-accepted single-turn case.
 
+34. ✅ **DONE (2026-10-05) — WP-11, the learning loop (flow/04 §7).** The one remaining never-started
+    WP with a concrete design already written. WP-10 (Scale) was explicitly deferred instead when
+    offered — real Atlas usage (5 orgs, 4 users, 1 connection) is nowhere near its own documented
+    ~50-customer trigger, so building it now would add cost/complexity for a problem that doesn't
+    exist yet; WP-11 has no such timing problem (the mechanism is dormant and harmless until real data
+    flows through it, not scale-driven complexity), so it was built.
+    - **Models** — `SenderProfile` (`{organization, domain, trust: neutral|trusted|suppressed,
+      confirmedInvoiceCount, falsePositiveCount, manuallySet}`) and `ClassificationFeedback` (an
+      append-only log, same pattern as `BillingEvent`/`AuditLog` — `SenderProfile`'s counts are
+      DERIVED/recomputable from this, not the sole source of truth). **Scope simplification, disclosed
+      not silent**: flow/04 also names a separate `UserRule` model for "ignore domain X" — folded into
+      `SenderProfile.manuallySet` instead of a second model, since a manual suppression and a learned
+      one answer the exact same question and two models would just need reconciliation logic a single
+      flag already gives for free. `UserRule`'s OTHER half ("remind N days before Z") is a different
+      concept (a custom reminder, not sender trust) and was NOT built — flagged as separate, unspecified
+      scope, not an oversight.
+    - **The real-time half** — a human deleting an email_sync Billing record is the one discrete,
+      unambiguous "the AI got this wrong" signal this system has (duplicates are merged, not deleted —
+      WP-5 — so a delete here specifically means "not a real invoice"). `billing.controller.ts`'s
+      `deleteBillingRecord` now calls `recordFalsePositive()` for exactly that case: atomically
+      increments `SenderProfile.falsePositiveCount` and appends a `ClassificationFeedback` entry.
+    - **The nightly half** (`sender-profile-scheduler.ts`, same `setTimeout`+`setInterval` pattern as
+      every other scheduler in this codebase) — there's no discrete "user confirmed this" action to
+      hook into in real time, so `confirmedInvoiceCount` is recomputed daily instead: an email_sync
+      Billing record that's survived (not been deleted) for at least 3 days counts as a real
+      confirmation — a record synced an hour ago hasn't had a fair chance to be reviewed yet. Trust
+      transitions exactly as flow/04 specifies: ≥3 false positives AND 0 confirmed → `suppressed`; ≥3
+      confirmed → `trusted`; neither → reverts to `neutral`. `manuallySet` profiles are never touched by
+      this evaluation — a human's own explicit choice always wins. A NEW suppression creates a real
+      `Notification` ("tells the user it did, with an undo" — flow/04's own stated requirement).
+    - **Pipeline integration** (`sync-engine.ts`) — a suppressed sender's candidate message is now
+      checked and skipped **before** the AI extraction call even happens (0 credits spent, marked with
+      a new `ProcessedMessage` outcome, `suppressed_sender`, distinct from `not_billing` — that one DID
+      cost credits, this one didn't). A trusted sender gets the opposite treatment: its extraction
+      confidence is raised to a floor (0.75) rather than only ever being penalized — Task 9's existing
+      `applySenderTrustPenalty` already covered the negative direction; this is the positive one,
+      applied after the penalty, not instead of it.
+    - **API + UI** — `GET/POST /api/sender-profiles` (list non-neutral profiles, manually suppress,
+      restore — owner/admin only for mutations, matching every other billing-affecting RBAC tier in
+      this codebase). New "Sender trust" section on the Platforms page (same placement pattern as
+      "Vendors to confirm" and "Usage & balances") showing muted/trusted senders with a one-click
+      Restore or Mute action.
+    - **Tested** — 29 new backend tests across 4 files: `sender-trust.test.ts` (10 — upsert semantics,
+      org-scoping, the restore-must-reset-falsePositiveCount property specifically called out since
+      leaving it non-zero would let the nightly job immediately re-suppress), `sender-profile-
+      scheduler.test.ts` (9 — the threshold math, the ambiguous-signal case where false positives AND
+      confirmations both exist deliberately stays neutral, the 3-day grace period actually excluding a
+      too-recent record, `manuallySet` profiles genuinely untouched even when auto-criteria would
+      otherwise flip them, a stale "trusted" label correctly reverting when it no longer qualifies),
+      `sync-engine.test.ts` (3 new — a suppressed sender's mocked AI extractor is proven NEVER CALLED at
+      all via a spy assertion, not just that the end result is correct; a trusted sender's raw 0.3
+      confidence genuinely gets raised to the 0.75 floor; a neutral/never-seen sender behaves byte-for-
+      byte identically to before this feature existed), `sender-profile.test.ts` (7, real HTTP — list/
+      suppress/restore/RBAC/404-never-leaks, plus the delete-hook end-to-end). A real Mongoose gotcha
+      was caught and fixed while writing these: `timestamps: true` makes `createdAt` an immutable path,
+      so a test helper's `updateOne({$set: {createdAt}})` was silently a no-op — confirmed directly with
+      a throwaway script before fixing it to pass `createdAt` at `create()` time instead. 248 total
+      backend tests, two consecutive full runs green. Backend AND frontend `tsc`/`lint`/`build` clean
+      (full production build, 15 routes). **Live-tested against the real Atlas database and the real
+      running server**: created 3 real email_sync Billing records from the same sender, deleted all 3
+      via real `DELETE /api/billing/:id` calls, confirmed `falsePositiveCount` reached 3 for real, ran
+      the actual production `evaluateOrganization()` function (not a mock) and confirmed it correctly
+      flipped the sender to `suppressed` with `confirmedInvoiceCount: 0`, confirmed a real `Notification`
+      was created with the right signature/copy, confirmed it appeared via a real `GET /api/sender-
+      profiles` call, then restored it via a real `POST /sender-profiles/:id/restore` call and confirmed
+      the reset was genuine (`trust: "neutral"`, `falsePositiveCount: 0`). Cleaned up and re-verified
+      every collection touched was gone. New model indexes (`SenderProfile`/`ClassificationFeedback`)
+      confirmed already present in the live database (auto-created by the dev server's own `autoIndex`)
+      before this was ever pushed, so production's `assertIndexesInSync()` boot check won't fail.
+    - **Honest scope note**: the "Global" tier flow/04 §7 also names (a curated vendor registry
+      "maintained by us... never derived from customer data") was deliberately NOT built — it's an
+      ongoing content-curation task, not a buildable feature with a clear spec, genuinely different in
+      kind from the Organization-tier learning loop this item delivers. This completes WP-11 as
+      concretely scoped. **Every WP from 0 through 12 has now had at least one of: full completion,
+      deliberate scoping, or deliberate, documented deferral** — nothing in the original 13-item set
+      remains silently untouched. The only items still genuinely open anywhere: WP-9 has no live Stripe
+      test (no live Stripe account exists in this environment), WP-6's direct-OAuth half is blocked on
+      Google/Microsoft's external review process, and WP-10 is deliberately deferred pending real usage
+      actually approaching its own ~50-customer trigger.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

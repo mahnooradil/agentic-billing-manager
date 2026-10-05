@@ -10,6 +10,7 @@ import { startDueDateScheduler } from "@/services/notification/due-date-schedule
 import { warmCatalogCache } from "@/services/integrations/pipedream";
 import { startBillingSyncScheduler } from "@/services/billing-sync/scheduler";
 import { startEmailSyncScheduler } from "@/services/email-sync/scheduler";
+import { startSenderProfileScheduler } from "@/services/email-sync/sender-profile-scheduler";
 import { startCreditResetScheduler } from "@/services/credits/credit-reset-scheduler";
 import { startCreditReconciliationScheduler } from "@/services/credits/credit-reconciliation-scheduler";
 import { assertNoLiveStripeKeyOutsideProduction } from "@/services/payments/stripe-subscription.service";
@@ -55,6 +56,7 @@ async function startServer(): Promise<void> {
     warmCatalogCache();
     startBillingSyncScheduler();
     startEmailSyncScheduler();
+    startSenderProfileScheduler();
     startDueDateScheduler();
     startCreditResetScheduler();
     startCreditReconciliationScheduler();

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Boxes, Check, Filter, Mail, Plus, X } from "lucide-react";
+import { BellOff, Boxes, Check, Filter, Mail, Plus, RotateCcw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -37,10 +37,16 @@ import {
   confirmVendor,
   rejectVendor,
 } from "@/services/connections/vendor.service";
+import {
+  listSenderProfiles,
+  suppressSenderProfile,
+  restoreSenderProfile,
+} from "@/services/connections/sender-profile.service";
 import type { PlatformConnection } from "@/services/types/platform-connections";
 import type { BillingRecord } from "@/services/types/billing";
 import type { UsageAccrual } from "@/services/types/usage-accrual";
 import type { PendingVendor } from "@/services/types/vendor";
+import type { SenderProfile } from "@/services/types/sender-profile";
 import { PlatformLogo } from "@/components/platforms/platform-logo";
 import { ConnectPlatformDialog } from "@/components/platforms/connect-platform-dialog";
 import { EmailPrivacyConsentDialog } from "@/components/platforms/email-privacy-consent-dialog";
@@ -55,6 +61,7 @@ interface PlatformsCachePayload {
   billingRecords: BillingRecord[];
   usageAccruals: UsageAccrual[];
   pendingVendors: PendingVendor[];
+  senderProfiles: SenderProfile[];
 }
 
 interface ConnectedPlatformRow {
@@ -111,6 +118,10 @@ function PlatformsViewInner() {
     cached?.pendingVendors ?? []
   );
   const [vendorActionId, setVendorActionId] = React.useState<string | null>(null);
+  const [senderProfiles, setSenderProfiles] = React.useState<SenderProfile[]>(
+    cached?.senderProfiles ?? []
+  );
+  const [senderActionId, setSenderActionId] = React.useState<string | null>(null);
   const [loadError, setLoadError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
   const reload = () => setReloadKey((key) => key + 1);
@@ -137,24 +148,28 @@ function PlatformsViewInner() {
     (async () => {
       if (!readPageCache<PlatformsCachePayload>(CACHE_KEY)) setStatus("loading");
       try {
-        const [connectionsRes, billingRes, usageRes, pendingVendorsRes] = await Promise.all([
-          listPlatformConnections(),
-          listBillingRecords(),
-          listUsageAccruals(),
-          listPendingVendors(),
-        ]);
+        const [connectionsRes, billingRes, usageRes, pendingVendorsRes, senderProfilesRes] =
+          await Promise.all([
+            listPlatformConnections(),
+            listBillingRecords(),
+            listUsageAccruals(),
+            listPendingVendors(),
+            listSenderProfiles(),
+          ]);
         if (ignore) return;
         const payload: PlatformsCachePayload = {
           connections: connectionsRes.data.connections,
           billingRecords: billingRes.data.billingRecords,
           usageAccruals: usageRes.data.accruals,
           pendingVendors: pendingVendorsRes.data.vendors,
+          senderProfiles: senderProfilesRes.data.profiles,
         };
         writePageCache(CACHE_KEY, payload);
         setConnections(payload.connections);
         setBillingRecords(payload.billingRecords);
         setUsageAccruals(payload.usageAccruals);
         setPendingVendors(payload.pendingVendors);
+        setSenderProfiles(payload.senderProfiles);
         setStatus("ready");
       } catch (error) {
         if (ignore) return;
@@ -333,6 +348,42 @@ function PlatformsViewInner() {
     }
   };
 
+  // WP-11 learning loop — restoring/muting updates the row in place rather
+  // than removing it, since (unlike vendor confirm/reject) this list stays
+  // relevant either way: a restored sender goes back to being watched, a
+  // newly-muted one still shows its own state.
+  const handleRestoreSender = async (profileId: string) => {
+    setSenderActionId(profileId);
+    try {
+      const res = await restoreSenderProfile(profileId);
+      setSenderProfiles((prev) => prev.filter((p) => p.id !== res.data.profile.id));
+      setAlert({ type: "success", message: "Sender restored — it will be scanned normally again." });
+    } catch (error) {
+      setAlert({
+        type: "error",
+        message: error instanceof ApiError ? error.message : "Could not restore this sender.",
+      });
+    } finally {
+      setSenderActionId(null);
+    }
+  };
+  const handleSuppressSender = async (profileId: string) => {
+    setSenderActionId(profileId);
+    try {
+      const res = await suppressSenderProfile(profileId);
+      setSenderProfiles((prev) =>
+        prev.map((p) => (p.id === profileId ? res.data.profile : p))
+      );
+    } catch (error) {
+      setAlert({
+        type: "error",
+        message: error instanceof ApiError ? error.message : "Could not mute this sender.",
+      });
+    } finally {
+      setSenderActionId(null);
+    }
+  };
+
   const connectedSlugs = new Set(connections.map((c) => c.platform.toLowerCase()));
   const nothingConnected =
     connectedPlatformRows.length === 0 && emailProviderGroups.length === 0;
@@ -441,6 +492,51 @@ function PlatformsViewInner() {
                       <Check />
                       Confirm
                     </Button>
+                  </div>
+                ))}
+              </Card>
+            </section>
+          ) : null}
+
+          {senderProfiles.length > 0 ? (
+            <section className="space-y-3">
+              <SectionHeader
+                title="Sender trust"
+                description="Senders your email sync has learned to trust or mute, based on which of their invoices you've kept vs. deleted. A muted sender is skipped entirely (no AI cost) until you restore it."
+              />
+              <Card className="divide-y overflow-hidden p-0">
+                {senderProfiles.map((profile) => (
+                  <div key={profile.id} className="flex items-center gap-3 px-5 py-3.5">
+                    <PlatformLogo src={null} name={profile.domain} className="size-9" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{profile.domain}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {profile.trust === "suppressed"
+                          ? `Muted${profile.manuallySet ? " (by you)" : ` — ${profile.falsePositiveCount} deleted as not real invoices`}`
+                          : `Trusted — ${profile.confirmedInvoiceCount} confirmed invoices`}
+                      </p>
+                    </div>
+                    {profile.trust === "suppressed" ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleRestoreSender(profile.id)}
+                        disabled={senderActionId !== null}
+                      >
+                        <RotateCcw />
+                        Restore
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleSuppressSender(profile.id)}
+                        disabled={senderActionId !== null}
+                      >
+                        <BellOff />
+                        Mute
+                      </Button>
+                    )}
                   </div>
                 ))}
               </Card>

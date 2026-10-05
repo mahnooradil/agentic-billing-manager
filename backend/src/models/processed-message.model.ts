@@ -30,7 +30,11 @@ import {
  *  message this old; short enough the collection doesn't grow forever. */
 export const PROCESSED_MESSAGE_TTL_DAYS = 180;
 
-export type ProcessedMessageOutcome = "invoice" | "not_billing";
+/** "suppressed_sender" (WP-11) — the message was skipped BEFORE the AI ever
+ *  looked at it, because its sender's `SenderProfile.trust` is
+ *  "suppressed" (learned or manually set) — distinct from "not_billing"
+ *  (the AI DID look and said no), since this one never cost any credits. */
+export type ProcessedMessageOutcome = "invoice" | "not_billing" | "suppressed_sender";
 
 export interface IProcessedMessage {
   connection: Types.ObjectId;
@@ -52,7 +56,7 @@ const processedMessageSchema = new Schema<IProcessedMessage, ProcessedMessageMod
   messageId: { type: String, required: true, trim: true },
   outcome: {
     type: String,
-    enum: { values: ["invoice", "not_billing"], message: "Invalid outcome" },
+    enum: { values: ["invoice", "not_billing", "suppressed_sender"], message: "Invalid outcome" },
     required: true,
   },
   processedAt: { type: Date, required: true, default: Date.now },

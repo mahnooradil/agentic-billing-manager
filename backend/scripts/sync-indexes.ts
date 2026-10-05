@@ -55,6 +55,8 @@ import "@/models/billing-event.model";
 import "@/models/subscription.model";
 import "@/models/usage-accrual.model";
 import "@/models/audit-log.model";
+import "@/models/sender-profile.model";
+import "@/models/classification-feedback.model";
 
 interface UniqueCheck {
   modelName: string;
@@ -155,6 +157,11 @@ const UNIQUE_CHECKS: UniqueCheck[] = [
     modelName: "Vendor",
     label: "Vendor {organization, dedupeKey}",
     groupFields: { organization: "$organization", dedupeKey: "$dedupeKey" },
+  },
+  {
+    modelName: "SenderProfile",
+    label: "SenderProfile {organization, domain}",
+    groupFields: { organization: "$organization", domain: "$domain" },
   },
   {
     modelName: "Subscription",
@@ -277,6 +284,8 @@ const ALL_MODEL_NAMES = [
   "Subscription",
   "UsageAccrual",
   "AuditLog",
+  "SenderProfile",
+  "ClassificationFeedback",
 ];
 
 async function main(): Promise<void> {

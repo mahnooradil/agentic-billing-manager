@@ -30,6 +30,7 @@ import { importBillingRowSchema, listBillingQuerySchema } from "@/validators/bil
 import { recordBillingEvent } from "@/services/billing/billing-event-recorder.service";
 import { recordAuditLog, billingAuditSummary } from "@/services/billing/audit-log-recorder.service";
 import { findDuplicateCandidateGroups } from "@/services/billing/billing-duplicate-detector.service";
+import { recordFalsePositive } from "@/services/email-sync/sender-trust.service";
 import type {
   CreateBillingInput,
   UpdateBillingInput,
@@ -614,7 +615,24 @@ export const deleteBillingRecord = asyncHandler(async (req, res) => {
   // only issues the DB command, it doesn't clear this object), but reading
   // it beforehand makes that not something a future refactor could break.
   const summary = `Deleted invoice ${billingAuditSummary(billing)}`;
+  // WP-11 learning loop — captured BEFORE the delete, same reasoning as
+  // `summary` above (the in-memory document still holds every field right
+  // after `deleteOne()`, but reading it first makes that not something a
+  // future refactor could silently break). A human deleting an email_sync
+  // record is the one discrete, unambiguous "the AI got this wrong" signal
+  // this system has (duplicates are merged, not deleted — see WP-5 — so a
+  // delete here isn't that case).
+  const falsePositiveSignal =
+    billing.source === "email_sync" && billing.senderDomain
+      ? { domain: billing.senderDomain, billingId: billing._id, sourceMessageId: billing.sourceMessageId }
+      : null;
   await billing.deleteOne();
+  if (falsePositiveSignal) {
+    await recordFalsePositive(organization._id, falsePositiveSignal.domain, {
+      billing: falsePositiveSignal.billingId,
+      sourceMessageId: falsePositiveSignal.sourceMessageId,
+    });
+  }
   // Best-effort cleanup of this record's BillingEvent history (Task 8) — an
   // orphaned event referencing a deleted Billing id is harmless (nothing
   // reads events except by billing id, which will simply never match

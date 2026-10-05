@@ -47,6 +47,7 @@ import {
 import { consumeCredits } from "@/services/credits/credit-ledger.service";
 import { resolveVendor } from "@/services/vendors/vendor-resolver.service";
 import { recordBillingEvent } from "@/services/billing/billing-event-recorder.service";
+import { isSenderSuppressed, isSenderTrusted } from "@/services/email-sync/sender-trust.service";
 import { mapDerivedStatusToBillingStatus } from "@/services/billing/status-machine";
 import type { BillingEventType } from "@/models/billing-event.model";
 import type { BillingStatus } from "@/models/billing.model";
@@ -88,7 +89,7 @@ function escapeRegExp(value: string): string {
 async function markMessageProcessed(
   connectionId: Types.ObjectId,
   messageId: string,
-  outcome: "invoice" | "not_billing"
+  outcome: "invoice" | "not_billing" | "suppressed_sender"
 ): Promise<void> {
   const now = new Date();
   await ProcessedMessage.updateOne(
@@ -317,11 +318,16 @@ async function syncConnectionEmailInner(
               messageId,
             });
           } else {
-            // Genuinely checked and confirmed not a billing email — mark it
-            // now (no later commit step depends on this one, unlike the
-            // "invoice" case below, which is only marked once its Billing
-            // write actually lands).
-            await markMessageProcessed(connection._id, messageId, "not_billing");
+            // Genuinely checked and confirmed not a billing email (or,
+            // WP-11, skipped entirely because the sender is suppressed —
+            // either way, no later commit step depends on this one, unlike
+            // the "invoice" case below, which is only marked once its
+            // Billing write actually lands).
+            await markMessageProcessed(
+              connection._id,
+              messageId,
+              extracted.suppressed ? "suppressed_sender" : "not_billing"
+            );
           }
         } catch {
           // One bad/unreachable message must never abort the whole run —
@@ -612,6 +618,12 @@ function eventTypeForStatus(status: BillingStatus, isNewRecord: boolean): Billin
 }
 
 const EVIDENCE_SNIPPET_MAX_CHARS = 300;
+/** WP-11 — the minimum confidence a trusted sender's extraction is raised
+ *  to (never lowered by this — see where it's applied). Below the
+ *  extractor's own typical "confident" range, deliberately: trust narrows
+ *  the range of plausible doubt, it doesn't manufacture certainty the
+ *  model itself never reported. */
+const TRUSTED_SENDER_CONFIDENCE_FLOOR = 0.75;
 
 /** Bounded, sanitized excerpt of the source email's own text, stored as the
  *  record's `evidence` — deliberately derived here in code from the raw
@@ -654,7 +666,23 @@ async function extractCandidateFields(
     openInvoiceLookup: { externalIdPrefix: string } | null;
   } | null;
   creditsUsed: number;
+  /** WP-11 — true when this message was skipped BEFORE the AI ever looked
+   *  at it, because its sender is suppressed. Lets the caller mark it with
+   *  a distinct outcome from "the AI looked and said no". */
+  suppressed?: boolean;
 }> {
+  // WP-11 learning loop — checked BEFORE spending any credits. A sender
+  // the workspace has already taught this pipeline to distrust (3+ deleted
+  // false positives, 0 confirmed) is skipped entirely, not just downgraded
+  // in confidence.
+  const senderDomainForTrustCheck = parseSender(message.fromHeader ?? undefined).domain;
+  if (senderDomainForTrustCheck) {
+    const suppressed = await isSenderSuppressed(connection.organization, senderDomainForTrustCheck);
+    if (suppressed) {
+      return { fields: null, creditsUsed: 0, suppressed: true };
+    }
+  }
+
   const extraction = await extractInvoiceFields({
     subject: message.subject,
     fromHeader: message.fromHeader,
@@ -725,11 +753,23 @@ async function extractCandidateFields(
     message.fromHeader ?? undefined,
     message.replyToHeader ?? undefined
   );
-  const adjustedConfidence = applySenderTrustPenalty(
+  const penalizedConfidence = applySenderTrustPenalty(
     fields.confidence,
     message.authResults,
     senderReplyToMismatch
   );
+  // WP-11 — the OTHER direction: a sender this workspace has taught the
+  // pipeline to trust (3+ confirmed invoices, never deleted) gets a
+  // confidence FLOOR raised, same spirit as Task 9's penalty but the
+  // positive case. Applied after the penalty, not instead of it — a
+  // trusted sender whose DMARC genuinely fails this one time is still
+  // worth flagging, just not all the way back down to "low confidence".
+  const adjustedConfidence =
+    penalizedConfidence !== null &&
+    domain &&
+    (await isSenderTrusted(connection.organization, domain))
+      ? Math.max(penalizedConfidence, TRUSTED_SENDER_CONFIDENCE_FLOOR)
+      : penalizedConfidence;
 
   // Prefer a semantic dedupe key (vendor + invoice number) over the raw message
   // id: an initial "your invoice" email and a later "payment received" receipt
