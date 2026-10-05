@@ -36,6 +36,8 @@ import {
   listPendingVendors,
   confirmVendor,
   rejectVendor,
+  listVendorsDueForRating,
+  rateVendor,
 } from "@/services/connections/vendor.service";
 import {
   listSenderProfiles,
@@ -45,7 +47,7 @@ import {
 import type { PlatformConnection } from "@/services/types/platform-connections";
 import type { BillingRecord } from "@/services/types/billing";
 import type { UsageAccrual } from "@/services/types/usage-accrual";
-import type { PendingVendor } from "@/services/types/vendor";
+import type { PendingVendor, UtilityRating, VendorDueForRating } from "@/services/types/vendor";
 import type { SenderProfile } from "@/services/types/sender-profile";
 import { PlatformLogo } from "@/components/platforms/platform-logo";
 import { ConnectPlatformDialog } from "@/components/platforms/connect-platform-dialog";
@@ -61,6 +63,7 @@ interface PlatformsCachePayload {
   billingRecords: BillingRecord[];
   usageAccruals: UsageAccrual[];
   pendingVendors: PendingVendor[];
+  vendorsDueForRating: VendorDueForRating[];
   senderProfiles: SenderProfile[];
 }
 
@@ -118,6 +121,10 @@ function PlatformsViewInner() {
     cached?.pendingVendors ?? []
   );
   const [vendorActionId, setVendorActionId] = React.useState<string | null>(null);
+  const [vendorsDueForRating, setVendorsDueForRating] = React.useState<VendorDueForRating[]>(
+    cached?.vendorsDueForRating ?? []
+  );
+  const [ratingActionId, setRatingActionId] = React.useState<string | null>(null);
   const [senderProfiles, setSenderProfiles] = React.useState<SenderProfile[]>(
     cached?.senderProfiles ?? []
   );
@@ -148,20 +155,28 @@ function PlatformsViewInner() {
     (async () => {
       if (!readPageCache<PlatformsCachePayload>(CACHE_KEY)) setStatus("loading");
       try {
-        const [connectionsRes, billingRes, usageRes, pendingVendorsRes, senderProfilesRes] =
-          await Promise.all([
-            listPlatformConnections(),
-            listBillingRecords(),
-            listUsageAccruals(),
-            listPendingVendors(),
-            listSenderProfiles(),
-          ]);
+        const [
+          connectionsRes,
+          billingRes,
+          usageRes,
+          pendingVendorsRes,
+          vendorsDueForRatingRes,
+          senderProfilesRes,
+        ] = await Promise.all([
+          listPlatformConnections(),
+          listBillingRecords(),
+          listUsageAccruals(),
+          listPendingVendors(),
+          listVendorsDueForRating(),
+          listSenderProfiles(),
+        ]);
         if (ignore) return;
         const payload: PlatformsCachePayload = {
           connections: connectionsRes.data.connections,
           billingRecords: billingRes.data.billingRecords,
           usageAccruals: usageRes.data.accruals,
           pendingVendors: pendingVendorsRes.data.vendors,
+          vendorsDueForRating: vendorsDueForRatingRes.data.vendors,
           senderProfiles: senderProfilesRes.data.profiles,
         };
         writePageCache(CACHE_KEY, payload);
@@ -169,6 +184,7 @@ function PlatformsViewInner() {
         setBillingRecords(payload.billingRecords);
         setUsageAccruals(payload.usageAccruals);
         setPendingVendors(payload.pendingVendors);
+        setVendorsDueForRating(payload.vendorsDueForRating);
         setSenderProfiles(payload.senderProfiles);
         setStatus("ready");
       } catch (error) {
@@ -348,6 +364,24 @@ function PlatformsViewInner() {
     }
   };
 
+  // flow/extra-02 Part A1 — periodic self-reported usage rating. Same
+  // soft-removal pattern as confirm/reject: rating a vendor never changes
+  // anything else this page shows.
+  const handleRateVendor = async (vendorId: string, utilityRating: UtilityRating) => {
+    setRatingActionId(vendorId);
+    try {
+      await rateVendor(vendorId, utilityRating);
+      setVendorsDueForRating((prev) => prev.filter((v) => v.id !== vendorId));
+    } catch (error) {
+      setAlert({
+        type: "error",
+        message: error instanceof ApiError ? error.message : "Could not save this rating.",
+      });
+    } finally {
+      setRatingActionId(null);
+    }
+  };
+
   // WP-11 learning loop — restoring/muting updates the row in place rather
   // than removing it, since (unlike vendor confirm/reject) this list stays
   // relevant either way: a restored sender goes back to being watched, a
@@ -491,6 +525,54 @@ function PlatformsViewInner() {
                     >
                       <Check />
                       Confirm
+                    </Button>
+                  </div>
+                ))}
+              </Card>
+            </section>
+          ) : null}
+
+          {vendorsDueForRating.length > 0 ? (
+            <section className="space-y-3">
+              <SectionHeader
+                title="Rate your usage"
+                description="How often do you actually use these? Helps flag subscriptions worth reconsidering."
+              />
+              <Card className="divide-y overflow-hidden p-0">
+                {vendorsDueForRating.map((vendor) => (
+                  <div key={vendor.id} className="flex items-center gap-3 px-5 py-3.5">
+                    <PlatformLogo src={null} name={vendor.name} className="size-9" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{vendor.name}</p>
+                      {vendor.sampleBilling ? (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {formatMoney(vendor.sampleBilling.amount, vendor.sampleBilling.currency, general)}{" "}
+                          on {new Date(vendor.sampleBilling.billingDate).toLocaleDateString()}
+                        </p>
+                      ) : null}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleRateVendor(vendor.id, "rarely")}
+                      disabled={ratingActionId !== null}
+                    >
+                      Rarely
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleRateVendor(vendor.id, "occasionally")}
+                      disabled={ratingActionId !== null}
+                    >
+                      Occasionally
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => void handleRateVendor(vendor.id, "daily")}
+                      disabled={ratingActionId !== null}
+                    >
+                      Daily
                     </Button>
                   </div>
                 ))}

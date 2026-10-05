@@ -20,6 +20,14 @@
  */
 import { Schema, model, type HydratedDocument, type Model, type Types } from "mongoose";
 
+/** flow/extra-02 Part A1 — a self-reported usage frequency, the cheapest and
+ *  most honest usage signal available (no AI, no new integration): "Daily"
+ *  covers everyday tools, "Occasionally" covers genuinely-but-lightly-used
+ *  ones, "Rarely" covers "rarely or never" (the one that actually flags a
+ *  cancel candidate). */
+export const UTILITY_RATINGS = ["daily", "occasionally", "rarely"] as const;
+export type UtilityRating = (typeof UTILITY_RATINGS)[number];
+
 export interface IVendor {
   /** Owning organization — every query MUST be scoped by this. */
   organization: Types.ObjectId;
@@ -53,6 +61,15 @@ export interface IVendor {
    *  reasoning as `Billing.duplicateOf` — only stops this vendor from being
    *  prompted for again; its already-synced Billing records are untouched. */
   rejectedAt?: Date;
+  /** flow/extra-02 Part A1 — the user's own periodic self-report of how
+   *  often they actually use this vendor. Absent means never rated yet.
+   *  Only ever asked for a CONFIRMED vendor — rating something not even
+   *  confirmed as real yet would be meaningless. */
+  utilityRating?: UtilityRating;
+  /** When `utilityRating` was last set — drives the "ask again after 60-90
+   *  days" re-prompt in `listVendorsDueForRating` (a rating from months ago
+   *  may no longer reflect real usage). */
+  utilityRatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -89,6 +106,13 @@ const vendorSchema = new Schema<IVendor, VendorModel>(
       type: Date,
     },
     rejectedAt: {
+      type: Date,
+    },
+    utilityRating: {
+      type: String,
+      enum: { values: UTILITY_RATINGS, message: "Invalid utility rating" },
+    },
+    utilityRatedAt: {
       type: Date,
     },
   },

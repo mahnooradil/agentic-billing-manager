@@ -1,6 +1,11 @@
 import { api } from "@/services/api/client";
 import type { ApiSuccess } from "@/services/types/api";
-import type { PendingVendorsData, VendorData } from "@/services/types/vendor";
+import type {
+  PendingVendorsData,
+  UtilityRating,
+  VendorData,
+  VendorsDueForRatingData,
+} from "@/services/types/vendor";
 
 /** GET /vendors/pending — vendors awaiting the "confirm detected vendors" review. */
 export function listPendingVendors(): Promise<ApiSuccess<PendingVendorsData>> {
@@ -15,4 +20,15 @@ export function confirmVendor(id: string): Promise<ApiSuccess<VendorData>> {
 /** POST /vendors/:id/reject — "not a real vendor" (an AI misread). */
 export function rejectVendor(id: string): Promise<ApiSuccess<VendorData>> {
   return api.post<ApiSuccess<VendorData>>(`/vendors/${id}/reject`);
+}
+
+/** GET /vendors/due-for-rating — flow/extra-02 Part A1: confirmed vendors
+ *  never rated, or rated more than 60 days ago. */
+export function listVendorsDueForRating(): Promise<ApiSuccess<VendorsDueForRatingData>> {
+  return api.get<ApiSuccess<VendorsDueForRatingData>>("/vendors/due-for-rating");
+}
+
+/** POST /vendors/:id/rate — "how often do you use this?" */
+export function rateVendor(id: string, utilityRating: UtilityRating): Promise<ApiSuccess<VendorData>> {
+  return api.post<ApiSuccess<VendorData>>(`/vendors/${id}/rate`, { utilityRating });
 }

@@ -289,6 +289,23 @@ already found:
     environment doesn't have, same test boundary already disclosed for WP-6's Gmail/Outlook OAuth. The
     OAuth-callback code path itself (`handleOAuthCallback` capturing `incoming_webhook.url`) is covered
     by a mocked-`fetch` test instead.
+19. ✅ **DONE (2026-10-05) — `flow/extra-02` Part A1 only (periodic self-reported usage rating).**
+    Full detail in `flow/00-executive-summary.md` item #36. The doc's own suggested order puts this
+    first since it has no dependency on the still-unbuilt domain-model rebuild (`Vendor.billingCadence`
+    — confirmed absent via grep, same for `amount_changed` anomaly tracking which DOES already exist on
+    `BillingEvent`). **Parts B (forecasting) and C ("where are we wasting money") were deliberately NOT
+    attempted** — both explicitly depend on `Vendor.billingCadence`, which doesn't exist yet; building
+    them now would forecast/recommend against garbage data, exactly the failure mode the doc itself
+    warns against. `Vendor` gained `utilityRating` (`daily`/`occasionally`/`rarely`) + `utilityRatedAt`;
+    `GET /api/vendors/due-for-rating` surfaces confirmed vendors never rated or rated >60 days ago (a
+    pull-based list on the Platforms page, same pattern as the existing "Vendors to confirm" step —
+    no new scheduler/notification needed); `POST /api/vendors/:id/rate` records the answer. 9 new tests
+    (264 total, two consecutive full runs green); backend+frontend tsc/lint/build all clean.
+    **Live-tested against real Atlas via real HTTP** against the actual running dev server: seeded a
+    never-rated confirmed vendor, a 90-day-stale-rated one, a 10-day-fresh-rated one, and an unconfirmed
+    one — confirmed the due-for-rating list correctly returned only the first two, confirmed a real
+    `POST /rate` call removed the rated vendor from the list, all seed data deleted by exact id
+    afterward.
 
 ---
 
@@ -309,7 +326,9 @@ exactly as this document anticipated. See task #10 above for what was actually b
   the design (per-org OAuth install) turned out to already be built; only the alerts-webhook half was
   net-new.
 - **Usage signal / forecasting** (`flow/extra-02`) — **explicitly placed at the very end by the user's
-  own instruction**, after everything else including WP-11/WP-12. In progress as of 2026-10-05.
+  own instruction**, after everything else including WP-11/WP-12. Part A1 (periodic self-reported usage
+  rating) ✅ **DONE (2026-10-05)**, see task #19 above — the one sub-item with no dependency on the
+  unbuilt domain-model rebuild. Parts A2/B/C remain not started, B/C blocked on `Vendor.billingCadence`.
 
 ### The 30/60/90 day framing (§3) — matches the WP order exactly, restated for calendar planning
 

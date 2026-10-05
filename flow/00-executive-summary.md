@@ -1795,6 +1795,49 @@ the document cites, not assumed from the document text.
       full real Slack OAuth round-trip (an admin actually clicking through Slack's own consent screen)
       was not live-tested, since that requires a real Slack workspace this environment doesn't have. The
       callback code path itself is covered by a mocked-`fetch` unit test instead, not a real Slack call.
+36. ✅ **DONE (2026-10-05) — `flow/extra-02` Part A1 only: periodic self-reported vendor usage rating.**
+    The doc names three usage-signal approaches (A1 self-report, A2 selective per-adapter real usage
+    data, A3 rejected outright) plus a forecasting part (B) and a "where are we wasting money" rule
+    (C). Only A1 was buildable right now — confirmed via grep that `Vendor.billingCadence` (which B and
+    C both explicitly require) does not exist anywhere in the codebase yet; building a forecast or a
+    waste-flagging rule on top of nothing would just produce garbage output, exactly the failure mode
+    the doc itself warns against. A2 is explicitly lower-priority/optional per the doc's own framing.
+    - **Built** — `Vendor` gained `utilityRating` (`"daily" | "occasionally" | "rarely"`, the last one
+      covering "rarely or never") and `utilityRatedAt`. `GET /api/vendors/due-for-rating` returns
+      confirmed vendors (never a pending/rejected one — rating something not even confirmed as real
+      yet is meaningless) that were either never rated or rated more than 60 days ago, each with the
+      same sample-billing context the existing "confirm detected vendors" list already uses so the
+      user remembers what they're being asked about. `POST /api/vendors/:id/rate` (zod-validated)
+      records the answer. **Deliberately pull-based, not a new scheduler/notification** — the doc's
+      "every 60-90 days, ask" becomes "the list only shows what's actually due" the same way the
+      existing vendor-confirmation list already works, avoiding a second notification mechanism for
+      something the Platforms page already surfaces naturally on every visit.
+    - **Frontend** — new "Rate your usage" section on the Platforms page, same placement/card pattern as
+      "Vendors to confirm"/"Sender trust"/"Usage & balances", with three one-click buttons (Rarely /
+      Occasionally / Daily) that remove the row from the list on success, same soft-update pattern as
+      vendor confirm/reject.
+    - **Tested** — 9 new backend tests (`vendor-rating.test.ts`, real HTTP): an unconfirmed vendor never
+      shows up due for rating, a confirmed never-rated one does (with sample billing), rating a vendor
+      sets both fields and drops it from the due list, an invalid rating value is zod-rejected, a
+      90-day-stale rating makes a vendor due again, a 10-day-fresh rating does not, a rejected vendor
+      never shows up, cross-organization scoping, and a cross-organization rate attempt 404s. 264 total
+      backend tests, two consecutive full runs green. Backend AND frontend `tsc`/`lint`/`build` clean
+      (full production build, 15 routes). No new index needed (`utilityRating`/`utilityRatedAt` have no
+      `unique`/`index: true`), so no production index-sync step required before this is safe to deploy.
+      **Live-tested against real Atlas via real HTTP**, hitting the actual running dev server (not a
+      direct function call): seeded a never-rated confirmed vendor, a 90-day-stale-rated one, a
+      10-day-fresh-rated one, and an unconfirmed one in the real database, confirmed a real
+      `GET /vendors/due-for-rating` call returned exactly the never-rated and stale-rated ones (not the
+      fresh or unconfirmed ones), confirmed a real `POST /vendors/:id/rate` call removed the rated
+      vendor from a subsequent real `GET` — then deleted every seeded document by exact id and
+      confirmed the scratch script itself was removed afterward.
+    - **Honest scope note**: Parts A2, B, and C of `flow/extra-02` remain genuinely not started. A2
+      (pulling real usage data from platforms whose API exposes it, e.g. Slack/Google Workspace seat
+      counts) is explicitly optional per the doc's own framing ("pick specific platforms only when
+      there's a concrete reason to"). B (forecasting) and C ("where are we wasting money") are both
+      blocked on the still-unbuilt `Vendor.billingCadence` field, which is part of the separate,
+      not-yet-started domain-model rebuild from the main 12-document audit — not something to add here
+      as a side effect of this item.
 
 ---
 
