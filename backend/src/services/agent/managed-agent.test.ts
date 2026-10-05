@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach, beforeAll, afterAll } from "vites
 
 import { env } from "@/config/env";
 import { AgentSession } from "@/models/agent-session.model";
+import { Organization } from "@/models/organization.model";
 
 const sessionsCreateMock = vi.fn();
 const eventsStreamMock = vi.fn();
@@ -29,6 +30,7 @@ import {
   sendAgentMessage,
   resetAgentSession,
   resetAllAgentSessionsForUser,
+  runAgentPrompt,
 } from "@/services/agent/managed-agent.service";
 
 /** A minimal async-iterable the service's `for await` loop can consume,
@@ -168,6 +170,107 @@ describe("sendAgentMessage (WP-7 — MAX_ITERATIONS + org-scoped sessions)", () 
     const remaining = await AgentSession.find({ user: userId });
     expect(remaining).toHaveLength(1);
     expect(remaining[0]?.organization.toString()).toBe(orgB.toString());
+  });
+
+  /** CLAUDE.md §10.3 — consumeCredits used to be fire-and-forget (`void`,
+   *  not awaited) and only ran on a clean loop exit, so a mid-turn
+   *  `session.error` meant real, already-spent tokens were never charged
+   *  at all. Now wrapped in `try/finally` and awaited. */
+  describe("credits are consumed even when the stream errors mid-turn (CLAUDE.md §10.3)", () => {
+    it("deducts credits for tokens already used before a session.error throw", async () => {
+      const organization = await Organization.create({
+        name: "Mid-Turn Error Org",
+        creditsBalance: 100,
+      });
+      const userId = new Types.ObjectId();
+
+      const events = [
+        {
+          type: "span.model_request_end",
+          model_usage: {
+            input_tokens: 500,
+            output_tokens: 500,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+        { type: "session.error" },
+      ];
+      eventsStreamMock.mockResolvedValue(fakeStream(events));
+
+      await expect(sendAgentMessage(userId, organization._id, "trigger a mid-turn failure")).rejects.toThrow();
+
+      const reloaded = await Organization.findById(organization._id);
+      // 1000 total tokens = 1 credit at the base rate — the exact amount
+      // matters less than the fact that it's no longer 100 (unconsumed).
+      expect(reloaded?.creditsBalance).toBeLessThan(100);
+    });
+
+    it("factors cache tokens and session duration into what gets consumed, not just input/output", async () => {
+      const organization = await Organization.create({
+        name: "Cache Tokens Org",
+        creditsBalance: 1000,
+      });
+      const userId = new Types.ObjectId();
+
+      const events = [
+        {
+          type: "span.model_request_end",
+          model_usage: {
+            input_tokens: 10,
+            output_tokens: 10,
+            cache_creation_input_tokens: 50_000,
+            cache_read_input_tokens: 0,
+          },
+        },
+        { type: "agent.message", content: [{ type: "text", text: "done" }] },
+        { type: "session.status_terminated" },
+      ];
+      eventsStreamMock.mockResolvedValue(fakeStream(events));
+
+      await sendAgentMessage(userId, organization._id, "use a lot of cache");
+
+      const reloaded = await Organization.findById(organization._id);
+      // A plain 20-token turn would cost exactly 1 credit — 50,000 cache
+      // write tokens at a 1.25x weight must push this well above that.
+      expect(1000 - (reloaded?.creditsBalance ?? 1000)).toBeGreaterThan(1);
+    });
+  });
+
+  it("runAgentPrompt (background recommendation generation) also awaits credit consumption, including cache tokens", async () => {
+    const organization = await Organization.create({
+      name: "Background Prompt Org",
+      creditsBalance: 1000,
+    });
+    const userId = new Types.ObjectId();
+    sessionsCreateMock.mockResolvedValue({ id: "sesn_bg" });
+    sessionsArchiveMock.mockResolvedValue(undefined);
+
+    const events = [
+      {
+        type: "span.model_request_end",
+        model_usage: {
+          input_tokens: 10,
+          output_tokens: 10,
+          cache_creation_input_tokens: 40_000,
+          cache_read_input_tokens: 0,
+        },
+      },
+      { type: "agent.message", content: [{ type: "text", text: "a recommendation" }] },
+      { type: "session.status_terminated" },
+    ];
+    eventsStreamMock.mockResolvedValue(fakeStream(events));
+
+    const reply = await runAgentPrompt(userId, organization._id, "generate a recommendation");
+    expect(reply).toBe("a recommendation");
+
+    const reloaded = await Organization.findById(organization._id);
+    // Same property as sendAgentMessage's own cache-token test: a plain
+    // 20-token turn costs 1 credit, 40,000 cache-write tokens must push
+    // this well above that — proving runAgentPrompt uses the same fixed
+    // accounting, not a separate, still-broken path.
+    expect(1000 - (reloaded?.creditsBalance ?? 1000)).toBeGreaterThan(1);
+    expect(sessionsArchiveMock).toHaveBeenCalledWith("sesn_bg");
   });
 
   it("resetAllAgentSessionsForUser clears every organization's session for that user", async () => {

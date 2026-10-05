@@ -1615,6 +1615,70 @@ the document cites, not assumed from the document text.
       blocked on the external Google/Microsoft review process, not something further code work in this
       session can unblock.
 
+33. ✅ **DONE (2026-10-05) — Billing Advisor Agent credit-accounting fixes (CLAUDE.md §10.3/§10.4:
+    "credit accounting under-recovers and can be outrun").** Raised by the user asking directly "is the
+    agent fully ready" — investigated the audit's own credit-accounting findings against the current
+    code before answering, confirmed two of the four were still genuinely unfixed (`MAX_ITERATIONS` was
+    already done 2026-10-01; the no-reservation/concurrent-overdraft risk and `tokensToCredits` ignoring
+    cache tokens + session-hour billing were not), then fixed both once the user said to.
+    - **Stale-cache credit-gate race** — `assertCreditBalance` previously took the already-resolved
+      `OrganizationDocument` off `req.organization`, which `middlewares/auth-cache.ts`'s 5-second
+      in-memory cache can serve stale. Several agent-chat requests arriving within that window all saw
+      the SAME snapshot balance and could all pass the gate at once, each then spending real credits —
+      overdrawing a workspace by several turns' worth, not the single small overdraft the design already
+      accepts. Changed to an async function that reads the balance fresh, right before the gate, from
+      the database directly — shrinks the race window from up to 5 seconds down to one DB round trip.
+      Deliberately NOT a full reservation/lock system (a bigger architectural change, out of scope for
+      this fix) — disclosed as the honest boundary of what this closes.
+    - **Fire-and-forget credit deduction** — both `consumeCredits` call sites in
+      `managed-agent.service.ts` (`sendAgentMessage` for live chat, `runAgentPrompt` for background
+      recommendation generation) were `void`, not awaited, so a ledger-write failure was silently lost.
+      `sendAgentMessage`'s stream-processing loop (previously un-wrapped) is now inside a `try/finally`
+      — a mid-turn `session.error` throw used to mean tokens already spent before the failure were NEVER
+      charged at all; now the `finally` block still runs and charges for whatever was actually consumed
+      up to that point. Both call sites now `await consumeCredits(...)` — safe because the function
+      itself already never throws (its own best-effort guarantee), so this can't mask a real error from
+      the try block.
+    - **`tokensToCredits` ignored cache tokens and Managed Agents' own $0.08/session-hour runtime billing
+      entirely** — both real Anthropic costs, both previously charged $0 in credits. Now accepts an
+      optional third argument: `cacheCreationInputTokens`/`cacheReadInputTokens` (weighted 1.25x/0.1x
+      relative to a plain input token — Anthropic's cache-write premium vs. cache-read discount,
+      deliberately approximate, same "placeholder blended rate" philosophy the file's own
+      `TOKENS_PER_CREDIT` already documents) and `sessionSeconds` (wall-clock turn duration, converted to
+      an hourly cost via `CREDIT_USD_VALUE`). `managed-agent.service.ts` now tracks
+      `cache_creation_input_tokens`/`cache_read_input_tokens` off the SAME `span.model_request_end`
+      event it already read `input_tokens`/`output_tokens` from (the fields were already there, just
+      never read) and times the turn's own wall clock to pass as `sessionSeconds`. The email-extraction
+      call site (`sync-engine.ts`) is unaffected — plain `messages.create` has no Managed Agents session
+      or prompt caching to account for, so it keeps calling the function with just two arguments.
+    - **Tested** — `credits.test.ts` gained 5 tests: a turn with cache tokens costs strictly more than
+      one without, a cache WRITE costs more than an equal-count cache READ, a long session costs more
+      than a short one with identical tokens, the exact session-hour-alone math ($0.08/hr ÷ $0.02/credit
+      = 4 credits), and the 2-argument call form still behaves identically (backward compatible). New
+      `utils/credits.test.ts` (5 tests) proves the live-read fix directly: seeds a real balance, takes an
+      in-memory reference to it (simulating a stale cached copy), changes the REAL database balance to
+      0, and confirms `assertCreditBalance` reflects the current database state, not the earlier
+      snapshot — the stale copy is asserted to still (wrongly) say the old value first, so this isn't a
+      vacuous test. `managed-agent.test.ts` gained 3 tests: credits are genuinely deducted for tokens
+      already used before a mid-turn `session.error` throw (previously would have charged nothing), cache
+      tokens measurably increase what a turn costs, and `runAgentPrompt`'s background path uses the
+      identical fixed accounting, not a second, still-broken implementation. 219 total backend tests, two
+      consecutive full runs green. `tsc`/`lint`/`build` clean. **Live-tested against the real Atlas
+      database and the real running server**: a real non-deterministic question through the real
+      Anthropic Managed Agent cost **8 credits** — compared directly against an earlier live test this
+      same session that measured 1 credit for a similarly-sized real turn BEFORE this fix — concrete
+      evidence of exactly the kind of under-charging this fix closes, not just a theoretical improvement.
+      Separately confirmed: draining a workspace's balance to 0 directly in the database, then
+      immediately calling the real chat endpoint, now correctly returns 403 right away (the live-read
+      fix), rather than depending on waiting out the old 5-second cache window. Cleaned up and
+      re-verified gone.
+    - **Honest scope note**: a full reservation/lock-based credit system (preventing ANY concurrent
+      overdraft, not just shrinking the race window) remains explicitly out of scope — the existing
+      design's own documented philosophy ("the balance can end up slightly below zero... the NEXT turn
+      is what gets blocked") already accepts a small overdraft as an intentional simplification; this fix
+      closes the part that was a real, unbounded-magnitude bug (N stale-cached requests all passing at
+      once), not the already-accepted single-turn case.
+
 ---
 
 ## Verified as already working — no action needed, just confirmed

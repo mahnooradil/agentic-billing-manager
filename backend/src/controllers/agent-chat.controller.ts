@@ -37,7 +37,7 @@ export const agentChat = asyncHandler(async (req, res) => {
     return;
   }
 
-  assertCreditBalance(organization);
+  await assertCreditBalance(organization._id);
 
   const { reply, action } = await sendAgentMessage(user._id, organization._id, message);
 

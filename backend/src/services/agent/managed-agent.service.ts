@@ -204,6 +204,7 @@ export async function runAgentPrompt(
   prompt: string
 ): Promise<string> {
   const anthropic = getClient();
+  const sessionStartedAt = Date.now();
   const session = await anthropic.beta.sessions.create({
     agent: env.anthropicAgentId,
     environment_id: env.anthropicEnvironmentId,
@@ -212,6 +213,8 @@ export async function runAgentPrompt(
 
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheCreationInputTokens = 0;
+  let cacheReadInputTokens = 0;
   try {
     const stream = await anthropic.beta.sessions.events.stream(session.id);
     await anthropic.beta.sessions.events.send(session.id, {
@@ -243,6 +246,8 @@ export async function runAgentPrompt(
         // this tracking would leave it invisible on the workspace's ledger.
         inputTokens += event.model_usage.input_tokens;
         outputTokens += event.model_usage.output_tokens;
+        cacheCreationInputTokens += event.model_usage.cache_creation_input_tokens;
+        cacheReadInputTokens += event.model_usage.cache_read_input_tokens;
       } else if (event.type === "session.status_terminated") {
         break;
       } else if (event.type === "session.status_idle") {
@@ -258,10 +263,19 @@ export async function runAgentPrompt(
     return reply;
   } finally {
     // Deduct AFTER the turn (actual cost is only known once it's done),
-    // even if the loop above threw — the API call already happened either way.
-    void consumeCredits(
+    // even if the loop above threw — the API call already happened either
+    // way. Awaited (not fire-and-forget, CLAUDE.md §10.3) so a ledger-write
+    // failure is at least visible to whatever's awaiting this function,
+    // rather than silently lost — consumeCredits itself never throws (see
+    // its own best-effort guarantee), so this can't mask the real error
+    // from the try block above.
+    await consumeCredits(
       organizationId,
-      tokensToCredits(inputTokens, outputTokens),
+      tokensToCredits(inputTokens, outputTokens, {
+        cacheCreationInputTokens,
+        cacheReadInputTokens,
+        sessionSeconds: (Date.now() - sessionStartedAt) / 1000,
+      }),
       "recommendation_generation",
       userId
     );
@@ -285,6 +299,7 @@ export async function sendAgentMessage(
 ): Promise<AgentReply> {
   const anthropic = getClient();
   const sessionId = await getOrCreateSessionId(userId, organizationId);
+  const turnStartedAt = Date.now();
 
   const stream = await anthropic.beta.sessions.events.stream(sessionId);
   await anthropic.beta.sessions.events.send(sessionId, {
@@ -295,157 +310,172 @@ export async function sendAgentMessage(
   let action: AgentAction | undefined;
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheCreationInputTokens = 0;
+  let cacheReadInputTokens = 0;
   let toolIterations = 0;
-  for await (const event of stream) {
-    if (event.type === "agent.message") {
-      for (const block of event.content) {
-        if (block.type === "text") reply += block.text;
-      }
-    } else if (event.type === "agent.custom_tool_use") {
-      toolIterations++;
+  try {
+    for await (const event of stream) {
+      if (event.type === "agent.message") {
+        for (const block of event.content) {
+          if (block.type === "text") reply += block.text;
+        }
+      } else if (event.type === "agent.custom_tool_use") {
+        toolIterations++;
 
-      // WP-7 — the hard ceiling: stop reading the stream entirely rather
-      // than send yet another tool result, regardless of what the model
-      // does next. See MAX_TOOL_ITERATIONS_HARD's own docstring.
-      if (toolIterations > MAX_TOOL_ITERATIONS_HARD) {
-        break;
-      }
+        // WP-7 — the hard ceiling: stop reading the stream entirely rather
+        // than send yet another tool result, regardless of what the model
+        // does next. See MAX_TOOL_ITERATIONS_HARD's own docstring.
+        if (toolIterations > MAX_TOOL_ITERATIONS_HARD) {
+          break;
+        }
 
-      // The soft ceiling: tell the model it's out of room, the same
-      // decline pattern runAgentPrompt already uses for an irrelevant tool
-      // call, so it gets a real chance to produce a normal closing reply
-      // instead of just being cut off.
-      if (toolIterations > MAX_TOOL_ITERATIONS_SOFT) {
+        // The soft ceiling: tell the model it's out of room, the same
+        // decline pattern runAgentPrompt already uses for an irrelevant tool
+        // call, so it gets a real chance to produce a normal closing reply
+        // instead of just being cut off.
+        if (toolIterations > MAX_TOOL_ITERATIONS_SOFT) {
+          await anthropic.beta.sessions.events.send(sessionId, {
+            events: [
+              {
+                type: "user.custom_tool_result",
+                custom_tool_use_id: event.id,
+                content: [
+                  {
+                    type: "text",
+                    text: "Tool call limit reached for this turn. Stop calling tools and reply now with whatever you've already found, noting that the answer may be incomplete.",
+                  },
+                ],
+                is_error: true,
+              },
+            ],
+          });
+          continue;
+        }
+
+        // A registered read-only/metadata-only tool — run it locally and hand
+        // the result straight back so the session can continue.
+        let resultText: string;
+        let isError = false;
+        try {
+          const input = (event.input ?? {}) as Record<string, unknown>;
+          // WP-7 org-id consolidation — pass the SAME organizationId this
+          // whole turn already resolved, instead of letting each tool
+          // independently re-derive it from userId (a real race if the user
+          // switches workspaces mid-turn — see types.ts's own docstring).
+          const result = await executeCustomTool(
+            organizationId.toString(),
+            event.name,
+            input
+          );
+          // Task 9 (S-07) — a second, independent sanitization pass right at
+          // the boundary where a tool result actually enters the model's
+          // context, on top of ai-invoice-extractor.ts's own ingest-time pass.
+          // Catches anything that reaches this point from a path the ingest
+          // sanitizer doesn't cover (a future tool, a field it doesn't touch)
+          // rather than relying on a single point of defense.
+          resultText = JSON.stringify(sanitizeForAgentContext(result));
+
+          // The agent confirmed a real, live-connectable platform — surface a
+          // deep link the frontend can turn into a one-click "Connect now"
+          // button straight into the existing secure Connect flow.
+          if (
+            event.name === "get_connection_requirements" &&
+            result &&
+            typeof result === "object" &&
+            (result as ConnectionRequirements).supported
+          ) {
+            const requirements = result as ConnectionRequirements;
+            action = {
+              type: "connect_platform",
+              platform: requirements.platform,
+              displayName: (requirements.displayName ?? requirements.platform).trim(),
+              source: requirements.source === "pipedream" ? "pipedream" : "native",
+            };
+          } else if (
+            event.name === "propose_update_billing_status" &&
+            result &&
+            typeof result === "object" &&
+            (result as ProposeUpdateStatusResult).found
+          ) {
+            const r = result as Required<ProposeUpdateStatusResult>;
+            action = {
+              type: "update_billing_status",
+              billingId: r.billingId,
+              customerName: r.customerName,
+              invoiceNumber: r.invoiceNumber,
+              currentStatus: r.currentStatus,
+              newStatus: r.proposedStatus,
+            };
+          } else if (
+            event.name === "propose_delete_billing_record" &&
+            result &&
+            typeof result === "object" &&
+            (result as ProposeDeleteResult).found
+          ) {
+            const r = result as Required<ProposeDeleteResult>;
+            action = {
+              type: "delete_billing_record",
+              billingId: r.billingId,
+              customerName: r.customerName,
+              invoiceNumber: r.invoiceNumber,
+              amount: r.amount,
+              currency: r.currency,
+            };
+          }
+        } catch (err) {
+          resultText =
+            err instanceof Error ? err.message : "Failed to run this tool. Please try again.";
+          isError = true;
+        }
         await anthropic.beta.sessions.events.send(sessionId, {
           events: [
             {
               type: "user.custom_tool_result",
               custom_tool_use_id: event.id,
-              content: [
-                {
-                  type: "text",
-                  text: "Tool call limit reached for this turn. Stop calling tools and reply now with whatever you've already found, noting that the answer may be incomplete.",
-                },
-              ],
-              is_error: true,
+              content: [{ type: "text", text: resultText }],
+              is_error: isError,
             },
           ],
         });
-        continue;
-      }
-
-      // A registered read-only/metadata-only tool — run it locally and hand
-      // the result straight back so the session can continue.
-      let resultText: string;
-      let isError = false;
-      try {
-        const input = (event.input ?? {}) as Record<string, unknown>;
-        // WP-7 org-id consolidation — pass the SAME organizationId this
-        // whole turn already resolved, instead of letting each tool
-        // independently re-derive it from userId (a real race if the user
-        // switches workspaces mid-turn — see types.ts's own docstring).
-        const result = await executeCustomTool(
-          organizationId.toString(),
-          event.name,
-          input
+      } else if (event.type === "span.model_request_end") {
+        // A turn can involve multiple model requests (e.g. one per tool round
+        // trip) — accumulate across the whole turn, not just the first one.
+        inputTokens += event.model_usage.input_tokens;
+        outputTokens += event.model_usage.output_tokens;
+        cacheCreationInputTokens += event.model_usage.cache_creation_input_tokens;
+        cacheReadInputTokens += event.model_usage.cache_read_input_tokens;
+      } else if (event.type === "session.status_terminated") {
+        break;
+      } else if (event.type === "session.status_idle") {
+        // requires_action after a custom_tool_use just means "waiting on the
+        // result we already sent above" — keep reading, don't treat as done.
+        if (event.stop_reason?.type !== "requires_action") break;
+      } else if (event.type === "session.error") {
+        throw new AppError(
+          "The AI agent ran into a problem answering that. Please try again.",
+          502
         );
-        // Task 9 (S-07) — a second, independent sanitization pass right at
-        // the boundary where a tool result actually enters the model's
-        // context, on top of ai-invoice-extractor.ts's own ingest-time pass.
-        // Catches anything that reaches this point from a path the ingest
-        // sanitizer doesn't cover (a future tool, a field it doesn't touch)
-        // rather than relying on a single point of defense.
-        resultText = JSON.stringify(sanitizeForAgentContext(result));
-
-        // The agent confirmed a real, live-connectable platform — surface a
-        // deep link the frontend can turn into a one-click "Connect now"
-        // button straight into the existing secure Connect flow.
-        if (
-          event.name === "get_connection_requirements" &&
-          result &&
-          typeof result === "object" &&
-          (result as ConnectionRequirements).supported
-        ) {
-          const requirements = result as ConnectionRequirements;
-          action = {
-            type: "connect_platform",
-            platform: requirements.platform,
-            displayName: (requirements.displayName ?? requirements.platform).trim(),
-            source: requirements.source === "pipedream" ? "pipedream" : "native",
-          };
-        } else if (
-          event.name === "propose_update_billing_status" &&
-          result &&
-          typeof result === "object" &&
-          (result as ProposeUpdateStatusResult).found
-        ) {
-          const r = result as Required<ProposeUpdateStatusResult>;
-          action = {
-            type: "update_billing_status",
-            billingId: r.billingId,
-            customerName: r.customerName,
-            invoiceNumber: r.invoiceNumber,
-            currentStatus: r.currentStatus,
-            newStatus: r.proposedStatus,
-          };
-        } else if (
-          event.name === "propose_delete_billing_record" &&
-          result &&
-          typeof result === "object" &&
-          (result as ProposeDeleteResult).found
-        ) {
-          const r = result as Required<ProposeDeleteResult>;
-          action = {
-            type: "delete_billing_record",
-            billingId: r.billingId,
-            customerName: r.customerName,
-            invoiceNumber: r.invoiceNumber,
-            amount: r.amount,
-            currency: r.currency,
-          };
-        }
-      } catch (err) {
-        resultText =
-          err instanceof Error ? err.message : "Failed to run this tool. Please try again.";
-        isError = true;
       }
-      await anthropic.beta.sessions.events.send(sessionId, {
-        events: [
-          {
-            type: "user.custom_tool_result",
-            custom_tool_use_id: event.id,
-            content: [{ type: "text", text: resultText }],
-            is_error: isError,
-          },
-        ],
-      });
-    } else if (event.type === "span.model_request_end") {
-      // A turn can involve multiple model requests (e.g. one per tool round
-      // trip) — accumulate across the whole turn, not just the first one.
-      inputTokens += event.model_usage.input_tokens;
-      outputTokens += event.model_usage.output_tokens;
-    } else if (event.type === "session.status_terminated") {
-      break;
-    } else if (event.type === "session.status_idle") {
-      // requires_action after a custom_tool_use just means "waiting on the
-      // result we already sent above" — keep reading, don't treat as done.
-      if (event.stop_reason?.type !== "requires_action") break;
-    } else if (event.type === "session.error") {
-      throw new AppError(
-        "The AI agent ran into a problem answering that. Please try again.",
-        502
-      );
     }
+  } finally {
+    // Deduct AFTER the turn — actual cost is only known once it's done.
+    // Awaited (not fire-and-forget, CLAUDE.md §10.3) so a ledger-write
+    // failure is at least visible rather than silently lost. Wrapped in
+    // `finally` (previously this ran only on a clean loop exit) so a mid-
+    // turn `session.error` throw above still gets charged for whatever
+    // tokens it already consumed before failing, instead of that real cost
+    // going completely unrecorded.
+    await consumeCredits(
+      organizationId,
+      tokensToCredits(inputTokens, outputTokens, {
+        cacheCreationInputTokens,
+        cacheReadInputTokens,
+        sessionSeconds: (Date.now() - turnStartedAt) / 1000,
+      }),
+      "agent_message",
+      userId
+    );
   }
-
-  // Deduct AFTER the turn — actual cost is only known once it's done. Never
-  // blocks the reply on a ledger failure (see consumeCredits' own guarantee).
-  void consumeCredits(
-    organizationId,
-    tokensToCredits(inputTokens, outputTokens),
-    "agent_message",
-    userId
-  );
 
   if (!reply.trim()) {
     throw new AppError(

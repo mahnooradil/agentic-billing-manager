@@ -235,6 +235,23 @@ already found:
     audit's own "near-empty email with a PDF attached is invisible" failure case exactly — correctly
     produced a Billing record with every field (vendor, invoice number, amount, status) that existed
     ONLY inside the PDF, never in the email body.
+16. ✅ **DONE (2026-10-05) — Billing Advisor Agent credit-accounting fixes (CLAUDE.md §10.3/§10.4).**
+    Full detail in `flow/00-executive-summary.md` item #33. Two of the audit's four credit-accounting
+    findings were still open (`MAX_ITERATIONS` already done 2026-10-01; the stale-cache gate race and
+    `tokensToCredits` ignoring cache tokens/session-hour billing were not) — fixed both:
+    `assertCreditBalance` now reads the live database balance instead of trusting a snapshot that can be
+    up to 5 seconds stale (`auth-cache.ts`), closing the window where several concurrent requests could
+    all pass the gate on the same stale "has credits" read; `consumeCredits` is now awaited (not
+    fire-and-forget) inside a `try/finally` around the whole turn, so a mid-turn `session.error` still
+    gets charged for tokens already spent instead of that cost vanishing untracked; `tokensToCredits`
+    now factors in prompt-cache tokens and the $0.08/session-hour Managed Agents runtime dimension,
+    both previously charged $0. 13 new tests (219 total, two consecutive full runs green); live-tested
+    against real Atlas and the real running server — a real non-deterministic agent turn cost **8
+    credits** post-fix vs. **1 credit** measured for a similar turn earlier this same session pre-fix,
+    concrete evidence of the under-charge this closes, not just a theoretical improvement. **Explicitly
+    out of scope**: a full reservation/lock-based credit system — the existing design already accepts a
+    small single-turn overdraft as intentional; this closes the unbounded-magnitude bug (many stale-
+    cached requests passing at once), not that already-accepted case.
 
 ---
 

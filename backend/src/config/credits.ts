@@ -86,8 +86,53 @@ export const CREDIT_USD_VALUE = 0.02;
 // endpoint can surface the real rate to the UI instead of a hardcoded copy.
 export const TOKENS_PER_CREDIT = 1000;
 
-/** Converts one turn's token usage into a whole number of credits (min 1). */
-export function tokensToCredits(inputTokens: number, outputTokens: number): number {
-  const total = Math.max(0, inputTokens) + Math.max(0, outputTokens);
-  return Math.max(1, Math.ceil(total / TOKENS_PER_CREDIT));
+/** CLAUDE.md §10.3/§10.4 — `tokensToCredits` previously ignored prompt-cache
+ *  tokens and Managed Agents' own session-runtime billing dimension
+ *  entirely, both real costs charged $0 in credits. A cache WRITE costs
+ *  MORE than a normal input token (Anthropic's own premium for creating a
+ *  cache entry); a cache READ costs much LESS. These weights are
+ *  deliberately approximate, same "placeholder blended rate" philosophy as
+ *  `TOKENS_PER_CREDIT` above — the fix is that they're no longer counted as
+ *  ZERO (a real, unbounded under-charge), not that the rate is now
+ *  perfectly precise per-model. */
+const CACHE_WRITE_TOKEN_WEIGHT = 1.25;
+const CACHE_READ_TOKEN_WEIGHT = 0.1;
+
+/** Managed Agents bills $0.08 for every hour a session is actively
+ *  "running" — a real, separate cost dimension from per-token model
+ *  pricing (idle time between turns is free, so this is NOT the same as
+ *  "time since the session was created"). Previously not metered here at
+ *  all. */
+const SESSION_RUNTIME_USD_PER_HOUR = 0.08;
+
+/** Optional usage dimensions beyond plain input/output tokens — omitted
+ *  entirely by the email-extraction call site (`sync-engine.ts`), which has
+ *  neither a Managed Agents session nor prompt caching to account for. */
+export interface AdditionalUsageCost {
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+  /** Wall-clock seconds the Managed Agents session was actively running to
+   *  produce this turn — see managed-agent.service.ts's own timing. */
+  sessionSeconds?: number;
+}
+
+/** Converts one turn's token usage (plus, for a Managed Agents turn, its
+ *  cache tokens and session runtime) into a whole number of credits
+ *  (min 1). */
+export function tokensToCredits(
+  inputTokens: number,
+  outputTokens: number,
+  additional?: AdditionalUsageCost
+): number {
+  const weightedTokens =
+    Math.max(0, inputTokens) +
+    Math.max(0, outputTokens) +
+    Math.max(0, additional?.cacheCreationInputTokens ?? 0) * CACHE_WRITE_TOKEN_WEIGHT +
+    Math.max(0, additional?.cacheReadInputTokens ?? 0) * CACHE_READ_TOKEN_WEIGHT;
+  const tokenCredits = weightedTokens / TOKENS_PER_CREDIT;
+
+  const sessionHours = Math.max(0, additional?.sessionSeconds ?? 0) / 3600;
+  const sessionCredits = (sessionHours * SESSION_RUNTIME_USD_PER_HOUR) / CREDIT_USD_VALUE;
+
+  return Math.max(1, Math.ceil(tokenCredits + sessionCredits));
 }

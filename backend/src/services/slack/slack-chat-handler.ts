@@ -167,7 +167,7 @@ export async function handleSlackChatEvent(
       return;
     }
 
-    assertCreditBalance(organization);
+    await assertCreditBalance(organization._id);
 
     const { reply: agentReply, action } = await sendAgentMessage(user._id, organization._id, text);
     await reply(action ? `${agentReply}\n\n${actionHint(action)}` : agentReply);
