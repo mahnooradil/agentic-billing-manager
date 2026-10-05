@@ -359,16 +359,29 @@ export const updatePlatformConnection = asyncHandler(async (req, res) => {
   const id = req.params.id as string;
   const body = req.body as UpdatePlatformConnectionInput;
 
-  const update: Record<string, unknown> = {};
-  if (body.displayName !== undefined) update.displayName = body.displayName;
+  const set: Record<string, unknown> = {};
+  const unset: Record<string, ""> = {};
+  if (body.displayName !== undefined) set.displayName = body.displayName;
   if (body.accountIdentifier !== undefined)
-    update.accountIdentifier = body.accountIdentifier;
-  if (body.metadata !== undefined) update.metadata = body.metadata;
-  if (body.trackedSenders !== undefined) update.trackedSenders = body.trackedSenders;
+    set.accountIdentifier = body.accountIdentifier;
+  if (body.metadata !== undefined) set.metadata = body.metadata;
+  if (body.trackedSenders !== undefined) set.trackedSenders = body.trackedSenders;
+  // `null` clears a syncIntervalMinutes override back to the sync type's
+  // own default; a number sets it; `undefined` (field absent) leaves it
+  // untouched — handled separately from the other fields since this is the
+  // only one where "clear it" is a meaningful, distinct request from "set it".
+  if (body.syncIntervalMinutes !== undefined) {
+    if (body.syncIntervalMinutes === null) unset.syncIntervalMinutes = "";
+    else set.syncIntervalMinutes = body.syncIntervalMinutes;
+  }
+
+  const update: Record<string, unknown> = {};
+  if (Object.keys(set).length) update.$set = set;
+  if (Object.keys(unset).length) update.$unset = unset;
 
   const connection = await PlatformConnection.findOneAndUpdate(
     { _id: id, organization: organization._id },
-    { $set: update },
+    update,
     { new: true, runValidators: true }
   );
   if (!connection) throw new AppError("Platform connection not found", 404);

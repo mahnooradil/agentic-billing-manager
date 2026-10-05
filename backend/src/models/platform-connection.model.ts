@@ -55,6 +55,15 @@ export type ConnectionStatus = (typeof CONNECTION_STATUSES)[number];
 export const CONNECTION_SOURCES = ["manual", "ai_assistant"] as const;
 export type ConnectionSource = (typeof CONNECTION_SOURCES)[number];
 
+/** Allowed sync-frequency choices (minutes) a user can pick on the Automation
+ *  page — an explicit, bounded set rather than a free-typed number, so an
+ *  override can never accidentally hammer a provider's API every minute or
+ *  go so sparse it looks broken. The scheduler's own default per sync type
+ *  (see services/platform-connections/sync-schedule.ts) is used whenever a
+ *  connection has no override. */
+export const SYNC_INTERVAL_OPTIONS_MINUTES = [15, 30, 60, 180, 360, 720, 1440] as const;
+export type SyncIntervalMinutes = (typeof SYNC_INTERVAL_OPTIONS_MINUTES)[number];
+
 /** The connection type each platform will use by default (future-facing hint). */
 export const PLATFORM_DEFAULT_CONNECTION_TYPE: Record<
   ConnectionPlatform,
@@ -123,6 +132,13 @@ export interface IPlatformConnection {
   messagesScanned?: number;
   /** Records created/updated in the last run (email-sync or billing-sync). */
   invoicesFound?: number;
+  /** User-chosen override for how often the recurring scheduler syncs THIS
+   *  connection — one of SYNC_INTERVAL_OPTIONS_MINUTES. Unset means "use the
+   *  sync type's own default" (60min email-sync / 360min billing-sync — see
+   *  services/platform-connections/sync-schedule.ts). Set from the Automation
+   *  page; irrelevant for `connectionType !== "oauth"`, which has no
+   *  recurring job at all. */
+  syncIntervalMinutes?: SyncIntervalMinutes;
   /** How the connection was initiated (manual UI vs the AI assistant). */
   source: ConnectionSource;
   createdAt: Date;
@@ -247,6 +263,13 @@ const platformConnectionSchema = new Schema<
     invoicesFound: {
       type: Number,
       min: 0,
+    },
+    syncIntervalMinutes: {
+      type: Number,
+      enum: {
+        values: SYNC_INTERVAL_OPTIONS_MINUTES,
+        message: "Invalid sync interval",
+      },
     },
     source: {
       type: String,

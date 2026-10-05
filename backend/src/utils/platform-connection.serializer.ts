@@ -8,6 +8,7 @@ import type {
   ConnectionStatus,
   ConnectionSource,
   PlatformConnectionDocument,
+  SyncIntervalMinutes,
 } from "@/models/platform-connection.model";
 
 export interface PublicPlatformConnection {
@@ -38,6 +39,9 @@ export interface PublicPlatformConnection {
   lastSyncError: string | null;
   messagesScanned: number | null;
   invoicesFound: number | null;
+  /** User-chosen sync-frequency override (null = using the sync type's own
+   *  default — see services/platform-connections/sync-schedule.ts). */
+  syncIntervalMinutes: SyncIntervalMinutes | null;
   /** How the connection was initiated (manual UI vs the AI assistant). */
   source: ConnectionSource;
   createdAt: Date;
@@ -67,6 +71,7 @@ export function toPublicPlatformConnection(
     lastSyncError: doc.lastSyncError ?? null,
     messagesScanned: doc.messagesScanned ?? null,
     invoicesFound: doc.invoicesFound ?? null,
+    syncIntervalMinutes: doc.syncIntervalMinutes ?? null,
     source: doc.source ?? "manual",
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,

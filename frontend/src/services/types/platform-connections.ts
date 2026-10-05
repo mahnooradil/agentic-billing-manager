@@ -20,6 +20,12 @@ export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 export const CONNECTION_STATUSES = ["connected", "disconnected", "error"] as const;
 export type ConnectionStatus = (typeof CONNECTION_STATUSES)[number];
 
+/** Allowed sync-frequency choices (minutes), mirroring the backend's
+ *  SYNC_INTERVAL_OPTIONS_MINUTES — an explicit, bounded set rather than a
+ *  free-typed number. */
+export const SYNC_INTERVAL_OPTIONS_MINUTES = [15, 30, 60, 180, 360, 720, 1440] as const;
+export type SyncIntervalMinutes = (typeof SYNC_INTERVAL_OPTIONS_MINUTES)[number];
+
 export interface PlatformConnection {
   id: string;
   /** Built-in key (e.g. "Stripe") or a custom platform name. */
@@ -48,6 +54,9 @@ export interface PlatformConnection {
   lastSyncError: string | null;
   messagesScanned: number | null;
   invoicesFound: number | null;
+  /** User-chosen sync-frequency override (null = using the sync type's own
+   *  default: hourly for email-sync, every 6h for billing-sync). */
+  syncIntervalMinutes: SyncIntervalMinutes | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -106,6 +115,8 @@ export interface UpdatePlatformConnectionPayload {
   accountIdentifier?: string;
   metadata?: Record<string, unknown>;
   trackedSenders?: string[];
+  /** A new override, or `null` to clear it back to the sync type's default. */
+  syncIntervalMinutes?: SyncIntervalMinutes | null;
 }
 
 export interface PlatformConnectionsData {

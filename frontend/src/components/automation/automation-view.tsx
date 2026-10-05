@@ -6,6 +6,13 @@ import { Workflow, ArrowRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { FormAlert } from "@/components/common/form-alert";
@@ -19,19 +26,41 @@ import { useAlertState } from "@/hooks/use-alert-state";
 import { usePreferences } from "@/services/preferences/preferences-store";
 import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { ApiError } from "@/services/api/client";
-import { listPlatformConnections } from "@/services/connections/platform-connections.service";
-import type { PlatformConnection } from "@/services/types/platform-connections";
+import {
+  listPlatformConnections,
+  updatePlatformConnection,
+} from "@/services/connections/platform-connections.service";
+import {
+  SYNC_INTERVAL_OPTIONS_MINUTES,
+  type PlatformConnection,
+  type SyncIntervalMinutes,
+} from "@/services/types/platform-connections";
 import { DisconnectDialog } from "@/components/connections/disconnect-dialog";
 
 type ViewStatus = "loading" | "error" | "ready";
 
 const CACHE_KEY = "automation";
-const BILLING_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const EMAIL_SYNC_INTERVAL_MS = 60 * 60 * 1000;
+const DEFAULT_EMAIL_SYNC_MINUTES: SyncIntervalMinutes = 60;
+const DEFAULT_BILLING_SYNC_MINUTES: SyncIntervalMinutes = 360;
+
+/** "Every 15 minutes" / "Every hour" / "Daily" — mirrors the backend's own
+ *  allowed options exactly (SYNC_INTERVAL_OPTIONS_MINUTES). */
+function intervalLabel(minutes: SyncIntervalMinutes): string {
+  if (minutes < 60) return `Every ${minutes} minutes`;
+  if (minutes === 60) return "Every hour";
+  if (minutes < 1440) return `Every ${minutes / 60} hours`;
+  return "Daily";
+}
+
+const INTERVAL_ITEMS = SYNC_INTERVAL_OPTIONS_MINUTES.map((minutes) => ({
+  value: String(minutes),
+  label: intervalLabel(minutes),
+}));
 
 interface SyncRow {
   connection: PlatformConnection;
   isEmailSync: boolean;
+  effectiveIntervalMinutes: SyncIntervalMinutes;
   scheduleLabel: string;
   lastRunIso: string | null;
   nextRunIso: string | null;
@@ -47,7 +76,9 @@ interface SyncRow {
 
 function buildRow(connection: PlatformConnection): SyncRow {
   const isEmailSync = isEmailSyncPlatform(connection.platform);
-  const intervalMs = isEmailSync ? EMAIL_SYNC_INTERVAL_MS : BILLING_SYNC_INTERVAL_MS;
+  const defaultMinutes = isEmailSync ? DEFAULT_EMAIL_SYNC_MINUTES : DEFAULT_BILLING_SYNC_MINUTES;
+  const effectiveIntervalMinutes = connection.syncIntervalMinutes ?? defaultMinutes;
+  const intervalMs = effectiveIntervalMinutes * 60_000;
   // Prefer the real lastSyncAt (S-17 fix) — a run's own recorded completion
   // time. Falls back to the older inferred signals only for a connection
   // that hasn't completed a sync since that field started being written.
@@ -66,7 +97,8 @@ function buildRow(connection: PlatformConnection): SyncRow {
   return {
     connection,
     isEmailSync,
-    scheduleLabel: isEmailSync ? "Every hour" : "Every 6 hours",
+    effectiveIntervalMinutes,
+    scheduleLabel: intervalLabel(effectiveIntervalMinutes),
     lastRunIso: lastRun ? lastRun.toISOString() : null,
     nextRunIso: nextRun ? nextRun.toISOString() : null,
     syncFailed: connection.lastSyncStatus === "error",
@@ -133,6 +165,7 @@ export function AutomationView() {
     open: boolean;
     connection: PlatformConnection | null;
   }>({ open: false, connection: null });
+  const [savingIntervalId, setSavingIntervalId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let ignore = false;
@@ -180,6 +213,27 @@ export function AutomationView() {
   const handleDisconnected = (message: string) => {
     setAlert({ type: "success", message });
     reload();
+  };
+
+  // Soft-updates the one row in place rather than a full reload — matches
+  // the pattern used across the app (vendor confirm/reject, sender
+  // restore/mute) for an action that only ever changes itself.
+  const handleIntervalChange = async (connectionId: string, minutes: SyncIntervalMinutes) => {
+    setSavingIntervalId(connectionId);
+    setAlert(null);
+    try {
+      const res = await updatePlatformConnection(connectionId, { syncIntervalMinutes: minutes });
+      setConnections((prev) =>
+        prev.map((c) => (c.id === connectionId ? res.data.connection : c))
+      );
+    } catch (error) {
+      setAlert({
+        type: "error",
+        message: error instanceof ApiError ? error.message : "Could not update the sync schedule.",
+      });
+    } finally {
+      setSavingIntervalId(null);
+    }
   };
 
   return (
@@ -242,7 +296,30 @@ export function AutomationView() {
                         </p>
                       ) : null}
                     </td>
-                    <td className="px-5 py-3.5 text-muted-foreground">{row.scheduleLabel}</td>
+                    <td className="px-5 py-3.5 text-muted-foreground">
+                      <Select
+                        items={INTERVAL_ITEMS}
+                        value={String(row.effectiveIntervalMinutes)}
+                        onValueChange={(value) =>
+                          void handleIntervalChange(
+                            row.connection.id,
+                            Number(value) as SyncIntervalMinutes
+                          )
+                        }
+                        disabled={savingIntervalId !== null}
+                      >
+                        <SelectTrigger size="sm" className="w-36" aria-label="Sync schedule">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SYNC_INTERVAL_OPTIONS_MINUTES.map((minutes) => (
+                            <SelectItem key={minutes} value={String(minutes)}>
+                              {intervalLabel(minutes)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </td>
                     <td className="px-5 py-3.5 text-muted-foreground">
                       {row.lastRunIso ? formatRelativeTime(row.lastRunIso, general) : "—"}
                       {row.invoicesFound !== null ? (

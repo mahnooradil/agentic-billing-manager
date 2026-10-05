@@ -10,7 +10,15 @@ import {
   CONNECTION_TYPES,
   CONNECTION_STATUSES,
   CONNECTION_SOURCES,
+  SYNC_INTERVAL_OPTIONS_MINUTES,
 } from "@/models/platform-connection.model";
+
+/** One of the allowed sync-frequency choices, or `null` to clear an override
+ *  and fall back to the sync type's own default. */
+const syncIntervalMinutesSchema = z.union([
+  z.union(SYNC_INTERVAL_OPTIONS_MINUTES.map((n) => z.literal(n)) as [z.ZodLiteral<number>, ...z.ZodLiteral<number>[]]),
+  z.null(),
+]);
 
 /** Free-form, PII-free metadata object (bounded loosely). */
 const metadataSchema = z.record(z.string(), z.unknown());
@@ -44,6 +52,7 @@ export const updatePlatformConnectionSchema = z
     accountIdentifier: z.string().trim().max(200),
     metadata: metadataSchema,
     trackedSenders: trackedSendersSchema,
+    syncIntervalMinutes: syncIntervalMinutesSchema,
   })
   .partial();
 
