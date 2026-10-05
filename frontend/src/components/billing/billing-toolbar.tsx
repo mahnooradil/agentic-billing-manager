@@ -18,6 +18,20 @@ export type BillingStatusFilter = "all" | BillingStatus;
 /** Sort options for the billing list. */
 export type BillingSort = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
 
+const STATUS_FILTER_ITEMS = [
+  { value: "all", label: "All statuses" },
+  { value: "Paid", label: "Paid" },
+  { value: "Pending", label: "Pending" },
+  { value: "Overdue", label: "Overdue" },
+];
+
+const SORT_ITEMS = [
+  { value: "date-desc", label: "Newest billing date" },
+  { value: "date-asc", label: "Oldest billing date" },
+  { value: "amount-desc", label: "Highest amount" },
+  { value: "amount-asc", label: "Lowest amount" },
+];
+
 interface BillingToolbarProps {
   search: string;
   onSearchChange: (value: string) => void;
@@ -54,7 +68,12 @@ export function BillingToolbar({
         />
       </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        {/* `items` lets Base UI's Select.Value resolve the label directly
+         *  instead of falling back to the raw value (e.g. "all" instead of
+         *  "All statuses") — see billing-form-dialog.tsx's platform select
+         *  for where this was first caught. */}
         <Select
+          items={STATUS_FILTER_ITEMS}
           value={status}
           onValueChange={(value) => onStatusChange(value as BillingStatusFilter)}
         >
@@ -69,6 +88,7 @@ export function BillingToolbar({
           </SelectContent>
         </Select>
         <Select
+          items={SORT_ITEMS}
           value={sort}
           onValueChange={(value) => onSortChange(value as BillingSort)}
         >

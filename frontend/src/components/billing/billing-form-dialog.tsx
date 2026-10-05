@@ -168,7 +168,16 @@ export function BillingFormDialog({
               control={control}
               name="platform"
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                // `items` lets Base UI's Select.Value resolve the selected
+                // platform's name directly from this map instead of falling
+                // back to the raw ObjectId `value` — without it, picking a
+                // just-created platform (or any platform, depending on
+                // mount timing) showed its id instead of its name.
+                <Select
+                  items={platforms.map((platform) => ({ value: platform.id, label: platform.name }))}
+                  value={field.value}
+                  onValueChange={field.onChange}
+                >
                   <SelectTrigger id="platform" className="w-full">
                     <SelectValue placeholder="Select a platform" />
                   </SelectTrigger>

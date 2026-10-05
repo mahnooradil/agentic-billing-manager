@@ -31,6 +31,11 @@ import {
   type InviteMemberFormValues,
 } from "@/lib/validations/invitation";
 
+const ROLE_ITEMS = [
+  { value: "member", label: "Member" },
+  { value: "admin", label: "Admin" },
+];
+
 interface InviteMemberDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -115,7 +120,13 @@ export function InviteMemberDialog({
               control={control}
               name="role"
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                // `items` lets Select.Value resolve "Member"/"Admin" instead
+                // of falling back to the raw lowercase "member"/"admin".
+                <Select
+                  items={ROLE_ITEMS}
+                  value={field.value}
+                  onValueChange={field.onChange}
+                >
                   <SelectTrigger id="invite-role" className="w-full">
                     <SelectValue />
                   </SelectTrigger>

@@ -60,7 +60,13 @@ export function SelectField({
         control={control}
         name={name}
         render={({ field }) => (
-          <Select value={field.value} onValueChange={field.onChange}>
+          // `items` lets Base UI's Select.Value resolve the selected
+          // option's label directly, instead of falling back to the raw
+          // value whenever it differs from the label (e.g. "ISO" vs.
+          // "ISO (YYYY-MM-DD)") — see billing-form-dialog.tsx's platform
+          // select for the same fix, discovered via a real ObjectId
+          // showing up in place of a platform's name.
+          <Select items={options} value={field.value} onValueChange={field.onChange}>
             <SelectTrigger id={fieldId} className="w-full">
               <SelectValue />
             </SelectTrigger>

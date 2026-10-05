@@ -61,6 +61,11 @@ const ROLE_ICON: Record<MembershipRole, typeof Crown> = {
   member: User,
 };
 
+const ROLE_ITEMS = [
+  { value: "member", label: "Member" },
+  { value: "admin", label: "Admin" },
+];
+
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   const letters = parts.map((part) => part[0]).join("");
@@ -256,7 +261,10 @@ export function TeamSettingsTab() {
 
                 <div className="flex items-center gap-2">
                   {isOwner && member.role !== "owner" ? (
+                    // `items` lets Select.Value resolve "Member"/"Admin"
+                    // instead of falling back to the raw value.
                     <Select
+                      items={ROLE_ITEMS}
                       value={member.role}
                       onValueChange={(value) =>
                         void handleRoleChange(member, value as "admin" | "member")
