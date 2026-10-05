@@ -56,7 +56,7 @@ import {
   upsertNotification,
   getNotificationPrefs,
 } from "@/services/notification/notification-engine";
-import { sendSlackAlert } from "@/services/notifications/slack";
+import { sendSlackAlert, resolveSlackWebhookUrl } from "@/services/notifications/slack";
 
 const MAX_MESSAGES_PER_RUN = 200;
 const PAGE_SIZE = 50;
@@ -121,7 +121,10 @@ interface AccountMetadata {
  *  the workspace is out of credits — otherwise this has no visible symptom
  *  besides invoices quietly never showing up. Respects the same notification
  *  preferences (master switch) as every other alert in the app. */
-async function notifyEmailSyncPaused(connection: PlatformConnectionDocument): Promise<void> {
+async function notifyEmailSyncPaused(
+  connection: PlatformConnectionDocument,
+  organizationIncomingWebhookUrl: string | undefined
+): Promise<void> {
   const prefs = await getNotificationPrefs(connection.user.toString());
   if (!prefs.enabled) return;
 
@@ -134,9 +137,13 @@ async function notifyEmailSyncPaused(connection: PlatformConnectionDocument): Pr
       "Your workspace has run out of credits, so scanning your inbox for new invoices has paused. Add credits to resume.",
   });
 
-  if (created && prefs.slackWebhookUrl) {
+  // flow/extra-01 — the organization's own auto-captured webhook (from
+  // "Add to Slack") takes priority over the older per-user manually-pasted
+  // one.
+  const webhookUrl = resolveSlackWebhookUrl(organizationIncomingWebhookUrl, prefs.slackWebhookUrl);
+  if (created && webhookUrl) {
     await sendSlackAlert(
-      prefs.slackWebhookUrl,
+      webhookUrl,
       ":warning: *Email sync paused* — your workspace is out of credits, so invoice scanning has stopped until you add more."
     ).catch(() => {
       // Best-effort — the in-app notification above is the source of truth.
@@ -186,7 +193,7 @@ async function syncConnectionEmailInner(
   // workspace would be blocked the same way; the next successful sync just
   // resumes once it has credits again).
   const organization = await Organization.findById(connection.organization).select(
-    "creditsBalance name"
+    "creditsBalance name slackWorkspace.incomingWebhookUrl"
   );
   if (!organization || organization.creditsBalance <= 0) {
     // Otherwise this fails completely silently — no error, no toast, nothing
@@ -196,7 +203,7 @@ async function syncConnectionEmailInner(
     // signature is reused, so it just refreshes quietly on every subsequent
     // paused run instead of re-notifying).
     if (organization) {
-      void notifyEmailSyncPaused(connection).catch(() => {
+      void notifyEmailSyncPaused(connection, organization.slackWorkspace?.incomingWebhookUrl).catch(() => {
         // Best-effort — a failed alert must never break/retry the sync itself.
       });
     }

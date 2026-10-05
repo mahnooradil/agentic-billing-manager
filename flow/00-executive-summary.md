@@ -1758,6 +1758,43 @@ the document cites, not assumed from the document text.
       test (no live Stripe account exists in this environment), WP-6's direct-OAuth half is blocked on
       Google/Microsoft's external review process, and WP-10 is deliberately deferred pending real usage
       actually approaching its own ~50-customer trigger.
+35. ✅ **DONE (2026-10-05) — `flow/extra-01`, the Slack alerts one-click webhook.** Investigation
+    before writing any code (grep for `SLACK_BOT_TOKEN` — zero hits anywhere in current code; reading
+    `organization.model.ts`, `services/slack/slack-oauth.service.ts`, `slack.controller.ts`,
+    `notifications-tab.tsx`) found the doc's own framing of a single shared global bot was stale: the
+    chatbot half of this redesign (per-organization "Add to Slack" OAuth install, `Organization.
+    slackWorkspace`) was **already fully built** in earlier session work, and so is CLAUDE.md's own
+    "one bot for the whole deployment" description. Only the alerts/webhook half (point 1 of the doc)
+    remained manual-paste-only.
+    - **Built** — the OAuth install's `BOT_SCOPES` now also requests `incoming-webhook` in the same
+      consent screen as the chat-bot scopes, so a workspace admin gets both in one click; `handleOAuth
+      Callback` captures Slack's `incoming_webhook.url` onto the new `Organization.slackWorkspace.
+      incomingWebhookUrl` field. A new pure function, `resolveSlackWebhookUrl(orgWebhook, userWebhook)`,
+      is the single place that decides which webhook an alert actually goes to: the org's auto-captured
+      one wins when present, falling back to the older per-user manually-pasted `UserSettings.
+      notifications.slackWebhookUrl` — a deliberate non-breaking design so anyone who already configured
+      the manual path keeps working exactly as before. Both real send sites — `notification-engine.ts`'s
+      due-date reminder alert and `sync-engine.ts`'s email-sync-paused alert — switched from reading the
+      manual field directly to calling this resolver. Settings UI copy updated to clarify the manual
+      field is now an optional fallback.
+    - **Tested** — 7 new tests: `slack.test.ts` (4 — priority/fallback/both-absent/empty-string-treated-
+      as-absent for the resolver), `slack-oauth.test.ts` (3, mocked `fetch` — the install URL's scope
+      list includes `incoming-webhook`, a successful OAuth callback captures the webhook URL onto the
+      organization while still encrypting the bot token at rest, and a callback where the admin didn't
+      grant the webhook scope doesn't crash, it's just absent). 255 total backend tests, two consecutive
+      full runs green. Backend AND frontend `tsc`/`lint`/`build` all clean.
+    - **Live-tested against real Atlas**: seeded a throwaway organization with a real `slackWorkspace.
+      incomingWebhookUrl` and a user whose settings had a *different* manual fallback webhook, created a
+      real due-soon Billing record, then called the actual production `runDueDateNotifications()`
+      function (not a mock) against real Atlas data with only the outbound `fetch` call intercepted (no
+      real Slack workspace exists in this environment to actually post to) — confirmed exactly one
+      outbound call was made, to the **organization's** webhook, never the user's fallback, proving the
+      resolver and both its integration points are wired correctly end-to-end. Every seeded document was
+      deleted by exact id afterward and confirmed gone.
+    - **Honest scope note**: same test boundary already disclosed for WP-6's Gmail/Outlook OAuth — a
+      full real Slack OAuth round-trip (an admin actually clicking through Slack's own consent screen)
+      was not live-tested, since that requires a real Slack workspace this environment doesn't have. The
+      callback code path itself is covered by a mocked-`fetch` unit test instead, not a real Slack call.
 
 ---
 

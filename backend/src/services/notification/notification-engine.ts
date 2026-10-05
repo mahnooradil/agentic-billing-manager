@@ -22,8 +22,9 @@ import { Recommendation } from "@/models/recommendation.model";
 import { Platform } from "@/models/platform.model";
 import { PlatformConnection } from "@/models/platform-connection.model";
 import { User } from "@/models/user.model";
+import { Organization } from "@/models/organization.model";
 import { sendDueDateReminderEmail } from "@/services/email/resend";
-import { sendSlackAlert } from "@/services/notifications/slack";
+import { sendSlackAlert, resolveSlackWebhookUrl } from "@/services/notifications/slack";
 import {
   Notification,
   type NotificationSeverity,
@@ -412,9 +413,19 @@ export async function runDueDateNotifications(): Promise<void> {
           }).catch((e) => logError("due-date email", e));
         }
 
-        if (prefs.slackWebhookUrl) {
+        // flow/extra-01 — the organization's own auto-captured webhook
+        // (from "Add to Slack") takes priority over the older per-user
+        // manually-pasted one.
+        const organization = await Organization.findById(record.organization).select(
+          "slackWorkspace.incomingWebhookUrl"
+        );
+        const webhookUrl = resolveSlackWebhookUrl(
+          organization?.slackWorkspace?.incomingWebhookUrl,
+          prefs.slackWebhookUrl
+        );
+        if (webhookUrl) {
           await sendSlackAlert(
-            prefs.slackWebhookUrl,
+            webhookUrl,
             `:warning: *Payment due ${dueLabel}* — ${message}`
           ).catch((e) => logError("due-date slack", e));
         }

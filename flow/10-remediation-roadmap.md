@@ -266,6 +266,29 @@ already found:
     item has now had full completion, a deliberate documented scope decision, or a deliberate documented
     deferral; nothing remains silently untouched. Open items: WP-9 (no live Stripe test), WP-6 (direct-
     OAuth half blocked externally), WP-10 (deliberately deferred pending real usage).
+18. ✅ **DONE (2026-10-05) — `flow/extra-01`, the Slack alerts one-click webhook.** Full detail in
+    `flow/00-executive-summary.md` item #35. Investigation before writing any code found the doc's
+    own framing stale: the per-organization "Add to Slack" chatbot half (OAuth install,
+    `Organization.slackWorkspace`, `services/slack/`) was **already fully built** in earlier session
+    work — `SLACK_BOT_TOKEN` confirmed completely unreferenced anywhere via grep, meaning CLAUDE.md's
+    own "one bot for the whole deployment" description is itself stale. Only the alerts/webhook half
+    (point 1 of the doc) was still manual. Built: the OAuth install now also requests the
+    `incoming-webhook` scope in the same consent screen, capturing `incoming_webhook.url` onto
+    `Organization.slackWorkspace.incomingWebhookUrl`; a new `resolveSlackWebhookUrl()` prefers that
+    org-level, auto-captured webhook and falls back to the older per-user manually-pasted one (never a
+    breaking change for anyone already using the manual path); both call sites that actually send Slack
+    alerts (`notification-engine.ts`'s due-date reminders, `sync-engine.ts`'s sync-paused alert) switched
+    to it. 7 new tests (255 total, two consecutive full runs green); backend+frontend tsc/lint/build all
+    clean. **Live-tested against real Atlas**: seeded a throwaway org with a real
+    `slackWorkspace.incomingWebhookUrl` and a user with a *different* manual fallback webhook, created a
+    real due-soon Billing record, ran the real `runDueDateNotifications()` against real Atlas data with
+    `fetch` intercepted (no real Slack workspace available to post to) — confirmed exactly one outbound
+    call, to the **org** webhook, never the user fallback; all seeded documents deleted by exact id
+    afterward. **Honest scope note**: a full real Slack OAuth round-trip (an actual admin clicking
+    through Slack's consent screen) was not live-tested — that requires a real Slack workspace this
+    environment doesn't have, same test boundary already disclosed for WP-6's Gmail/Outlook OAuth. The
+    OAuth-callback code path itself (`handleOAuthCallback` capturing `incoming_webhook.url`) is covered
+    by a mocked-`fetch` test instead.
 
 ---
 
@@ -282,12 +305,11 @@ exactly as this document anticipated. See task #10 above for what was actually b
 
 ### The two "extra" items (not from the 12 documents) — where they'd slot in if picked up
 
-- **Slack OAuth redesign** (`flow/extra-01`) — same underlying reasoning as WP-6 (direct OAuth beats
-  a shared/manual connection method for a volume-heavy, provider-specific integration). Natural
-  parallel to WP-6 if picked up, not before WP-4 (no hard dependency, but no urgency before the core
-  domain work either).
+- **Slack OAuth redesign** (`flow/extra-01`) — ✅ **DONE (2026-10-05)**, see task #18 above. Most of
+  the design (per-org OAuth install) turned out to already be built; only the alerts-webhook half was
+  net-new.
 - **Usage signal / forecasting** (`flow/extra-02`) — **explicitly placed at the very end by the user's
-  own instruction**, after everything else including WP-11/WP-12.
+  own instruction**, after everything else including WP-11/WP-12. In progress as of 2026-10-05.
 
 ### The 30/60/90 day framing (§3) — matches the WP order exactly, restated for calendar planning
 

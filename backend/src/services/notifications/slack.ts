@@ -1,15 +1,40 @@
 /**
- * Slack alerts — via a Slack "Incoming Webhook" URL the user creates
- * themselves in their own Slack workspace (Slack App settings → Incoming
- * Webhooks), not through any OAuth/Connect flow here. Matches this
- * project's convention (see services/email/resend.ts) of a single plain
- * `fetch` call instead of pulling in an SDK for one documented REST call.
+ * Slack alerts. Two ways a workspace ends up with a webhook URL:
  *
- * The URL is validated at the settings layer (see
- * user-settings.validator.ts) to be exactly `https://hooks.slack.com/...`,
- * so this never ends up POSTing to an arbitrary/internal address.
+ *  1. flow/extra-01's "Add to Slack" OAuth install requests the
+ *     `incoming-webhook` scope in the same consent screen as the chat bot
+ *     — `Organization.slackWorkspace.incomingWebhookUrl`, set automatically,
+ *     no manual step.
+ *  2. The OLDER path, kept as a fallback for anyone who already configured
+ *     it that way before this existed: the user creates a Slack "Incoming
+ *     Webhook" themselves (Slack App settings → Incoming Webhooks) and
+ *     pastes the URL into Settings — `UserSettings.notifications.
+ *     slackWebhookUrl`, validated at the settings layer (see
+ *     user-settings.validator.ts) to be exactly
+ *     `https://hooks.slack.com/...`, so this never ends up POSTing to an
+ *     arbitrary/internal address.
+ *
+ * `resolveSlackWebhookUrl` below is the one place that decides which of
+ * the two actually gets used. Matches this project's convention (see
+ * services/email/resend.ts) of a single plain `fetch` call instead of
+ * pulling in an SDK for one documented REST call.
  */
 const SEND_TIMEOUT_MS = 10_000;
+
+/**
+ * Picks the webhook URL an alert should actually be sent to — the
+ * organization's own auto-captured one (flow/extra-01) takes priority, so
+ * a workspace that's installed the Slack app gets alerts "for free" with
+ * no separate manual step; a per-user manually-pasted URL is the fallback,
+ * for a workspace that either hasn't installed the app (OAuth not
+ * configured on this server) or connected it before this field existed.
+ */
+export function resolveSlackWebhookUrl(
+  organizationIncomingWebhookUrl: string | undefined,
+  userManualWebhookUrl: string | undefined
+): string | undefined {
+  return organizationIncomingWebhookUrl || userManualWebhookUrl || undefined;
+}
 
 /**
  * Posts one plain-text message to the configured Slack channel. Best-effort

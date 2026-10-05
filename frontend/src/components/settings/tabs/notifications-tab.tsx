@@ -183,8 +183,8 @@ export function NotificationsSettingsTab() {
             </div>
             <TextField
               id="notif-slack-webhook"
-              label="Slack webhook URL (optional)"
-              helper="Create one in Slack (Apps → Incoming Webhooks) and paste it here to also post billing alerts to a Slack channel."
+              label="Slack webhook URL (optional — only needed if you haven't connected Slack below)"
+              helper="If you've connected Slack via &quot;Add to Slack&quot; above, alerts already post there automatically — no need to fill this in. This is a fallback: create a webhook yourself in Slack (Apps → Incoming Webhooks) and paste it here instead."
               placeholder="https://hooks.slack.com/services/..."
               error={errors.slackWebhookUrl?.message}
               {...register("slackWebhookUrl")}

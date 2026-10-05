@@ -24,8 +24,11 @@ import { Organization } from "@/models/organization.model";
 const SLACK_API_BASE = "https://slack.com/api";
 const STATE_TTL = "10m";
 /** `chat:write` to reply, `im:history`/`im:read` to receive DM content —
- *  same scopes this app's single-workspace setup already used manually. */
-const BOT_SCOPES = "chat:write,im:history,im:read";
+ *  same scopes this app's single-workspace setup already used manually.
+ *  `incoming-webhook` (flow/extra-01) requests a channel webhook in the
+ *  SAME consent screen, so due-date alerts no longer need a user to
+ *  manually create one in Slack and paste the URL into Settings. */
+const BOT_SCOPES = "chat:write,im:history,im:read,incoming-webhook";
 
 interface OAuthState {
   organizationId: string;
@@ -70,6 +73,11 @@ interface SlackOAuthAccessResponse {
   access_token?: string;
   bot_user_id?: string;
   team?: { id?: string; name?: string };
+  /** Present when the `incoming-webhook` scope was granted — the channel
+   *  the installing admin picked on Slack's own consent screen. Absent on
+   *  a workspace install that somehow doesn't include that scope (e.g. an
+   *  older-permission re-auth); callers must treat it as optional. */
+  incoming_webhook?: { url?: string; channel?: string };
 }
 
 /** Verifies the `code`, exchanges it for a bot token, and saves it (encrypted)
@@ -111,6 +119,7 @@ export async function handleOAuthCallback(
     teamName: data.team.name,
     botToken: encryptSecret(data.access_token),
     botUserId: data.bot_user_id,
+    incomingWebhookUrl: data.incoming_webhook?.url,
     connectedAt: new Date(),
   };
   await organization.save();

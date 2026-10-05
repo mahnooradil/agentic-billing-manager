@@ -58,6 +58,15 @@ export interface IOrganization {
     teamName?: string;
     botToken: string;
     botUserId?: string;
+    /** flow/extra-01 — the "Add to Slack" install now also requests the
+     *  `incoming-webhook` scope, so this is captured in the SAME consent
+     *  flow as the bot token: no more manually creating a webhook in Slack
+     *  and pasting the URL into Settings (the old `UserSettings.
+     *  notifications.slackWebhookUrl` path, kept as a fallback for anyone
+     *  who already configured it that way — see
+     *  services/notifications/slack.ts's `resolveSlackWebhookUrl`).
+     *  Not present on a workspace connected before this field existed. */
+    incomingWebhookUrl?: string;
     connectedAt: Date;
   };
   createdAt: Date;
@@ -102,6 +111,7 @@ const organizationSchema = new Schema<IOrganization, OrganizationModel>(
         teamName: { type: String, trim: true },
         botToken: { type: String, required: true },
         botUserId: { type: String, trim: true },
+        incomingWebhookUrl: { type: String, trim: true },
         connectedAt: { type: Date, required: true },
       },
       default: undefined,
